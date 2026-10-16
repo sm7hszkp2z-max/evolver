@@ -11,7 +11,7 @@ export declare const humanNarrative: z.ZodObject<{
     severity: z.ZodDefault<z.ZodEnum<["info", "notice", "warn", "error"]>>;
     iconHint: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    severity: "warn" | "info" | "notice" | "error";
+    severity: "warn" | "error" | "info" | "notice";
     title: string;
     detail?: string | undefined;
     why?: string | undefined;
@@ -19,7 +19,7 @@ export declare const humanNarrative: z.ZodObject<{
     iconHint?: string | undefined;
 }, {
     title: string;
-    severity?: "warn" | "info" | "notice" | "error" | undefined;
+    severity?: "warn" | "error" | "info" | "notice" | undefined;
     detail?: string | undefined;
     why?: string | undefined;
     next?: string | undefined;
@@ -55,7 +55,7 @@ export declare const rootEvent: z.ZodObject<{
         severity: z.ZodDefault<z.ZodEnum<["info", "notice", "warn", "error"]>>;
         iconHint: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
-        severity: "warn" | "info" | "notice" | "error";
+        severity: "warn" | "error" | "info" | "notice";
         title: string;
         detail?: string | undefined;
         why?: string | undefined;
@@ -63,7 +63,7 @@ export declare const rootEvent: z.ZodObject<{
         iconHint?: string | undefined;
     }, {
         title: string;
-        severity?: "warn" | "info" | "notice" | "error" | undefined;
+        severity?: "warn" | "error" | "info" | "notice" | undefined;
         detail?: string | undefined;
         why?: string | undefined;
         next?: string | undefined;
@@ -79,6 +79,9 @@ export declare const rootEvent: z.ZodObject<{
         kind?: "machine" | "human" | undefined;
         id?: string | undefined;
     }>>;
+    /** Protected-writer replay key, minted by the service and never by a caller. */
+    auditOperationId: z.ZodOptional<z.ZodString>;
+    auditRequestHash: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     type: string;
     actor: {
@@ -88,7 +91,7 @@ export declare const rootEvent: z.ZodObject<{
     schemaVersion: string;
     ts: string;
     human: {
-        severity: "warn" | "info" | "notice" | "error";
+        severity: "warn" | "error" | "info" | "notice";
         title: string;
         detail?: string | undefined;
         why?: string | undefined;
@@ -99,12 +102,14 @@ export declare const rootEvent: z.ZodObject<{
     eventId: string;
     replayability: "deterministic" | "stochastic_recorded" | "stochastic_unreproducible";
     payload?: unknown;
+    auditOperationId?: string | undefined;
+    auditRequestHash?: string | undefined;
 }, {
     type: string;
     ts: string;
     human: {
         title: string;
-        severity?: "warn" | "info" | "notice" | "error" | undefined;
+        severity?: "warn" | "error" | "info" | "notice" | undefined;
         detail?: string | undefined;
         why?: string | undefined;
         next?: string | undefined;
@@ -119,6 +124,8 @@ export declare const rootEvent: z.ZodObject<{
     } | undefined;
     schemaVersion?: string | undefined;
     replayability?: "deterministic" | "stochastic_recorded" | "stochastic_unreproducible" | undefined;
+    auditOperationId?: string | undefined;
+    auditRequestHash?: string | undefined;
 }>;
 export type RootEvent = z.infer<typeof rootEvent>;
 /** append 入参: seq/eventId/ts 由 store 生成. */
@@ -129,4 +136,6 @@ export type RawEvent = {
     actor?: z.input<typeof actor>;
     replayability?: Replayability;
     schemaVersion?: string;
+    auditOperationId?: string;
+    auditRequestHash?: string;
 };

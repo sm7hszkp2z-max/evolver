@@ -16,7 +16,9 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, resolve as resolvePath, sep, join as joinPath } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, realpathSync, rmdirSync, rmSync, writeFileSync, } from 'node:fs';
-import { renderExecPrompt } from './prompt.js';
+import { ExecutionAttemptError } from '../algo/cycleEngine.js';
+import { renderExecPrompt, sanitizeInjection } from './prompt.js';
+import { execContextTimeoutIsOptional, snapshotExecInputContext } from './contextResolver.js';
 import { parseGitShortstat, gitDiffProof } from './proofOfWork.js';
 // Policy enforcement core (#107): checkPolicy runs the always-on global guards (blast hard cap +
 // protected paths + destructive deletes) on EVERY exec — gene or not — plus the per-gene constraints when a
@@ -398,6 +400,9 @@ function createExecutionDeadline(parentSignal, maxRuntimeMs) {
     let expired = false;
     let rejectInterrupt = () => { };
     const interrupt = new Promise((_, reject) => { rejectInterrupt = reject; });
+    // An already-aborted parent can reject before any run() attaches Promise.race.
+    // Keep the interrupt promise handled without changing the rejection seen by a later race.
+    void interrupt.catch(() => undefined);
     const onParentAbort = () => {
         if (controller.signal.aborted)
             return;
@@ -657,7 +662,7 @@ export function makeClaudeExecBridge(opts, internal) {
         if (opts.declarativeValidationOnly && (gene?.requiresCommandValidation || opts.validationCmds?.length)) {
             throw new Error('declarative file acceptance cannot replace the selected Gene command validation; use a verified script sandbox');
         }
-        const prompt = renderExecPrompt({
+        let prompt = renderExecPrompt({
             mutation,
             decision,
             ...(gene ? { gene } : {}),
@@ -665,8 +670,48 @@ export function makeClaudeExecBridge(opts, internal) {
             // use-case ①: inject the personality style block from the state applySelectForRun just persisted.
             ...(opts.personality ? { personality: opts.personality.currentState() } : {}),
         });
+        const contextStartedAt = Date.now();
+        const contextDeadlineAt = contextStartedAt + Math.min(1000, opts.executionLimits?.maxRuntimeMs ?? Infinity);
+        let inputContext;
+        if (opts.resolveContext) {
+            const resolveContext = opts.resolveContext;
+            const selectedContextGene = decision.selectedAssetId ?? decision.selectedGeneId ?? undefined;
+            const contextDeadline = createExecutionDeadline(opts.signal, Math.max(0, contextDeadlineAt - Date.now()));
+            try {
+                inputContext = snapshotExecInputContext(await contextDeadline.run(() => {
+                    contextDeadline.assertActive();
+                    // Factory resolvers retain their actual read owner after cancellation.
+                    // A late result cannot escape this race or change the selected prompt.
+                    return Promise.resolve().then(() => resolveContext({
+                        decision, gene, basePrompt: prompt, deadlineAt: contextDeadlineAt,
+                        taskText: `${mutation.expected_effect}\n${mutation.trigger_signals.join(' ')}`,
+                        signal: contextDeadline.signal,
+                    }));
+                }), selectedContextGene);
+            }
+            catch (error) {
+                if (error instanceof ExecBridgeRunCancelledError || opts.signal?.aborted)
+                    return cancelledExecutionResult(undefined);
+                if (error instanceof ExecBridgeRunTimedOutError || contextDeadline.expired()) {
+                    if (!execContextTimeoutIsOptional(resolveContext))
+                        return timedOutExecutionResult(undefined);
+                    // Omit only factory-declared optional context. The whole execution budget below still applies.
+                }
+                else
+                    throw error; // Frozen-context/eligibility refusal must never silently execute without its binding.
+            }
+            finally {
+                contextDeadline.dispose();
+            }
+        }
+        if (inputContext?.text)
+            prompt += inputContext.text;
         assertRepoCwdStillAllowed();
-        const executionDeadline = createExecutionDeadline(opts.signal, opts.executionLimits?.maxRuntimeMs);
+        const remainingRuntimeMs = opts.executionLimits?.maxRuntimeMs === undefined ? undefined
+            : Math.max(0, opts.executionLimits.maxRuntimeMs - (Date.now() - contextStartedAt));
+        if (remainingRuntimeMs === 0)
+            return timedOutExecutionResult(undefined);
+        const executionDeadline = createExecutionDeadline(opts.signal, remainingRuntimeMs);
         try {
             // Isolation: atomically reserve an unpredictable private temp container, then let git create the absent
             // worktree path inside it. Cleanup is armed only after git succeeds and the resulting directory is verified.
@@ -723,16 +768,30 @@ export function makeClaudeExecBridge(opts, internal) {
                 if (reservation && worktreeIdentity)
                     runWorkspaceLease = reservation.bindWorkspace(workDir);
                 const run = await executionDeadline.run(() => {
-                    agentStarted = true;
-                    return Promise.resolve().then(() => agent(prompt, {
-                        cwd: workDir,
-                        ...(runWorkspaceLease ? { workspaceLease: runWorkspaceLease } : {}),
-                        timeoutMs,
-                        ...(agentEnv ? { env: agentEnv } : {}),
-                        ...(executionDeadline.signal ? { signal: executionDeadline.signal } : {}),
-                        ...(resume ? { resume } : {}),
-                        ...(managedWorktreeName ? { managedWorktreeName } : {}),
-                    })).then((value) => {
+                    return Promise.resolve().then(() => {
+                        agentStarted = true;
+                        try {
+                            return agent(prompt, {
+                                cwd: workDir,
+                                ...(runWorkspaceLease ? { workspaceLease: runWorkspaceLease } : {}),
+                                timeoutMs,
+                                ...(agentEnv ? { env: agentEnv } : {}),
+                                ...(executionDeadline.signal ? { signal: executionDeadline.signal } : {}),
+                                ...(resume ? { resume } : {}),
+                                ...(managedWorktreeName ? { managedWorktreeName } : {}),
+                            });
+                        }
+                        finally {
+                            if (inputContext?.text) {
+                                // Invocation is observable even when the runner rejects. An async observer is best-effort,
+                                // never a prerequisite for execution, validation or worktree cleanup.
+                                try {
+                                    void Promise.resolve(opts.executionObserver?.onInputContext?.(inputContext.receipt, executionDeadline.signal)).catch(() => { });
+                                }
+                                catch { /* Input observation cannot change execution outcome. */ }
+                            }
+                        }
+                    }).then((value) => {
                         agentSettled = true;
                         observedRun = value;
                         return value;
@@ -1041,8 +1100,19 @@ export function makeClaudeExecBridge(opts, internal) {
             }
             // A successful run must not hide abandoned edits/resources. Both cleanup paths are attempted first so one
             // failure cannot strand the other worktree. Failed and cancelled results retain their primary classification.
-            if (cleanupError && result.outcome.status === 'success')
-                throw cleanupError;
+            if (agentStarted)
+                result.agentInvoked = true;
+            if (agentStarted && gene && decision.selectedGeneId && decision.selectedAssetId) {
+                result.selectedGeneInvocation = { geneId: decision.selectedGeneId, assetId: decision.selectedAssetId };
+            }
+            if (observedRun && gene?.strategy?.length && gene.strategy.length <= 64
+                && gene.strategy.every((step) => step.length <= 2000)) {
+                result.plannedStrategy = gene.strategy.map((step) => sanitizeInjection(step));
+            }
+            if (cleanupError && result.outcome.status === 'success') {
+                result.postExecutionCleanupFailed = true;
+                throw new ExecutionAttemptError(cleanupError, result);
+            }
             return result;
         }
         finally {

@@ -51,6 +51,8 @@ Evolver 将 agent 的运行材料整理为可审核、可追溯的 Gene、Capsul
 ## 环境要求与安装
 
 - npm 发行包的 Node.js engines 合同是 `^22.13.0 || >=23.4.0`：支持22.x中的22.13.0及以上版本，或23.4.0及以上版本；Node18、Node20及23.0至23.3不满足要求。
+- POSIX 上的 npm CLI/Proxy launcher 还要求 `/usr/bin/env` 支持 `-S`（GNU coreutils 或现代 BSD/macOS）。BusyBox/Alpine 默认的 `env` 不满足此要求，须先安装兼容实现；musl 支持不代表 BusyBox launcher 兼容。Windows 使用 npm 生成的 launcher，不依赖 `sh`。
+- Windows 的包入口使用 npm 或 pnpm 安装；Bun 1.3.14 的 Windows package-manager shim 不支持上述 shebang。Bun 直接运行 JavaScript 或构建独立 executable 是不同路径，不代表 `bun install`/`bunx` 的入口兼容。
 - Git 用于需要仓库上下文、差异与回滚证明的操作；显示帮助或能力清单不等于已经运行进化任务。
 - npm安装会访问registry并写入所选安装前缀。遇到权限错误时使用用户自有的npm前缀，不要以管理员安装来掩盖服务用户、PATH或身份目录不同的问题。
 
@@ -86,7 +88,13 @@ evolver setup-hooks --help
 
 V2推荐使用 `--runtime` 选择入口，`--platform` 仍是兼容别名。确认runtime、`--scope` 和 `--root` 后再决定安装；真正安装会修改对应配置文件，需要操作者明确同意。
 
-`--dry-run` 目前仅适用于 `opencode` 和 `kiro`。Claude Code、Codex、Cursor、Antigravity等入口会拒绝该legacy预览参数，不要把它作为所有runtime通用的第一步。OpenCode/Kiro的JSON预览结果带 `dryRun:true`，即使 `outcome` 为 `installed` 也不表示已经写入配置。
+`--dry-run` 适用于 `claude-code`、`codex`、`opencode` 和 `kiro`，只预览、不写配置；Cursor、Antigravity等入口仍拒绝该legacy预览参数。JSON预览结果带 `dryRun:true`，即使 `outcome` 为 `installed` 也不表示已经写入配置。上述四个runtime也支持只读 `--verify`；缺少所选配置时不会报告验证成功。
+
+Claude Code/Codex安装、验证或卸载时，可以用 `--components=product-only|evolution-only|both` 选择产品工具桥、经验功能或两者；省略时默认 `both`。选择只影响本次操作，不会移除未选组件，也不保存为全局偏好。`product-only` 不需要Hub凭据、不解析经验profile/env；`evolution-only` 不依赖产品桥。其他runtime拒绝显式组件选择。先确认user/project范围；卸载沿用所需组件选择，用户自有配置及其他工具保持不变。产品桥注册不代表Admin授权。
+
+CLI/Proxy 的 npm launcher 在 Node 与应用参数之间加入 `--`，使 `--env-file` 由对应的 Evolver 命令处理，避免 Node 在应用启动前读取它。直接使用 Node 调用脚本会忽略 shebang，须使用 `node [Node选项] -- <CLI或Proxy脚本> [应用参数]`。Node 自身的选项应放在这个 `--` 之前；既有 `NODE_OPTIONS` 仍是 Node 的运行环境配置，不由组件选择隔离。
+
+若 `evox-product` 已是用户自有entry，不带force的legacy安装会继续保留它，但 `both` 的预览、验证和lifecycle计划不会把它当成受管理的产品桥。需要接管时，由操作者明确使用legacy `--force`；后续卸载会恢复接管前entry。不要以安装命令exit0代替所选组件的只读验证。
 
 | 入口 | V2边界 |
 | --- | --- |

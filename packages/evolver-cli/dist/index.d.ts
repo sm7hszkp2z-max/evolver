@@ -164,6 +164,9 @@ export interface InjectDeps {
     legacyTaskSweep?: () => void;
     /** Test seam for the non-git workspace notice. Production uses cwd + ~/.evomap throttle state. */
     nonGitNotice?: NonGitWorkspaceNoticeOptions;
+    /** Resolving means bytes written, not host receipt or execution. */
+    stdout?: (text: string) => void | Promise<void>;
+    contextTimeoutMs?: number;
 }
 /**
  * `evolver inject session-start`: the SessionStart hook entrypoint (the command every installer registers).

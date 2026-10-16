@@ -1,6 +1,6 @@
 {
   "name": "@evomap/evolver-core",
-  "version": "2.0.42",
+  "version": "2.0.44",
   "private": false,
   "type": "module",
   "engines": {
@@ -13,6 +13,30 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./v1-env-compat": {
+      "types": "./dist/bootstrap/v1EnvCompat.d.ts",
+      "default": "./dist/bootstrap/v1EnvCompat.js"
+    },
+    "./prompt-recall": {
+      "types": "./dist/promptRecall.d.ts",
+      "default": "./dist/promptRecall.js"
+    },
+    "./snapshot-worker": {
+      "types": "./dist/assetstore/snapshotWorkerBridge.d.ts",
+      "default": "./dist/assetstore/snapshotWorkerBridge.js"
+    },
+    "./protected-audit-service": {
+      "types": "./dist/events/protectedAuditServiceMain.d.ts",
+      "default": "./dist/events/protectedAuditServiceMain.js"
+    },
+    "./protected-audit-rpc-child": {
+      "types": "./dist/events/protectedAuditRpcChild.d.ts",
+      "default": "./dist/events/protectedAuditRpcChild.js"
+    },
+    "./protected-audit-migration": {
+      "types": "./dist/events/protectedAuditMigration.d.ts",
+      "default": "./dist/events/protectedAuditMigration.js"
     }
   },
   "dependencies": {

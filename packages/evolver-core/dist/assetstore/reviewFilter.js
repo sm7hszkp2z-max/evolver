@@ -2,6 +2,7 @@ import { LocalJsonlProvider } from './localJsonl.js';
 import { ReviewLedger } from './reviewLedger.js';
 import { ProvenanceStore } from './provenance.js';
 import { assetsDir } from '../events/paths.js';
+import { withContextRead } from './contextRead.js';
 import { assessSourceEligibility } from './sourceQualification.js';
 // Scan window before review filtering — the local gene pool is bounded; mirrors makeTrustedGeneResolver's
 // `list('Gene', 1000)`. Scanning wider than maxGenes then filtering means a quarantined draft sitting in the
@@ -66,12 +67,92 @@ export async function pendingGeneReviewRecords(store, review) {
     return genes;
 }
 export async function listApprovedGenes(store, review, maxGenes, provenance = provenanceStoreForStore(store), options = {}) {
-    const all = await store.list('Gene', GENE_SCAN_LIMIT);
+    // Capture the caller's read boundary before dispatch; legacy calls without a
+    // boundary retain their existing concurrency and numeric-limit semantics.
+    options = { ...options };
+    checkSelectionActive(options);
+    validateGeneLimit(maxGenes);
+    const all = options.signal !== undefined || options.deadlineAt !== undefined
+        ? await listBeforeSelectionBoundary(store, options)
+        : await store.list('Gene', GENE_SCAN_LIMIT);
+    checkSelectionActive(options);
     const trust = provenance.snapshot();
+    checkSelectionActive(options);
     const reviewed = review.snapshot();
+    checkSelectionActive(options);
+    return approvedGeneRecords({ genes: all, provenance: trust, review: reviewed }, maxGenes, options);
+}
+/** Stop waiting without relinquishing an unfinished legacy provider operation.
+ * A legacy list cannot be forcibly cancelled; withContextRead keeps its slot
+ * until the actual read settles, including a late rejection after this race. */
+async function listBeforeSelectionBoundary(store, options) {
+    const { signal, deadlineAt } = options;
+    let timer;
+    let onAbort;
+    try {
+        return await Promise.race([
+            Promise.resolve().then(() => {
+                checkSelectionActive(options);
+                return withContextRead(store, () => store.list('Gene', GENE_SCAN_LIMIT));
+            }),
+            new Promise((_, reject) => {
+                onAbort = () => reject(new Error('source_selection_aborted'));
+                signal?.addEventListener('abort', onAbort, { once: true });
+                if (signal?.aborted)
+                    onAbort();
+                if (deadlineAt !== undefined) {
+                    const checkDeadline = () => {
+                        const remaining = deadlineAt - Date.now();
+                        if (remaining <= 0)
+                            onAbort();
+                        else
+                            timer = setTimeout(checkDeadline, Math.min(remaining, 0x7fffffff));
+                    };
+                    checkDeadline();
+                }
+            }),
+        ]);
+    }
+    finally {
+        if (timer !== undefined)
+            clearTimeout(timer);
+        if (onAbort)
+            signal?.removeEventListener('abort', onAbort);
+    }
+}
+function checkSelectionActive(options) {
+    if (options.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt)) {
+        throw new Error('invalid_source_selection_deadline');
+    }
+    if (options.signal?.aborted || (options.deadlineAt !== undefined && Date.now() >= options.deadlineAt)) {
+        throw new Error('source_selection_aborted');
+    }
+}
+function validateGeneLimit(maxGenes) {
+    // Preserve the existing legacy fractional limit (the first integer count >=
+    // the limit), while zero cannot admit a record and non-finite limits are invalid.
+    if (!Number.isFinite(maxGenes) || maxGenes < 0)
+        throw new Error('invalid_gene_limit');
+}
+/** Same trust/review/source gate for the asynchronous read-only snapshot path. */
+export function approvedGenesFromSnapshot(snapshot, maxGenes, options = {}) {
+    checkSelectionActive(options);
+    validateGeneLimit(maxGenes);
+    if (maxGenes === 0) {
+        if (options.benchmark)
+            options.onQualification?.([]);
+        return [];
+    }
+    return approvedGeneRecords({ ...snapshot, genes: snapshot.genes.slice(0, GENE_SCAN_LIMIT) }, maxGenes, options);
+}
+function approvedGeneRecords(snapshot, maxGenes, options) {
+    const all = snapshot.genes;
+    const trust = snapshot.provenance;
+    const reviewed = snapshot.review;
     const approved = [];
     const receipts = [];
     for (const g of all) {
+        checkSelectionActive(options);
         if (trust.get(String(g.asset_id))?.trusted === false)
             continue; // hub-untrusted → withhold until promoted
         const reviewRecord = reviewed.get(String(g.asset_id));
@@ -87,6 +168,7 @@ export async function listApprovedGenes(store, review, maxGenes, provenance = pr
         if (approved.length >= maxGenes)
             break;
     }
+    checkSelectionActive(options);
     if (options.benchmark)
         options.onQualification?.(receipts);
     return approved;

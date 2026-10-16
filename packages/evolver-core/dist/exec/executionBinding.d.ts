@@ -147,6 +147,7 @@ export declare const executionBindingInputSchema: z.ZodObject<{
         capsule_asset_id: string | null;
         context_digest: string;
     };
+    deadline: string;
     budget: {
         max_credits: number;
     };
@@ -173,7 +174,6 @@ export declare const executionBindingInputSchema: z.ZodObject<{
         spec_id: string;
         validation_plan_digest: string;
     };
-    deadline: string;
     resource_grant: {
         max_files: number;
         validation_commands: string[];
@@ -202,6 +202,7 @@ export declare const executionBindingInputSchema: z.ZodObject<{
         capsule_asset_id: string | null;
         context_digest: string;
     };
+    deadline: string;
     budget: {
         max_credits: number;
     };
@@ -228,7 +229,6 @@ export declare const executionBindingInputSchema: z.ZodObject<{
         spec_id: string;
         validation_plan_digest: string;
     };
-    deadline: string;
     resource_grant: {
         max_files: number;
         validation_commands: string[];
@@ -344,6 +344,12 @@ export interface PermitDecision {
 export interface ImmutableExecutionProvenance {
     gene_ids: readonly string[];
     capsule_ids: readonly string[];
+    input_context?: {
+        schema: 'exec-input-context.v1';
+        gene_asset_ids: readonly string[];
+        capsule_asset_ids: readonly string[];
+        digest: string;
+    };
     tool_decisions: readonly ToolDecision[];
     policy_decisions: readonly PolicyDecision[];
     validator: ValidatorEvidence | null;

@@ -125,12 +125,31 @@ export interface ReuseResultReport {
     tokensSaved?: number;
     timeSavedSeconds?: number;
     reason?: string;
+    /** Caller-produced evidence object. The runtime forwards it verbatim; the Hub owns its schema and weighting. */
+    evidence?: Record<string, unknown>;
 }
 /** Reuse-result reporting is best-effort; failures must not break fetch or solve paths. */
+/** Hub-wide reuse effectiveness of the asset after this report (evomap-hub#3647). */
+export interface ReuseStats {
+    total: number;
+    success: number;
+    successRate: number;
+}
 export interface ReuseResultReceipt {
     recorded: boolean;
     reason?: string;
     id?: string;
+    reuseStats?: ReuseStats;
+    /** Hub admission verdict: false means the report was stored but does not count (reason says why). */
+    eligible?: boolean;
+    /** Whether this report changed the asset's quality evidence. */
+    counted?: boolean;
+    /** Evidence weight the Hub assigned to this report. */
+    weight?: number;
+    /** The Hub rejected the request itself; resending the same report can never succeed. Absent means retryable. */
+    terminal?: true;
+    /** Hub HTTP status behind a terminal rejection. */
+    status?: number;
 }
 export type LearningAssetType = 'memory' | 'skill' | 'playbook' | 'eval';
 export type LearningAssetStatus = 'pending_review' | 'active' | 'disabled' | 'stale' | 'archived';
@@ -356,6 +375,15 @@ export type AssetDeliveryOutcome = {
     status: 'rejected';
     reason: AssetDeliveryRejection;
 };
+/** A fetch the Hub held back until a new account confirms the credit spend; `assets` is then always empty. */
+export type FetchPage = {
+    assets: AssetRecord[];
+    confirmRequired: false;
+} | {
+    assets: [];
+    confirmRequired: true;
+    creditCostPreview: Record<string, unknown>;
+};
 export interface HubCapability {
     references?: import('../reference/decoder.js').ReferenceCapability;
     /**
@@ -367,6 +395,8 @@ export interface HubCapability {
     publishDiagnostics?(): PublishReceiptDiagnostics;
     /** 拉取资产. hub 侧排序/scope(公版 GDI, 私有 RBAC); core 不重排. */
     fetch(query: HubQuery): Promise<AssetRecord[]>;
+    /** 可选: 同 fetch, 但保留 hub 的新手确认闸门(confirm_required), 让调用方区分"需要确认"与"无结果". */
+    fetchPage?(query: HubQuery): Promise<FetchPage>;
     /** 搜索资产. 与 fetch 同 shape, 差异在 hub 侧召回策略. */
     search(query: HubQuery): Promise<AssetRecord[]>;
     /** 可选: 按 content-addressed asset_id 拉单个 full asset. private adapter/proxy 用它保证只 fetch 一个 winner. */

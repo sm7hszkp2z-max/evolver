@@ -1,4 +1,4 @@
-import type { AssetStoreProvider } from '../assetstore/provider.js';
+import type { AssetStoreProvider, AssetRecord } from '../assetstore/provider.js';
 import type { ProvenanceStore } from '../assetstore/provenance.js';
 import type { ReviewLedger } from '../assetstore/reviewLedger.js';
 import type { Mutation } from '../wire/index.js';
@@ -9,6 +9,7 @@ import type { PersonalityStore } from '../personality/store.js';
 import type { AgentRunTraceRecorder } from '../trace/learningTrace.js';
 import type { ExecutionObserver } from './claudeBridge.js';
 import { type BenchmarkContext } from '../assetstore/sourceQualification.js';
+import { type ExecContextOptions, type ExecContextDependencies } from './contextResolver.js';
 /**
  * Resolve a gene's strategy from the store and whether it is safe to EMBED into an autonomous agent's prompt —
  * the exec-side link from #30 (provenance ledger) and the review-state gate to #45 (requireTrustedGene gate). A
@@ -17,7 +18,7 @@ import { type BenchmarkContext } from '../assetstore/sourceQualification.js';
  * is quarantined until a human approves). Both default-open, so cycle-self-produced/local genes are unaffected;
  * only hub-ingested (untrusted) and auto-distilled (unreviewed) drafts are withheld. Looks up by id or asset_id.
  */
-export declare function makeTrustedGeneResolver(store: AssetStoreProvider, provenance?: ProvenanceStore, review?: ReviewLedger, includeProbation?: boolean, benchmark?: BenchmarkContext): GeneResolver;
+export declare function makeTrustedGeneResolver(store: AssetStoreProvider, provenance?: ProvenanceStore, review?: ReviewLedger, includeProbation?: boolean, benchmark?: BenchmarkContext, onResolvedGene?: (record: AssetRecord) => void): GeneResolver;
 export interface AutonomousSafety {
     /** Exact file acceptance cannot silently replace a selected Gene's command validation. */
     declarativeValidationOnly?: boolean;
@@ -58,7 +59,9 @@ export declare function resolveAutonomousAgentOptions(runner: RunnerName | undef
  * isolation (#43) + env scrub (#42) + non-bypassing agent permissions (#38/#40) + trusted-gene gate fed by
  * provenance (#45/#30). Pass the result as runEvolutionCycle's `execute`.
  */
-export declare function makeSafeExecute(repo: string, store: AssetStoreProvider, safety: AutonomousSafety, opts?: {
+export declare function makeSafeExecute(repo: string, store: AssetStoreProvider, safety: AutonomousSafety, opts?: ExecContextOptions & {
+    selectedContext?: ExecContextDependencies['selectedContext'];
+    assertPromptAdapter?: ExecContextDependencies['assertPromptAdapter'];
     benchmark?: BenchmarkContext;
     provenance?: ProvenanceStore;
     review?: ReviewLedger;
@@ -72,6 +75,8 @@ export declare function makeSafeExecute(repo: string, store: AssetStoreProvider,
     /** Optional learning-trace recorder forwarded to the exec bridge (Learning Ops slice 2). */
     traceRecorder?: AgentRunTraceRecorder;
     executionObserver?: ExecutionObserver;
+    /** Capture the authoritative record used for this invocation before the agent runs. */
+    onResolvedGene?: (record: AssetRecord) => void;
     executionLimits?: {
         maxRuntimeMs: number;
         maxFiles: number;

@@ -133,6 +133,11 @@ export interface MigrationResult {
     destPath?: string;
     /** Registration ownership is ambiguous, so the foreground proxy must not continue. */
     requiresForegroundExit?: true;
+    /**
+     * A stored registration transaction was durably rolled back during this call and the
+     * `migration_ambiguous` attempt marker it left behind has been replaced.
+     */
+    priorOwnershipRolledBack?: true;
     /** Operator-facing message (short phrase for skipped/failed; full line for migrated). */
     message: string;
 }

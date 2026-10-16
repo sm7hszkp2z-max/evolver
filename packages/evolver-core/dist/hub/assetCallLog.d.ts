@@ -1,6 +1,10 @@
+import { type AuditWriteOptions } from '../events/boundedAudit.js';
 export type AssetCallAction = 'hub_search_hit' | 'hub_search_miss' | 'asset_reuse' | 'asset_reference' | 'asset_publish' | 'asset_publish_skip' | 'asset_inject' | 'asset_inject_shadow' | 'hub_review_submitted' | 'hub_review_rejected' | 'hub_review_failed';
 export type TokensSavedBasis = 'measured' | 'cost_index' | 'estimated_blast_radius' | 'estimated_default';
 export interface AssetCallEntry {
+    /** Protected-writer replay identity; omitted by legacy local records. */
+    audit_operation_id?: string;
+    audit_request_hash?: string;
     run_id?: string | null;
     action: AssetCallAction;
     asset_id?: string;
@@ -66,6 +70,8 @@ export declare class AssetCallLog {
     constructor(path: string, now?: () => Date);
     /** Append one record (timestamped). Never throws — logging must not break evolution. */
     append(entry: AssetCallEntry): void;
+    /** True only after write/fsync/cleanup confirmation. False is unconfirmed, NOT proof of no append: never blindly retry. */
+    appendBounded(entry: AssetCallEntry, options?: AuditWriteOptions): Promise<boolean>;
     /** Read records with optional filters. Corrupt lines are skipped. */
     read(opts?: ReadOpts): AssetCallRecord[];
     /** Totals + per-action counts (for CLI / observability). */

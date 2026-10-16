@@ -15,6 +15,9 @@
 //
 // The on-disk layout is shared (one jsonl per kind, content-addressed records), so reading is just
 // parsing — no format adapter and no second wire contract.
+import { queryLocalRelatedCapsules } from './relatedCapsules.js';
+import { beginLocalGeneScanV1, readLocalGeneSnapshot } from './boundedSnapshot.js';
+import { beginLocalContextReadV1 } from './contextReadOperationV1.js';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readUtf8Regular } from './assetStoreStorage.js';
@@ -86,11 +89,17 @@ function matchesQuery(record, q) {
  * owning engine appends to these files behind our back, and a stale cache would silently freeze a gene's
  * evidence at whatever it was when this process started.
  */
+const builtInPromptForeignReaders = new WeakSet();
 export class ForeignJsonlSource {
     baseDir;
+    static isBuiltInPromptReader(value) {
+        return typeof value === 'object' && value !== null && builtInPromptForeignReaders.has(value);
+    }
     reportedUnreadable = new Set();
     constructor(baseDir) {
         this.baseDir = baseDir;
+        Object.defineProperty(this, 'baseDir', { value: baseDir, enumerable: true, writable: false, configurable: false });
+        builtInPromptForeignReaders.add(this);
     }
     /**
      * Read one foreign file, degrading it to "empty" on ANY failure.
@@ -128,6 +137,35 @@ export class ForeignJsonlSource {
                 byAssetId.set(record.asset_id, record);
         }
         return [...byAssetId.values()];
+    }
+    queryGeneSnapshot(query = {}) {
+        return readLocalGeneSnapshot(this.baseDir, query);
+    }
+    beginPromptGeneSnapshotV1(query) {
+        return beginLocalContextReadV1(query.signal, signal => this.queryGeneSnapshot({ ...query, signal }));
+    }
+    beginPromptRelatedCapsulesV1(query) {
+        return beginLocalContextReadV1(query.signal, signal => this.queryRelatedCapsules({ ...query, signal }));
+    }
+    beginPromptAssetGetV1(assetId, query) {
+        return beginLocalContextReadV1(query.signal, () => {
+            if (!Number.isFinite(query.deadlineAt) || Date.now() >= query.deadlineAt)
+                throw new Error('context_deadline');
+            return this.get(assetId);
+        });
+    }
+    beginPromptLogicalGeneLookupV1(id, query) {
+        return beginLocalContextReadV1(query.signal, () => {
+            if (!Number.isFinite(query.deadlineAt) || Date.now() >= query.deadlineAt)
+                throw new Error('context_deadline');
+            return this.findByLogicalId(id, 2, 'Gene');
+        });
+    }
+    beginGeneScanV1(query = {}) {
+        return beginLocalGeneScanV1(this.baseDir, query);
+    }
+    queryRelatedCapsules(query) {
+        return queryLocalRelatedCapsules(this.baseDir, query);
     }
     async put(asset) {
         throw new ForeignStoreReadOnlyError(this.baseDir, asset.type);

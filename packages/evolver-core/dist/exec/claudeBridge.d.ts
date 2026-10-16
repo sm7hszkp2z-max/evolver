@@ -1,7 +1,8 @@
 import type { Mutation } from '../wire/index.js';
 import type { GeneDecision } from '../algo/geneSelection.js';
-import type { ExecutionResult } from '../algo/cycleEngine.js';
+import { type ExecutionResult } from '../algo/cycleEngine.js';
 import { type GeneStrategyInfo } from './prompt.js';
+import { type ExecContextResolver, type ExecContextReceipt } from './contextResolver.js';
 import type { PersonalityStore } from '../personality/store.js';
 import type { AgentRunTraceRecorder } from '../trace/learningTrace.js';
 import type { PolicyDecision, ProofReference, ToolDecision, ValidatorEvidence } from './executionBinding.js';
@@ -26,6 +27,8 @@ export interface ValidateHookResult {
 }
 export type ValidateHook = (mutation: Mutation, decision: GeneDecision, cwd: string, signal: AbortSignal) => Promise<ValidateHookResult> | ValidateHookResult;
 export interface ExecutionObserver {
+    /** Exact final prompt appendix provenance; historical input only, never output or validation evidence. */
+    onInputContext?(receipt: ExecContextReceipt, signal?: AbortSignal): Promise<void> | void;
     onToolDecision?(decision: ToolDecision, signal?: AbortSignal): Promise<void> | void;
     onPolicyDecision?(decision: PolicyDecision, signal?: AbortSignal): Promise<void> | void;
     onValidatorDecision?(decision: ValidatorEvidence, signal?: AbortSignal): Promise<void> | void;
@@ -90,6 +93,8 @@ export interface ExecBridgeOptions {
     };
     /** Optional: enrich the prompt with the selected gene's strategy. */
     resolveGene?: GeneResolver;
+    /** Final-prompt-only case resolver. Never used for candidate prechecks or to replace a custom Gene resolver. */
+    resolveContext?: ExecContextResolver;
     /** Optional: validation commands surfaced in the prompt's done-criteria. */
     validationCmds?: readonly string[];
     /** Optional: authoritative success decision after the agent runs. Falls back to "agent ok + produced a diff". */

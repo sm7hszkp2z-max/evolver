@@ -43,7 +43,7 @@ export interface CompletedTask {
     taskId: string;
     completed: boolean;
     error?: string;
-    /** The report could not be delivered and is now owed to the Hub on a later beat. */
+    /** Saved debt: known unsent or refused can retry; unknown delivery requires reconciliation. */
     pending?: boolean;
 }
 export interface PendingCompletion {
@@ -54,6 +54,8 @@ export interface PendingCompletion {
     attempts: number;
     nextAttemptMs: number;
     lastError?: string;
+    /** Written before every HTTP attempt; removed only after its response is recorded. */
+    dispatchState?: 'in_progress';
 }
 export interface PendingClaim {
     taskId: string;
@@ -110,7 +112,7 @@ export interface CommitmentWiring {
      * learns it was kept when the produced asset comes back.
      */
     complete: (taskId: string, resultAssetId: string, generation?: string) => Promise<CompletedTask>;
-    /** Re-send reports the Hub never acknowledged. Due entries only, oldest backoff first. */
+    /** Send known-unsent or response-settled debt. Unknown delivery stays saved without replay. */
     retryCompletions: () => Promise<CompletionRetryResult>;
     /** Re-file claims that never reached the execute queue. The claim is already spent. */
     retryQueueWrites: () => Promise<QueueRetryResult>;

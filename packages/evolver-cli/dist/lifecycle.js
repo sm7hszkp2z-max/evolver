@@ -34,6 +34,13 @@ const PS_PATH = selectExistingPosixCommand([
     '/run/current-system/sw/bin/ps',
 ]);
 const LAUNCHCTL_PATH = '/bin/launchctl';
+// `launchctl print gui/<uid>/<label>` exit statuses, as named by `launchctl error <n>`: 113 is
+// "Could not find specified service" (the login domain exists, the label is not loaded) and 112 is
+// "Could not find specified domain" (no GUI login session). 3 ("No such process") is kept as absent
+// for launchd builds that report a missing label that way.
+const LAUNCHCTL_NO_SUCH_PROCESS_STATUS = 3;
+const LAUNCHCTL_DOMAIN_NOT_FOUND_STATUS = 112;
+const LAUNCHCTL_SERVICE_NOT_FOUND_STATUS = 113;
 const UNIX_RECOVERY_CONTROLLER_FILENAME = 'evolver-recovery-controller';
 const HOST_WINDOWS_SYSTEM_ROOT = process.env['SystemRoot']?.trim() || 'C:\\Windows';
 const LIFECYCLE_USAGE = 'Usage: evolver lifecycle <start|stop|restart|status|check|watch|install-service --target=launchd|systemd|windows [--with-autoexec] [--autoexec-home=<path>]|remove-service --target=launchd|systemd|windows [--dry-run] [--env-file=<path>]|bootstrap [--target=launchd|systemd|windows] [--dry-run]|remove-autoexec-service --target=launchd|systemd|windows [--dry-run]|cleanup-legacy-tasks [--dry-run]|restore-legacy-task-preimage --preimage=<path>>\n';
@@ -3562,9 +3569,10 @@ function probeBootstrapManagerState(target, run, uid, timeoutMs) {
                 return 'inconclusive';
             if (result.status === 0)
                 return 'present';
-            if (result.status === 3)
+            if (result.status === LAUNCHCTL_NO_SUCH_PROCESS_STATUS
+                || result.status === LAUNCHCTL_SERVICE_NOT_FOUND_STATUS)
                 return 'absent';
-            if (result.status === 113)
+            if (result.status === LAUNCHCTL_DOMAIN_NOT_FOUND_STATUS)
                 return 'unavailable';
             return 'inconclusive';
         }
@@ -5410,7 +5418,17 @@ function readProxySettings(path, options = {}) {
         if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) {
             throw new Error('proxy settings changed while opening');
         }
-        const parsed = JSON.parse(readFileSync(descriptor, 'utf8'));
+        const buffer = Buffer.alloc(MAX_PROXY_SETTINGS_BYTES + 1);
+        let total = 0;
+        while (total < buffer.length) {
+            const count = readSync(descriptor, buffer, total, buffer.length - total, total);
+            if (!count)
+                break;
+            total += count;
+        }
+        if (total > MAX_PROXY_SETTINGS_BYTES)
+            throw new Error('proxy settings exceed size limit');
+        const parsed = JSON.parse(buffer.subarray(0, total).toString('utf8'));
         const after = fstatSync(descriptor, { bigint: true });
         if (after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size
             || after.mtimeNs !== opened.mtimeNs || after.ctimeNs !== opened.ctimeNs) {
@@ -5435,6 +5453,8 @@ function readProxySettings(path, options = {}) {
         };
     }
     catch (err) {
+        if (options.throwReadError && err.code !== 'ENOENT')
+            throw err;
         if (!options.quietReadError && err.code !== 'ENOENT') {
             const stderr = options.stderr ?? ((text) => { process.stderr.write(text); });
             stderr(`[Lifecycle] failed to read proxy settings: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -5444,6 +5464,113 @@ function readProxySettings(path, options = {}) {
     finally {
         if (descriptor !== undefined)
             closeSync(descriptor);
+    }
+}
+export function proxyLoopStatus(health, now) {
+    const lastTickAt = health['lastTickAt'];
+    const nextTickDueAt = health['nextTickDueAt'];
+    const failures = health['consecutiveFailures'];
+    const validTime = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 8_640_000_000_000_000;
+    if (typeof health['lifecycleArmed'] !== 'boolean' || !Number.isSafeInteger(failures) || failures < 0
+        || (lastTickAt !== undefined && (!validTime(lastTickAt) || lastTickAt > now))
+        || (nextTickDueAt !== undefined && (!validTime(nextTickDueAt) || (validTime(lastTickAt) && nextTickDueAt < lastTickAt)))) {
+        return { state: 'unknown' };
+    }
+    return {
+        state: failures > 0 ? 'degraded' : health['lifecycleArmed'] === false ? 'disabled'
+            : validTime(nextTickDueAt) && nextTickDueAt >= now ? 'idle'
+                : validTime(nextTickDueAt) && now > nextTickDueAt + 5_000 ? 'overdue_or_blocked'
+                    : validTime(lastTickAt) ? (now - lastTickAt <= 60_000 ? 'recent' : 'overdue_or_blocked') : 'unknown',
+        ...(validTime(lastTickAt) ? { lastTickAt } : {}),
+        ...(validTime(nextTickDueAt) ? { nextTickDueAt } : {}),
+        consecutiveFailures: failures,
+    };
+}
+/** A bounded, authenticated local observation. Unlike lifecycleStatus, it never removes stale state. */
+export async function probeProxyRuntime(paths, timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS) {
+    const unknown = (reason, ipc = 'unknown') => ({ state: 'unknown', ipc, reason, loop: { state: 'unknown' } });
+    let settings;
+    try {
+        settings = readProxySettings(paths.settingsFile, { throwReadError: true });
+    }
+    catch {
+        return unknown('settings_unreadable_or_invalid');
+    }
+    if (!settings.url || !settings.token)
+        return unknown('settings_missing_or_invalid');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    let reached = false;
+    try {
+        const response = await fetch(`${settings.url}/proxy/status`, {
+            headers: { authorization: `Bearer ${settings.token}` }, signal: controller.signal, redirect: 'manual',
+        });
+        reached = true;
+        if (response.status >= 300 && response.status < 400) {
+            await response.body?.cancel();
+            return unknown('ipc_redirect_refused', 'reachable');
+        }
+        if (!response.ok) {
+            await response.body?.cancel();
+            return unknown(response.status === 401 || response.status === 403 ? 'ipc_auth_failed' : 'ipc_http_error', 'reachable');
+        }
+        if (!response.body)
+            return unknown('ipc_invalid_response', 'reachable');
+        const reader = response.body.getReader();
+        const chunks = [];
+        let bytes = 0;
+        try {
+            while (true) {
+                const chunk = await reader.read();
+                if (chunk.done)
+                    break;
+                bytes += chunk.value.byteLength;
+                if (bytes > MAX_PROXY_SETTINGS_BYTES) {
+                    await reader.cancel();
+                    return unknown('ipc_response_too_large', 'reachable');
+                }
+                chunks.push(chunk.value);
+            }
+        }
+        finally {
+            reader.releaseLock();
+        }
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (!body || typeof body !== 'object' || Array.isArray(body))
+            return unknown('ipc_invalid_response', 'reachable');
+        const status = body;
+        if (status['status'] !== 'running' || status['running'] !== true)
+            return unknown('ipc_invalid_response', 'reachable');
+        const value = status['health'];
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+            return {
+                state: 'running', ipc: 'reachable', reason: 'legacy_loop_telemetry_unavailable', loop: { state: 'unknown' },
+            };
+        const health = value;
+        const pid = health['pid'];
+        const identity = coreUtil.parseFileLockProcessStartIdentity(health['processStartIdentity']);
+        if (!Number.isSafeInteger(pid) || pid <= 0 || !identity || health['running'] !== true || health['ipcListening'] !== true
+            || (settings.pid !== undefined && settings.pid !== pid)
+            || coreUtil.inspectFileLockOwnerProcess({ pid: pid, processStartIdentity: identity }) !== 'current') {
+            return unknown('ipc_process_identity_unconfirmed', 'reachable');
+        }
+        const auth = status['hub_auth_status'];
+        const hubAuth = auth === 'ok' || auth === 'auth_failed' || auth === 'retired' || auth === 'rate_limited' || auth === 'replacement_healthy' ? auth : 'unknown';
+        return {
+            state: 'running', ipc: 'reachable', pid: pid, loop: proxyLoopStatus(health, Date.now()), hubAuth,
+            syncErrorPresent: typeof status['last_sync_error'] === 'string' && status['last_sync_error'].length > 0,
+        };
+    }
+    catch {
+        if (reached)
+            return unknown(controller.signal.aborted ? 'ipc_timeout' : 'ipc_invalid_response', 'reachable');
+        if (settings.pid && !isPidRunning(settings.pid))
+            return { state: 'stopped', ipc: 'unreachable', pid: settings.pid, reason: 'recorded_process_exited', loop: { state: 'unknown' } };
+        return unknown(controller.signal.aborted ? 'ipc_timeout' : 'ipc_unreachable_or_invalid', 'unreachable');
+    }
+    finally {
+        clearTimeout(timeout);
+        controller.abort();
     }
 }
 function isNumericLoopbackOrigin(value) {

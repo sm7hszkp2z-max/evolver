@@ -51,6 +51,15 @@ export declare class HubClientError extends Error {
     readonly retryAfterMs?: number | undefined;
     constructor(status: number, body: unknown, retryAfterMs?: number | undefined);
 }
+export declare function isTerminalHubRejectionStatus(status: unknown): status is number;
+/**
+ * A Hub verdict that resending the same request can never change. Auth failures, throttling, 5xx and
+ * transport errors are not verdicts on the request and return undefined.
+ */
+export declare function terminalHubRejection(error: unknown): {
+    reason: string;
+    status: number;
+} | undefined;
 export declare class HubUnreachableError extends Error {
     readonly details: {
         status?: number;

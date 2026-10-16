@@ -127,6 +127,8 @@ const validatorEvidenceSchema = z.object({
 const provenanceSchema = z.object({
     gene_ids: boundedStringArray,
     capsule_ids: boundedStringArray,
+    input_context: z.object({ schema: z.literal('exec-input-context.v1'), gene_asset_ids: boundedStringArray,
+        capsule_asset_ids: boundedStringArray, digest }).strict().optional(),
     tool_decisions: z.array(toolDecisionSchema).max(128),
     policy_decisions: z.array(policyDecisionSchema).max(32),
     validator: validatorEvidenceSchema.nullable(),

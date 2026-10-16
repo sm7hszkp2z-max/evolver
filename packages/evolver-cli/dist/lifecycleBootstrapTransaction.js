@@ -525,12 +525,7 @@ export function acquireBootstrapReadinessLock(stateDir, options = {}) {
     return bootstrapLockHandle(path, owner);
 }
 function bootstrapLockHandle(path, owner) {
-    const expectedBytes = Buffer.from(`${JSON.stringify({
-        v: 2,
-        pid: owner.pid,
-        token: owner.token,
-        processStart: owner.processStartIdentity,
-    })}\n`, 'utf8');
+    const expectedBytes = Buffer.from(util.serializeFileLockOwnerRecord(owner), 'utf8');
     let receipt;
     try {
         if (process.platform === 'win32') {

@@ -208,7 +208,7 @@ export async function runPublishCommand(args, deps = {}) {
             // A field-level refusal is a defect in the RECORD, not a verdict on the work in it. Read the Hub's own
             // `details[]`, mend what is mechanically derivable, and (only when asked) try once more — otherwise the
             // envelope still carries the plan, so the operator can see the asset is salvageable instead of losing it.
-            const validationAttempt = await callHubWithRepair(validate, bundle.sanitized, parsed.repair === true);
+            const validationAttempt = await callHubWithRepair(validate, referenceOnly ? structuredClone(bundle.sanitized) : bundle.sanitized, parsed.repair === true);
             const validation = validationAttempt.result;
             let effectiveAssets = validationAttempt.assets;
             const validationCredits = extractCredits(validation.body);
@@ -242,7 +242,8 @@ export async function runPublishCommand(args, deps = {}) {
                     ...repairEnvelopeField(validationAttempt),
                 }), 1);
             }
-            if (referenceOnly && !validReferenceReceipt(validation.body, bundle.sanitized, true)) {
+            if (referenceOnly && (wire.canonicalize(validationAttempt.assets) !== wire.canonicalize(bundle.sanitized)
+                || !validReferenceReceipt(validation.body, bundle.sanitized, true))) {
                 return write(publishFailure('quality_gate_failed', 'reference validation response does not attest the submitted non-execution pair', {
                     retryable: false, mode: parsed.dryRun ? 'dry_run' : 'publish', gates: { ...bundle.gates, quality: 'fail' },
                 }), 1);
@@ -250,7 +251,7 @@ export async function runPublishCommand(args, deps = {}) {
             if (parsed.dryRun)
                 return write(dryRunEnvelope(bundle, validationCredits, undefined, validationAttempt), 0);
             const publish = deps.publish ?? transport.publish;
-            const publishAttempt = await callHubWithRepair(publish, effectiveAssets, parsed.repair === true);
+            const publishAttempt = await callHubWithRepair(publish, referenceOnly ? structuredClone(bundle.sanitized) : effectiveAssets, parsed.repair === true);
             const published = publishAttempt.result;
             effectiveAssets = publishAttempt.assets;
             const repairApplied = mergeRepairAttempts(validationAttempt, publishAttempt);
@@ -347,7 +348,7 @@ export async function runPublishCommand(args, deps = {}) {
 }
 async function callHubWithRepair(call, assets, allowRepair) {
     const first = await call(assets);
-    if (first.ok)
+    if (first.ok || hasReferenceEvidenceMode(assets))
         return { result: first, assets, applied: false, entries: [] };
     const plan = planBundleRepair(assets, first.body);
     // Retry only when the WHOLE bundle is mended. One unrepairable asset means the Hub will refuse the bundle
@@ -809,7 +810,7 @@ function sanitizePublishBundle(original, env) {
     // 已绑定记录的 business-id 引用同样属于完整内容，不能在验证后改成另一种引用并重算资产。
     // 脱敏若真正改变内容，后续 host ledger 会要求重新验证；人工无声明路径保留旧引用规范化。
     if (hub.requiresPublishBinding(original))
-        return sanitized;
+        return hub.rebindSanitizedEvolutionEventBundle(original, sanitized);
     const finalGeneIdByOriginalRef = new Map();
     for (let i = 0; i < original.length; i++) {
         const source = original[i];
@@ -821,7 +822,7 @@ function sanitizePublishBundle(original, env) {
                 finalGeneIdByOriginalRef.set(ref, finalAsset.asset_id);
         }
     }
-    return sanitized.map((asset, index) => {
+    const rebound = sanitized.map((asset, index) => {
         if (asset.type !== 'Capsule')
             return asset;
         const originalGeneRef = stringField(original[index], 'gene');
@@ -832,6 +833,7 @@ function sanitizePublishBundle(original, env) {
             return asset;
         return withRecomputedAssetId({ ...asset, gene: finalGeneId });
     });
+    return hub.rebindSanitizedEvolutionEventBundle(original, rebound);
 }
 function withRecomputedAssetId(asset) {
     const assetId = wire.computeAssetId(asset);
@@ -1033,6 +1035,18 @@ function checkBundle(bundle) {
     const geneIds = new Set([gene.asset_id, stringField(gene, 'id')].filter((id) => Boolean(id)));
     if (!geneIds.has(String(capsule['gene'] ?? '')))
         return { ok: false, message: 'gene must publish with its capsule' };
+    if (eventsFound.length > 0) {
+        try {
+            hub.assertEvolutionEventPublishBundle(bundle);
+        }
+        catch (error) {
+            return {
+                ok: false,
+                message: error instanceof Error && /^publish_event_[a-z_]+$/.test(error.message)
+                    ? error.message : 'publish_event_bundle_invalid',
+            };
+        }
+    }
     return { ok: true };
 }
 function finalPayloadLeakCheck(bundle, env) {
@@ -1240,7 +1254,15 @@ function createDefaultTransport(deps, opts = {}) {
     return {
         fetchAssetById: (assetId) => connected.hub.fetchAssetById(assetId),
         validate: (bundle) => call('/a2a/validate', 'validate', bundle),
-        publish: (bundle) => withLocalPublishBinding(bundle, env, (authorized) => call('/a2a/publish', 'publish', authorized), deps.resolveProxyClient),
+        publish: (bundle) => {
+            if (hasReferenceEvidenceMode(bundle)) {
+                const assets = structuredClone(bundle);
+                // Reference originals cannot enter execution normalization or acquire a host execution binding.
+                validateReferencePublishBundle(assets);
+                return call('/a2a/publish', 'publish', assets);
+            }
+            return withLocalPublishBinding(bundle, env, (authorized) => call('/a2a/publish', 'publish', authorized), deps.resolveProxyClient);
+        },
         ...(opts.composeRecipe === false ? {} : {
             composeRecipe: (payload) => hub.composeRecipeAfterAssetPublish(connected.hub, payload),
         }),

@@ -27,6 +27,8 @@ export interface ConnectPublicOptions {
     onNodeSecretDiverged?: () => void;
     /** oauth 模式: device flow 传输(缺省=真 HTTP, 此处需注入或由 hubUrl 推导). */
     oauthTransport?: OAuthTransport;
+    /** Fail a reporting request before HTTP if token.json no longer matches its durable destination. */
+    expectedOAuthTokenBinding?: string;
     /** keypair 模式: 注册公钥到 hub. */
     registerPublicKey?: (pem: string) => Promise<{
         credentialId: string;

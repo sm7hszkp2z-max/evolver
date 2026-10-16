@@ -34,7 +34,19 @@ export interface PublicOAuthOptions {
     maxWaitMs?: number;
     /** Provider-level refresh bound, including injected transports. */
     refreshTimeoutMs?: number;
+    /** Exact access credential bound to a durable reporting destination. Never use for ordinary reads. */
+    expectedTokenBinding?: string;
 }
+/** A local refusal before the business request enters HubFetch.fetchFn. No credential data is exposed. */
+export declare class OAuthCredentialBindingError extends Error {
+    constructor();
+}
+/** Authentication failed before the bound Hub business request began. */
+export declare class OAuthAuthenticationPreflightError extends Error {
+    constructor(cause: unknown);
+}
+/** Inspect the trusted credential file without exposing its access token or treating the machine id as an account. */
+export declare function readPublicOAuthCredentialBinding(credPath: string): string | undefined;
 /**
  * device token 认证(M6-5, 默认路径 evolver login). device code flow(学 gh auth login):
  * 显示 user code → 用户在浏览器授权 → 轮询拿 token. 绑机器指纹(CEO: OS machineId+软兜底).

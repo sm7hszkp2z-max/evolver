@@ -114,6 +114,15 @@ export interface SkillCapsule {
     gene: string;
     trigger: string[];
     summary: string;
+    a2a: {
+        context_projection: {
+            schema: 'gene-context-projection.v1';
+            record_kind: 'method_record';
+            summary: string;
+            trigger: string[];
+            strategy: string[];
+        };
+    };
     confidence: number;
     blast_radius: {
         files: number;
@@ -149,10 +158,12 @@ export type AssembleResult = {
  * Assemble a Capsule from a gene + real execution evidence (v1 assembleCapsule) — RED LINE #2/#3. Every
  * `Gene.validation` command MUST appear in `execution.trace` (whitespace-normalized exact match) AND carry an
  * integer exit code; otherwise refuse → the caller degrades to Gene-only. No coverage = no Capsule.
+ * Context projection requires an explicit source plannedStrategy. Synthesized Gene steps stay in the legacy field.
  */
 export declare function assembleCapsule(gene: algo.GeneCandidate, execution: SkillExecution, opts?: {
     scenario?: string;
     evidenceMode?: SkillEvidenceMode;
+    plannedStrategy?: readonly string[];
 }): AssembleResult;
 export interface ReverseDistillResult {
     gene: algo.GeneCandidate | null;

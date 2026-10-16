@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --
 import { mailbox } from '@evomap/evolver-core';
 import { PrivateNodeCredentialStore } from '../private/nodeCredentialStore.js';
 import { loadEnvFileFromEnv } from './envFile.js';
@@ -108,6 +108,8 @@ export interface HubRuntime {
     hub: ProxyDaemonDeps['hub'];
     /** Identity used by this connected runtime, including explicit credential overrides not yet persisted to the store. */
     currentNodeId?: () => string | undefined;
+    /** Only a private adapter that binds its effective destination at send time may expose this. */
+    boundReuseFeedback?: NonNullable<ProxyDaemonDeps['boundReuseFeedback']>;
     hello: (opts: {
         rotate: boolean;
         evolverVersion?: string;

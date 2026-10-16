@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { util } from '@evomap/evolver-core';
@@ -137,6 +137,11 @@ function commitmentExpired(claim, nowMs) {
 function retryDelayMs(attempts) {
     return Math.min(COMPLETION_RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1), COMPLETION_RETRY_CAP_MS);
 }
+/** A dead owner cannot prove remote non-delivery, regardless of the retry count. */
+function completionDeliveryUnknown(entry) {
+    return entry.dispatchState !== undefined
+        || (entry.attempts === 0 && entry.lastError === 'completion_in_progress');
+}
 /** Queue ids the receiver writes carry this prefix, so the loop can tell hub work apart. */
 export const HUB_QUEUE_PREFIX = 'hub-';
 /** A task id becomes a filename, so it may only be what a filename may safely be. */
@@ -218,52 +223,101 @@ function clearUnqueued(path, queueTaskId) {
  * Write the debt down, unless it is no longer owed. A report that failed while an
  * overlapping one succeeded must not come back as a pending debt: the Hub already has the
  * result, and re-sending it is how a settled task starts failing as `not_claimed`.
- * Returns false when nothing was recorded, so no caller promises a retry that will not come.
+ * A recorded refusal may retry, retire an obsolete dispatch, or exhaust its budget.
+ * A persistence failure is distinct from an obsolete response and is reported explicitly.
  */
-function oweCompletion(ledgerPath, taskId, resultAssetId, error, nowMs, settled, generation) {
-    if (settled?.())
-        return false;
-    return updateCompletionLedger(ledgerPath, (ledger) => {
-        // A debt belongs to one filing. A later filing's first failure is its first attempt,
-        // not the continuation of a budget the previous one spent.
-        const prior = ledger.pending[taskId];
-        const continues = prior !== undefined && (prior.generation ?? generation) === generation;
-        const attempts = (continues ? prior.attempts : 0) + 1;
-        return { ...ledger, pending: { ...ledger.pending, [taskId]: { taskId, resultAssetId, attempts, nextAttemptMs: nowMs + retryDelayMs(attempts), lastError: error, ...(generation ? { generation } : {}) } } };
-    });
+function oweCompletion(ledgerPath, entry, error, nowMs) {
+    return withLedgerLock(ledgerPath, () => {
+        const ledger = readCompletionLedger(ledgerPath);
+        const current = ledger.pending[entry.taskId];
+        // This response owns only its exact write-ahead entry. A replaced debt is not
+        // its acknowledgement to record, even if it shares the same task id.
+        if (entry.generation === undefined || !sameDebt(current, entry) || current?.dispatchState !== 'in_progress')
+            return 'obsolete';
+        const owned = { ...(ledger.owned ?? {}) };
+        const pending = { ...ledger.pending };
+        const owner = owned[`${HUB_QUEUE_PREFIX}${entry.taskId}`];
+        // An actual returned refusal settles this old dispatch's ambiguity. If the
+        // claim moved on, retire only its matching marker, never the replacement claim.
+        if (owner?.generation !== entry.generation) {
+            delete pending[entry.taskId];
+            return replaceCompletionLedger(ledgerPath, { ...ledger, pending }) ? 'obsolete' : 'unrecorded';
+        }
+        const attempts = entry.attempts + 1;
+        if (attempts >= COMPLETION_MAX_ATTEMPTS) {
+            delete pending[entry.taskId];
+            delete owned[`${HUB_QUEUE_PREFIX}${entry.taskId}`];
+            return replaceCompletionLedger(ledgerPath, { ...ledger, pending, owned }) ? 'abandoned' : 'unrecorded';
+        }
+        const next = { ...entry, attempts, nextAttemptMs: nowMs + retryDelayMs(attempts), lastError: error };
+        delete next.dispatchState;
+        pending[entry.taskId] = next;
+        return replaceCompletionLedger(ledgerPath, { ...ledger, pending }) ? 'retryable' : 'unrecorded';
+    }, 'unrecorded');
 }
 /**
  * What a wiring with no Hub client can still do: write the debt down. A task claimed before
  * a restart finishes in a process that may have no identity left, and dropping the report
  * there is the one outcome the Hub cannot recover from — it waits out the whole commitment.
  */
-/** A thrown transport error is the same event as a refusal, and must not escape the loop. */
+/** A returned refusal can retry; a throw does not prove whether the Hub accepted the POST. */
 async function hubComplete(client, taskId, assetId) {
     try {
         const result = await client.completeTask(taskId, assetId);
         return result.ok ? { ok: true } : { ok: false, error: result.error ?? `hub ${result.status ?? 0}` };
     }
     catch (error) {
-        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+        return { ok: false, error: error instanceof Error ? error.message : String(error), deliveryUnknown: true };
     }
 }
 const NO_RETRIES = async () => ({ retried: 0, completed: 0, abandoned: 0, pending: 0, unrecorded: 0, abandonedTasks: [] });
 const NO_QUEUE_RETRIES = async () => ({ retried: 0, queued: 0, pending: 0, dropped: 0 });
+/** Fix a filing's result under the same lock as the ownership check, before any send. */
+function reserveCompletion(path, taskId, resultAssetId, generation, nowMs, error, attempts) {
+    return withLedgerLock(path, () => {
+        const ledger = readCompletionLedger(path);
+        const owned = ledger.owned?.[`${HUB_QUEUE_PREFIX}${taskId}`];
+        if (!owned)
+            return { outcome: { taskId, completed: false, error: 'not_claimed' } };
+        if (generation === undefined || owned.generation !== generation) {
+            return { outcome: { taskId, completed: false, error: 'stale_generation' } };
+        }
+        const prior = ledger.pending[taskId];
+        if (prior && (prior.generation === undefined || completionDeliveryUnknown(prior) || prior.generation === generation)) {
+            return { outcome: { taskId, completed: false, pending: true,
+                    ...(prior.generation === undefined ? { error: 'generation_unbound' }
+                        : prior.generation === generation && prior.resultAssetId !== resultAssetId ? { error: 'completion_result_conflict' }
+                            : completionDeliveryUnknown(prior) ? { error: 'completion_in_progress' }
+                                : prior.lastError ? { error: prior.lastError } : {}) } };
+        }
+        const entry = { taskId, resultAssetId, generation, attempts,
+            nextAttemptMs: nowMs + retryDelayMs(Math.max(attempts, 1)), lastError: error,
+            ...(error === 'completion_in_progress' ? { dispatchState: 'in_progress' } : {}) };
+        return replaceCompletionLedger(path, { ...ledger, pending: { ...ledger.pending, [taskId]: entry } })
+            ? { entry } : { outcome: { taskId, completed: false, error, unrecorded: true } };
+    }, { outcome: { taskId, completed: false, error, unrecorded: true } });
+}
+/** A live request owns its send through settlement; another beat cannot overlap it. */
+function acquireCompletionDispatch(path, taskId) {
+    const lock = `${path}.complete-${createHash('sha256').update(taskId).digest('hex')}.lock`;
+    try {
+        mkdirSync(dirname(path), { recursive: true });
+        return { path: lock, owner: util.acquireLock(lock, { maxTries: 1, waitMs: 0 }) };
+    }
+    catch {
+        return null;
+    }
+}
 export function unsentCommitments(ledgerPath, now) {
     return {
         claimFor: (queueTaskId) => readCompletionLedger(ledgerPath).owned?.[queueTaskId] ?? null,
         complete: async (taskId, resultAssetId, generation) => {
             // The same gate as the live wiring: a debt is only worth recording for a claim this
             // node actually holds, under the filing that holds it.
-            const owned = readCompletionLedger(ledgerPath).owned?.[`${HUB_QUEUE_PREFIX}${taskId}`];
-            if (!owned)
-                return { taskId, completed: false, error: 'not_claimed' };
-            if (owned.generation !== generation)
-                return { taskId, completed: false, error: 'stale_generation' };
             // Nothing can send this now, so writing it down is the whole job — and claiming a
             // retry the ledger never recorded would promise a delivery no later run can make.
-            const recorded = oweCompletion(ledgerPath, taskId, resultAssetId, 'task_receiver_disabled', now(), undefined, generation);
-            return { taskId, completed: false, error: 'task_receiver_disabled', ...(recorded ? { pending: true } : { unrecorded: true }) };
+            const reserved = reserveCompletion(ledgerPath, taskId, resultAssetId, generation, now(), 'task_receiver_disabled', 1);
+            return 'outcome' in reserved ? reserved.outcome : { taskId, completed: false, error: 'task_receiver_disabled', pending: true };
         },
         retryCompletions: NO_RETRIES,
         retryQueueWrites: NO_QUEUE_RETRIES,
@@ -273,12 +327,18 @@ export function liveCommitments(client, deps) {
     const { ledgerPath, now, queueDir } = deps;
     // Clearing a debt is itself a ledger write, and a write that did not land leaves the
     // record disagreeing with what the caller was told. `unrecorded` says so out loud.
-    // Clearing a debt is itself a ledger write, and a write that did not land leaves the
-    // record disagreeing with what the caller was told. `unrecorded` says so out loud.
     // The claim only goes with it when it is the claim this debt was made under: a later
     // filing shares the task id and is still held.
-    const settle = (taskId, outcome, generation) => {
+    const settle = (taskId, outcome, generation, onlyKnownDelivery = false) => {
+        let protectedDebt;
         const persisted = updateCompletionLedger(ledgerPath, (ledger) => {
+            // Expiry or changed ownership is not a remote acknowledgement. Recheck the
+            // current debt under this write lock before releasing either it or its claim.
+            const debt = ledger.pending[taskId];
+            if (onlyKnownDelivery && debt && (debt.generation === undefined || completionDeliveryUnknown(debt))) {
+                protectedDebt = debt;
+                return null;
+            }
             const queueTaskId = `${HUB_QUEUE_PREFIX}${taskId}`;
             const owned = { ...(ledger.owned ?? {}) };
             // The claim goes only when this debt can prove the claim is its own. A debt written
@@ -288,13 +348,15 @@ export function liveCommitments(client, deps) {
             if (generation !== undefined && owned[queueTaskId]?.generation === generation)
                 delete owned[queueTaskId];
             const pending = { ...ledger.pending };
-            // The debt itself is this task's either way: a legacy entry has no filing to belong
-            // to, and one naming a later filing is not the entry this settle was called for.
-            const debt = pending[taskId];
-            if (debt && (debt.generation === undefined || debt.generation === generation))
+            // Only a bound debt belongs to this settlement. Legacy unbound evidence stays,
+            // as does any entry that names another filing.
+            if (debt?.generation !== undefined && debt.generation === generation)
                 delete pending[taskId];
             return { ...ledger, pending, owned };
         });
+        if (protectedDebt)
+            return { taskId, completed: false, pending: true,
+                error: protectedDebt.generation === undefined ? 'generation_unbound' : 'completion_in_progress' };
         return persisted ? outcome : { ...outcome, unrecorded: true };
     };
     // A debt is only this attempt's to settle while the ledger still holds the entry the
@@ -303,61 +365,67 @@ export function liveCommitments(client, deps) {
         const current = readCompletionLedger(ledgerPath).pending[entry.taskId];
         return sameDebt(current, entry);
     };
-    // A task the register has let go of has been settled — by this pass or an overlapping
-    // one — and its debt is paid. `held` is read before the Hub call, so a claim that was
-    // never registered (an old ledger) does not read as "settled" here.
-    // Settled, or moved on: either way this filing no longer holds the claim, and a debt
-    // recorded for it now would block the filing that does from recording its own.
-    const settledSince = (taskId, held, generation) => () => {
-        if (!held)
-            return false;
-        const owned = readCompletionLedger(ledgerPath).owned?.[`${HUB_QUEUE_PREFIX}${taskId}`];
-        return owned === undefined || owned.generation !== generation;
-    };
-    // Two reports for the same task can fail out of order. `before` is what the ledger held
-    // when this attempt started; anything else on record now is a later word than this one.
-    const supersededSince = (taskId, before) => () => {
-        const current = readCompletionLedger(ledgerPath).pending[taskId];
-        if (!current)
-            return false;
-        return !sameDebt(current, before);
-    };
-    const owe = (taskId, resultAssetId, error, settled, generation) => {
-        const recorded = oweCompletion(ledgerPath, taskId, resultAssetId, error, now(), settled, generation);
-        // Only a recorded debt is a promised retry; an unwritable ledger has to say so.
-        return { taskId, completed: false, error, ...(recorded ? { pending: true } : { unrecorded: true }) };
-    };
     const report = async (taskId, resultAssetId, generation) => {
         const opening = readCompletionLedger(ledgerPath);
         const owned = opening.owned?.[`${HUB_QUEUE_PREFIX}${taskId}`];
-        const wasHeld = Boolean(owned);
         const before = opening.pending[taskId];
         // Only a claim this node registered may be completed, and only by the filing that
         // holds it. No record, or a record from a later filing, and the result is not ours to
         // hand over — the Hub cannot take a completion back once it has one.
         if (!owned)
             return { taskId, completed: false, error: 'not_claimed' };
-        if (owned.generation !== generation)
+        if (generation === undefined || owned.generation !== generation)
             return { taskId, completed: false, error: 'stale_generation' };
+        if (before && (before.generation === undefined || completionDeliveryUnknown(before))) {
+            return { taskId, completed: false, pending: true,
+                error: before.generation === undefined ? 'generation_unbound'
+                    : before.generation === generation && before.resultAssetId !== resultAssetId ? 'completion_result_conflict' : 'completion_in_progress' };
+        }
         // The Hub holds a task for its claimant only until the commitment runs out. Past that
         // it may have re-dispatched the work, and a late report would overwrite whoever now
         // owns it — so stop, and name the orphaned asset loudly enough to be recoverable.
         if (commitmentExpired(owned, now())) {
             // This filing's commitment is over, so this filing's claim goes with it — scoped, so
             // a re-claim that happened in the meantime keeps the claim it made.
-            return settle(taskId, { taskId, completed: false, error: 'commitment_expired' }, generation);
+            return settle(taskId, { taskId, completed: false, error: 'commitment_expired' }, generation, true);
         }
-        const result = await hubComplete(client, taskId, resultAssetId);
-        const stale = settledSince(taskId, wasHeld, generation);
-        const superseded = supersededSince(taskId, before);
-        // The Hub has this asset. Whatever this filing owed is paid, including a debt another
-        // attempt of the SAME filing recorded while we waited — leaving it would re-send a
-        // completed task. A later filing's debt is another claim's and stays.
-        if (result.ok)
-            return settle(taskId, { taskId, completed: true }, generation);
-        // The work is done and the Hub does not know it. Owe the report and retry it on
-        // later beats — otherwise a transient 429 silently costs us the whole delivery.
-        return owe(taskId, resultAssetId, result.error, () => stale() || superseded(), generation);
+        // A filing owes one result. Changing its asset cannot replace an ambiguous
+        // completion or bypass backoff; only retryCompletions may send its saved debt.
+        if (before && (before.generation === undefined || before.generation === generation)) {
+            return { taskId, completed: false, pending: true,
+                ...(before.generation === undefined ? { error: 'generation_unbound' }
+                    : before.resultAssetId !== resultAssetId ? { error: 'completion_result_conflict' }
+                        : before.lastError ? { error: before.lastError } : {}) };
+        }
+        const dispatch = acquireCompletionDispatch(ledgerPath, taskId);
+        if (!dispatch) {
+            const current = readCompletionLedger(ledgerPath).pending[taskId];
+            return { taskId, completed: false, ...(current ? { pending: true } : { unrecorded: true }),
+                error: current?.generation === generation && current.resultAssetId !== resultAssetId ? 'completion_result_conflict' : 'completion_busy' };
+        }
+        try {
+            const reserved = reserveCompletion(ledgerPath, taskId, resultAssetId, generation, now(), 'completion_in_progress', 0);
+            if ('outcome' in reserved)
+                return reserved.outcome;
+            const result = await hubComplete(client, taskId, resultAssetId);
+            // Keep the write-ahead marker on network/timeouts or unclassified adapter throws.
+            // Neither a released local lock nor an expired commitment proves non-delivery.
+            if (!result.ok && result.deliveryUnknown)
+                return { taskId, completed: false, pending: true, error: result.error };
+            // The Hub has this asset. Whatever this filing owed is paid, including a debt another
+            // attempt of the SAME filing recorded while we waited — leaving it would re-send a
+            // completed task. A later filing's debt is another claim's and stays.
+            if (result.ok)
+                return settle(taskId, { taskId, completed: true }, generation);
+            // The work is done and the Hub does not know it. Owe the report and retry it on
+            // later beats — otherwise a transient 429 silently costs us the whole delivery.
+            const recorded = oweCompletion(ledgerPath, reserved.entry, result.error, now());
+            return { taskId, completed: false, error: result.error,
+                ...(recorded === 'retryable' ? { pending: true } : recorded === 'unrecorded' ? { unrecorded: true } : {}) };
+        }
+        finally {
+            util.releaseLock(dispatch.path, dispatch.owner);
+        }
     };
     return {
         claimFor: (queueTaskId) => readCompletionLedger(ledgerPath).owned?.[queueTaskId] ?? null,
@@ -421,65 +489,91 @@ export function liveCommitments(client, deps) {
             // Oldest due first, not insertion order: a fixed slice of an unsorted map lets the
             // same five debts hold every slot forever while the ones behind them expire unsent.
             const due = Object.values(ledger.pending)
-                .filter((entry) => entry.nextAttemptMs <= now())
+                .filter((entry) => entry.generation !== undefined && !completionDeliveryUnknown(entry) && entry.nextAttemptMs <= now())
                 .sort((left, right) => left.nextAttemptMs - right.nextAttemptMs)
                 .slice(0, COMPLETION_RETRIES_PER_TICK);
             const out = { retried: 0, completed: 0, abandoned: 0, pending: Object.keys(ledger.pending).length, unrecorded: 0, abandonedTasks: [] };
             for (const entry of due) {
-                out.retried += 1;
-                const owned = readCompletionLedger(ledgerPath).owned?.[`${HUB_QUEUE_PREFIX}${entry.taskId}`];
-                if (commitmentExpired(owned, now())) {
+                // Only known-unsent or response-settled, generation-bound debt is retryable.
+                // Unknown delivery and legacy evidence remain pending for authoritative reconciliation.
+                const dispatch = acquireCompletionDispatch(ledgerPath, entry.taskId);
+                if (!dispatch)
+                    continue;
+                try {
                     if (!stillOurs(entry))
                         continue;
-                    // A debt the ledger still holds has not been let go of, whatever this tick says.
-                    if (settle(entry.taskId, { taskId: entry.taskId, completed: false }, entry.generation).unrecorded) {
+                    out.retried += 1;
+                    const owned = readCompletionLedger(ledgerPath).owned?.[`${HUB_QUEUE_PREFIX}${entry.taskId}`];
+                    if (commitmentExpired(owned, now())) {
+                        if (!stillOurs(entry))
+                            continue;
+                        // A debt the ledger still holds has not been let go of, whatever this tick says.
+                        const expired = settle(entry.taskId, { taskId: entry.taskId, completed: false }, entry.generation, true);
+                        if (expired.pending) {
+                            out.retried -= 1;
+                            continue;
+                        }
+                        if (expired.unrecorded) {
+                            out.unrecorded += 1;
+                            continue;
+                        }
+                        out.abandoned += 1;
+                        out.abandonedTasks.push({ taskId: entry.taskId, resultAssetId: entry.resultAssetId, lastError: 'commitment_expired' });
+                        continue;
+                    }
+                    // The same gate the first report passed: a debt with no claim behind it, or one
+                    // whose claim moved on to a later filing, is not ours to send. Drop it, and leave
+                    // any claim that is not this debt's alone — it is still held.
+                    if (!owned || owned.generation !== entry.generation) {
+                        if (stillOurs(entry)) {
+                            const stale = settle(entry.taskId, { taskId: entry.taskId, completed: false }, entry.generation, true);
+                            if (stale.pending)
+                                out.retried -= 1;
+                        }
+                        continue;
+                    }
+                    // Reserve this exact known-unsent or response-settled retry under the lock. A snapshot
+                    // selected before another process crashed must not revive its now-unknown send.
+                    let marked;
+                    const reserved = updateCompletionLedger(ledgerPath, (ledger) => {
+                        const current = ledger.pending[entry.taskId];
+                        const owner = ledger.owned?.[`${HUB_QUEUE_PREFIX}${entry.taskId}`];
+                        if (!sameDebt(current, entry) || !current || completionDeliveryUnknown(current)
+                            || current.nextAttemptMs !== entry.nextAttemptMs || current.lastError !== entry.lastError
+                            || owner?.generation !== entry.generation || commitmentExpired(owner, now()))
+                            return null;
+                        marked = { ...current, dispatchState: 'in_progress' };
+                        return { ...ledger, pending: { ...ledger.pending, [entry.taskId]: marked } };
+                    });
+                    if (!reserved) {
                         out.unrecorded += 1;
                         continue;
                     }
-                    out.abandoned += 1;
-                    out.abandonedTasks.push({ taskId: entry.taskId, resultAssetId: entry.resultAssetId, lastError: 'commitment_expired' });
-                    continue;
-                }
-                // The same gate the first report passed: a debt with no claim behind it, or one
-                // whose claim moved on to a later filing, is not ours to send. Drop it, and leave
-                // any claim that is not this debt's alone — it is still held.
-                if (!owned || owned.generation !== entry.generation) {
-                    if (stillOurs(entry))
-                        settle(entry.taskId, { taskId: entry.taskId, completed: false }, entry.generation);
-                    continue;
-                }
-                const result = await hubComplete(client, entry.taskId, entry.resultAssetId);
-                if (result.ok) {
-                    // The Hub has the result; the record must go even if a newer debt replaced it.
-                    if (settle(entry.taskId, { taskId: entry.taskId, completed: true }, entry.generation).unrecorded)
-                        out.unrecorded += 1;
-                    out.completed += 1;
-                    continue;
-                }
-                // Both outcomes below rewrite the ledger, so both need the same proof that this
-                // attempt's debt is still the one on record — giving up is a deletion, and a stale
-                // response must not delete a newer debt any more than it may overwrite one.
-                if (!stillOurs(entry))
-                    continue;
-                const attempts = entry.attempts + 1;
-                if (attempts >= COMPLETION_MAX_ATTEMPTS) {
-                    if (settle(entry.taskId, { taskId: entry.taskId, completed: false }, entry.generation).unrecorded) {
-                        out.unrecorded += 1;
+                    if (!marked)
+                        continue;
+                    const result = await hubComplete(client, entry.taskId, entry.resultAssetId);
+                    // An unclassified throw leaves the actual dispatch unknown; do not spend a
+                    // response-settled retry attempt or erase the marker. Other debts still drain.
+                    if (!result.ok && result.deliveryUnknown)
+                        continue;
+                    if (result.ok) {
+                        // The Hub has the result; the record must go even if a newer debt replaced it.
+                        if (settle(entry.taskId, { taskId: entry.taskId, completed: true }, entry.generation).unrecorded)
+                            out.unrecorded += 1;
+                        out.completed += 1;
                         continue;
                     }
-                    out.abandoned += 1;
-                    out.abandonedTasks.push({ taskId: entry.taskId, resultAssetId: entry.resultAssetId, lastError: result.error });
-                    continue;
+                    const recorded = oweCompletion(ledgerPath, marked, result.error, now());
+                    if (recorded === 'unrecorded')
+                        out.unrecorded += 1;
+                    if (recorded === 'abandoned') {
+                        out.abandoned += 1;
+                        out.abandonedTasks.push({ taskId: entry.taskId, resultAssetId: entry.resultAssetId, lastError: result.error });
+                    }
                 }
-                const written = updateCompletionLedger(ledgerPath, (ledger) => {
-                    // Re-checked under the lock, not merely before it: the debt may have been
-                    // settled or replaced between the check above and this write.
-                    if (!sameDebt(ledger.pending[entry.taskId], entry))
-                        return null;
-                    return { ...ledger, pending: { ...ledger.pending, [entry.taskId]: { ...entry, attempts, nextAttemptMs: now() + retryDelayMs(attempts), lastError: result.error } } };
-                });
-                if (!written)
-                    out.unrecorded += 1;
+                finally {
+                    util.releaseLock(dispatch.path, dispatch.owner);
+                }
             }
             out.pending = Object.keys(readCompletionLedger(ledgerPath).pending).length;
             return out;

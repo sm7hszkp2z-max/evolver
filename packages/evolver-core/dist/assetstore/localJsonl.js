@@ -1,3 +1,6 @@
+import { queryLocalRelatedCapsules } from './relatedCapsules.js';
+import { beginLocalGeneScanV1, readLocalGeneSnapshot } from './boundedSnapshot.js';
+import { beginLocalContextReadV1 } from './contextReadOperationV1.js';
 import { assertExecutionEligible, isExecutionEligible } from '../reference/guard.js';
 import { loadReferenceFence } from '../reference/store.js';
 import { unlinkSync } from 'node:fs';
@@ -33,8 +36,12 @@ export function signalsOf(a) {
  * 内存索引(asset_id→record)供 get/search; 文件指纹变化时在共享锁内重建索引，保证多个
  * CLI/daemon 进程之间可见; 写入也在锁内刷新后再按 asset_id 去重(内容寻址天然幂等).
  */
+const builtInPromptLocalReaders = new WeakSet();
 export class LocalJsonlProvider {
     baseDir;
+    static isBuiltInPromptReader(value) {
+        return typeof value === 'object' && value !== null && builtInPromptLocalReaders.has(value);
+    }
     index = new Map();
     lockPath;
     bundleJournalPath;
@@ -45,6 +52,11 @@ export class LocalJsonlProvider {
     // — the ReviewLedger/ProvenanceStore — in the SAME directory, instead of defaulting to the real ~/.evomap.
     constructor(baseDir) {
         this.baseDir = baseDir;
+        // Prompt snapshots and their related-case reads must use one source root.
+        // A mutable public readonly field (readonly is only a TS check) permits
+        // an injected ledger callback to retarget a later optional V1 read.
+        Object.defineProperty(this, 'baseDir', { value: baseDir, enumerable: true, writable: false, configurable: false });
+        builtInPromptLocalReaders.add(this);
         ensureAssetStoreDirectory(baseDir);
         this.referenceScope = loadReferenceFence(baseDir);
         this.lockPath = join(baseDir, '.assetstore.lock');
@@ -80,9 +92,9 @@ export class LocalJsonlProvider {
                 try {
                     const r = JSON.parse(line);
                     if (r.asset_id)
-                        next.set(r.asset_id, r);
+                        next.set(r.asset_id, r); // preserve legacy read behavior
                 }
-                catch { /* skip 坏行 */ }
+                catch { /* skip 坏行 for legacy readers */ }
             }
         }
         this.index.clear();
@@ -170,6 +182,35 @@ export class LocalJsonlProvider {
     }
     hasPendingBundle() {
         return assertOptionalRegularFile(this.bundleJournalPath, 'temp_file') !== null;
+    }
+    queryGeneSnapshot(query = {}) {
+        return readLocalGeneSnapshot(this.baseDir, query);
+    }
+    beginPromptGeneSnapshotV1(query) {
+        return beginLocalContextReadV1(query.signal, signal => this.queryGeneSnapshot({ ...query, signal }));
+    }
+    beginPromptRelatedCapsulesV1(query) {
+        return beginLocalContextReadV1(query.signal, signal => this.queryRelatedCapsules({ ...query, signal }));
+    }
+    beginPromptAssetGetV1(assetId, query) {
+        return beginLocalContextReadV1(query.signal, () => {
+            if (!Number.isFinite(query.deadlineAt) || Date.now() >= query.deadlineAt)
+                throw new Error('context_deadline');
+            return this.get(assetId);
+        });
+    }
+    beginPromptLogicalGeneLookupV1(id, query) {
+        return beginLocalContextReadV1(query.signal, () => {
+            if (!Number.isFinite(query.deadlineAt) || Date.now() >= query.deadlineAt)
+                throw new Error('context_deadline');
+            return this.findByLogicalId(id, 2, 'Gene');
+        });
+    }
+    beginGeneScanV1(query = {}) {
+        return beginLocalGeneScanV1(this.baseDir, query);
+    }
+    queryRelatedCapsules(query) {
+        return queryLocalRelatedCapsules(this.baseDir, query);
     }
     async put(asset) {
         return this.putConditional(asset, { allowLogicalCollision: true });

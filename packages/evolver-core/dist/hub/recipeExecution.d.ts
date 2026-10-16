@@ -97,13 +97,13 @@ export declare const recipeEvidenceSchema: z.ZodDiscriminatedUnion<"type", [z.Zo
     type: z.ZodLiteral<"failure">;
 }, "strict", z.ZodTypeAny, {
     type: "failure";
-    status: "failed" | "refused" | "unsupported";
+    status: "failed" | "unsupported" | "refused";
     reason: string;
     input_digest: string;
     output_digest: string;
 }, {
     type: "failure";
-    status: "failed" | "refused" | "unsupported";
+    status: "failed" | "unsupported" | "refused";
     reason: string;
     input_digest: string;
     output_digest: string;
@@ -275,13 +275,13 @@ export declare const recipeExecutionSchemas: {
             type: z.ZodLiteral<"failure">;
         }, "strict", z.ZodTypeAny, {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
         }, {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
@@ -317,7 +317,7 @@ export declare const recipeExecutionSchemas: {
             output_digest: string;
         } | {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
@@ -354,7 +354,7 @@ export declare const recipeExecutionSchemas: {
             output_digest: string;
         } | {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
@@ -457,13 +457,13 @@ export declare const recipeExecutionSchemas: {
             type: z.ZodLiteral<"failure">;
         }, "strict", z.ZodTypeAny, {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
         }, {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
@@ -497,7 +497,7 @@ export declare const recipeExecutionSchemas: {
             output_digest: string;
         } | {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
@@ -531,7 +531,7 @@ export declare const recipeExecutionSchemas: {
             output_digest: string;
         } | {
             type: "failure";
-            status: "failed" | "refused" | "unsupported";
+            status: "failed" | "unsupported" | "refused";
             reason: string;
             input_digest: string;
             output_digest: string;
@@ -594,17 +594,17 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
             optional: z.ZodBoolean;
             fallbackGeneId: z.ZodNullable<z.ZodString>;
         }, "strip", z.ZodTypeAny, {
+            geneAssetId: string;
             assetType: string;
             position: number;
-            geneAssetId: string;
             condition: string | null;
             parameters: RecipeJson;
             optional: boolean;
             fallbackGeneId: string | null;
         }, {
+            geneAssetId: string;
             assetType: string;
             position: number;
-            geneAssetId: string;
             condition: string | null;
             parameters: RecipeJson;
             optional: boolean;
@@ -639,12 +639,12 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
             triggerText: string;
         }>;
         version: number;
-        title: string;
         schema: "recipe_execution.v1";
+        title: string;
         steps: {
+            geneAssetId: string;
             assetType: string;
             position: number;
-            geneAssetId: string;
             condition: string | null;
             parameters: RecipeJson;
             optional: boolean;
@@ -665,12 +665,12 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
             triggerText: string;
         }>;
         version: number;
-        title: string;
         schema: "recipe_execution.v1";
+        title: string;
         steps: {
+            geneAssetId: string;
             assetType: string;
             position: number;
-            geneAssetId: string;
             condition: string | null;
             parameters: RecipeJson;
             optional: boolean;
@@ -745,12 +745,12 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
             triggerText: string;
         }>;
         version: number;
-        title: string;
         schema: "recipe_execution.v1";
+        title: string;
         steps: {
+            geneAssetId: string;
             assetType: string;
             position: number;
-            geneAssetId: string;
             condition: string | null;
             parameters: RecipeJson;
             optional: boolean;
@@ -808,12 +808,12 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
             triggerText: string;
         }>;
         version: number;
-        title: string;
         schema: "recipe_execution.v1";
+        title: string;
         steps: {
+            geneAssetId: string;
             assetType: string;
             position: number;
-            geneAssetId: string;
             condition: string | null;
             parameters: RecipeJson;
             optional: boolean;
@@ -883,17 +883,17 @@ export declare const recipeExecutionResponses: {
                     optional: z.ZodBoolean;
                     fallbackGeneId: z.ZodNullable<z.ZodString>;
                 }, "strip", z.ZodTypeAny, {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
                     fallbackGeneId: string | null;
                 }, {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -928,12 +928,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -954,12 +954,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1034,12 +1034,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1097,12 +1097,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1163,12 +1163,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1229,12 +1229,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1302,17 +1302,17 @@ export declare const recipeExecutionResponses: {
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
             }, "strip", z.ZodTypeAny, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
                 fallbackGeneId: string | null;
             }, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -1347,12 +1347,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -1373,12 +1373,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -1453,12 +1453,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -1516,12 +1516,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -1589,17 +1589,17 @@ export declare const recipeExecutionResponses: {
                     optional: z.ZodBoolean;
                     fallbackGeneId: z.ZodNullable<z.ZodString>;
                 }, "strip", z.ZodTypeAny, {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
                     fallbackGeneId: string | null;
                 }, {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1634,12 +1634,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1660,12 +1660,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1740,12 +1740,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1803,12 +1803,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1870,12 +1870,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -1936,12 +1936,12 @@ export declare const recipeExecutionResponses: {
                     triggerText: string;
                 }>;
                 version: number;
-                title: string;
                 schema: "recipe_execution.v1";
+                title: string;
                 steps: {
+                    geneAssetId: string;
                     assetType: string;
                     position: number;
-                    geneAssetId: string;
                     condition: string | null;
                     parameters: RecipeJson;
                     optional: boolean;
@@ -2009,17 +2009,17 @@ export declare const recipeExecutionResponses: {
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
             }, "strip", z.ZodTypeAny, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
                 fallbackGeneId: string | null;
             }, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2054,12 +2054,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2080,12 +2080,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2160,12 +2160,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2223,12 +2223,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2363,17 +2363,17 @@ export declare const recipeExecutionResponses: {
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
             }, "strip", z.ZodTypeAny, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
                 fallbackGeneId: string | null;
             }, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2408,12 +2408,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2434,12 +2434,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2514,12 +2514,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2577,12 +2577,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2649,17 +2649,17 @@ export declare const recipeExecutionResponses: {
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
             }, "strip", z.ZodTypeAny, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
                 fallbackGeneId: string | null;
             }, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2694,12 +2694,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2720,12 +2720,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2800,12 +2800,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2863,12 +2863,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2935,17 +2935,17 @@ export declare const recipeExecutionResponses: {
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
             }, "strip", z.ZodTypeAny, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
                 fallbackGeneId: string | null;
             }, {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -2980,12 +2980,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -3006,12 +3006,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -3086,12 +3086,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;
@@ -3149,12 +3149,12 @@ export declare const recipeExecutionResponses: {
                 triggerText: string;
             }>;
             version: number;
-            title: string;
             schema: "recipe_execution.v1";
+            title: string;
             steps: {
+                geneAssetId: string;
                 assetType: string;
                 position: number;
-                geneAssetId: string;
                 condition: string | null;
                 parameters: RecipeJson;
                 optional: boolean;

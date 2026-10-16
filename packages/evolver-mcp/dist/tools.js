@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 import { reference, assetstore, wire, mailbox as mb, hub, bootstrap, ops } from '@evomap/evolver-core';
 import { ProxyReverificationError, safeReverificationRecovery } from './proxyClient.js';
 import { buildEvolverPrimer } from './primer.js';
@@ -106,6 +107,24 @@ function proxyFetchResult(value, assetId) {
     const metadata = proxyFallbackMetadata(value);
     return metadata ? { asset, ...metadata } : asset;
 }
+const HUB_TASK_ID_BASE_MAX_LENGTH = 256;
+const HUB_TASK_ID_FOLLOW_UP_SUFFIXES = [':correction', ':retention'];
+const HUB_TASK_ID_MAX_LENGTH = HUB_TASK_ID_BASE_MAX_LENGTH + Math.max(...HUB_TASK_ID_FOLLOW_UP_SUFFIXES.map((s) => s.length));
+const HUB_TASK_ID_SUFFIX_ALTERNATION = `(?:${HUB_TASK_ID_FOLLOW_UP_SUFFIXES.join('|')})`;
+const HUB_TASK_ID_PATTERN = `^(?!${HUB_TASK_ID_SUFFIX_ALTERNATION}$)[\\s\\S]{1,${HUB_TASK_ID_BASE_MAX_LENGTH}}${HUB_TASK_ID_SUFFIX_ALTERNATION}?$`;
+const HUB_TASK_ID_REGEXP = new RegExp(HUB_TASK_ID_PATTERN);
+function taskIdBase(taskId) {
+    const suffix = HUB_TASK_ID_FOLLOW_UP_SUFFIXES.find((s) => taskId.endsWith(s));
+    return suffix ? taskId.slice(0, -suffix.length) : taskId;
+}
+function optionalTaskIdArg(args) {
+    const value = args['taskId'];
+    if (typeof value !== 'string' || value.length === 0)
+        return undefined;
+    if (HUB_TASK_ID_REGEXP.test(value))
+        return value;
+    throw new Error(taskIdBase(value).length > HUB_TASK_ID_BASE_MAX_LENGTH ? 'task_id_too_long' : 'invalid_task_id');
+}
 function optionalNonNegativeNumberArg(args, key, error) {
     if (!Object.prototype.hasOwnProperty.call(args, key))
         return undefined;
@@ -113,6 +132,58 @@ function optionalNonNegativeNumberArg(args, key, error) {
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
         throw new Error(error);
     return value;
+}
+const MAX_EVIDENCE_BYTES = 2048;
+function optionalEvidenceArg(args) {
+    const value = args['evidence'];
+    if (value === undefined)
+        return undefined;
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw new Error('invalid_evidence');
+    if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_EVIDENCE_BYTES)
+        throw new Error('evidence_too_large');
+    return value;
+}
+function caseAppendix(context) {
+    let text = '';
+    const sections = context.sections.filter((section) => section.kind === 'example').map((section) => {
+        const block = context.text.slice(section.start, section.end);
+        const start = text.length;
+        text += block;
+        return { ...section, start, end: text.length };
+    });
+    const geneAssetIds = [...new Set(sections.map((section) => section.geneAssetId))];
+    const capsuleAssetIds = [...new Set(sections.flatMap((section) => section.capsuleAssetId ? [section.capsuleAssetId] : []))];
+    const ids = new Set([...geneAssetIds, ...capsuleAssetIds]);
+    return { ...context, text, digest: `sha256:${createHash('sha256').update(text).digest('hex')}`, sections, geneAssetIds, capsuleAssetIds,
+        qualifications: context.qualifications.filter((item) => ids.has(item.assetId)),
+        counts: { ...context.counts, rendered: geneAssetIds.length, examples: capsuleAssetIds.length } };
+}
+function recallContextOptions(args) {
+    const contentMode = args['contentMode'] ?? 'context';
+    if (contentMode !== 'summary' && contentMode !== 'strategy' && contentMode !== 'context')
+        throw new Error('invalid_gene_context_content_mode');
+    if (args['includeExamples'] !== undefined && typeof args['includeExamples'] !== 'boolean')
+        throw new Error('invalid_gene_context_include_examples');
+    const rawBudget = args['budget'];
+    if (rawBudget !== undefined && (!rawBudget || typeof rawBudget !== 'object' || Array.isArray(rawBudget)))
+        throw new Error('invalid_gene_context_budget');
+    const budget = record(rawBudget);
+    if (Object.keys(budget).some((key) => !['maxChars', 'maxExampleChars', 'maxExampleCharsPerGene'].includes(key)))
+        throw new Error('invalid_gene_context_budget');
+    const integer = (value, fallback, maximum, error) => {
+        if (value === undefined)
+            return fallback;
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > maximum)
+            throw new Error(error);
+        return value;
+    };
+    return { contentMode, budget: {
+            maxChars: integer(budget['maxChars'], 16000, 128000, 'invalid_gene_context_budget'),
+            maxExampleChars: integer(budget['maxExampleChars'], 3000, 32000, 'invalid_gene_context_budget'),
+            maxExampleCharsPerGene: integer(budget['maxExampleCharsPerGene'], 1200, 8000, 'invalid_gene_context_budget'),
+            maxExamplesPerGene: args['includeExamples'] === false ? 0 : 1,
+        }, timeoutMs: integer(args['timeoutMs'], 1000, 60000, 'invalid_gene_context_timeout') };
 }
 function reuseOutcome(value) {
     if (typeof value === 'string' && REUSE_OUTCOMES.has(value)) {
@@ -141,7 +212,9 @@ function validateAssetBundleArgs(args) {
  * schema 单一来源走 gep-sdk(经 evolver-core 重导出), 不重复实现.
  */
 export function buildEvolverTools(deps) {
-    const baseDir = deps.store.baseDir;
+    assetstore.assertPromptProviderNotProxy(deps.store);
+    const declaredBaseDir = Object.getOwnPropertyDescriptor(deps.store, 'baseDir')?.value;
+    const baseDir = typeof declaredBaseDir === 'string' ? declaredBaseDir : undefined;
     const referenceStore = deps.referenceStore ?? (baseDir ? new reference.ReferenceStore(join(baseDir, 'references')) : undefined);
     const remoteReferenceScope = new reference.ReferenceSessionScope();
     const referenceScope = { hasId: (id) => (referenceStore?.hasId(id) ?? false) || remoteReferenceScope.hasId(id) };
@@ -152,6 +225,10 @@ export function buildEvolverTools(deps) {
     // dedup handle) — without it we cannot tell a retry from a genuine new reuse, so we must not drop it (Bugbot
     // #269). Bounded by one stdio process' lifetime.
     const emitted = new Set();
+    // task_id labels which task a reuse report is about; the Hub records every report (evomap-hub#3647). Agents that
+    // omit taskId are labelled with this MCP session id, which also keeps Hubs still enforcing a required task_id
+    // (a486b9589, before #3647) from rejecting the report.
+    const sessionTaskId = deps.cycleId ?? `mcp-${randomUUID()}`;
     // Best-effort + never throws: reuse-feedback is an optimization, so an ingest failure can never break the tool
     // the agent is calling (mirrors the autoexec reuse seam contract). Returns whether the event was recorded
     // (emitted now OR already recorded via idempotency; false = no ingestor, or the ingest threw).
@@ -278,10 +355,27 @@ export function buildEvolverTools(deps) {
             // later observe, from this agent's transcript, which primed genes were used. NOT a hub search (that is
             // evolver_asset_search): this is the curated, already-approved local memory, ready to reuse quietly.
             name: 'evolver_recall',
-            description: 'Fallback：当本机已审核通过的可复用经验 gene 可能有帮助时调用（不是 Hub Recipe 搜索）。联网默认先 evolver_recipe_search / evolver_recipe_express。返回信任+审核双闸后的本地 gene，并记录一条 value.inject。若传入 sessionId(= 本会话 transcript 文件名去掉 .jsonl 后缀),后续 auto-recall 能从该 transcript 观测哪些注入 gene 真正被用,为经 MCP 接入的 AI 闭合自学习环;不传则仅记录归因、无法关联到会话。命中后静默复用，并在结果明确后用 evolver_asset_reuse_result 回报。',
-            inputSchema: { type: 'object', properties: { limit: { type: 'number' }, sessionId: { type: 'string' } } },
+            description: 'Fallback：读取本机信任+审核通过的 curated Gene（默认 limit=5，不搜索 Hub）。保留完整 summary/signals_match/strategy；默认 context 附带有界、独立合格的历史 Capsule 示例，正文只在 context_delivery.context 返回，genes[].examples 仅含身份与证据元数据。contentMode=summary|strategy 或 includeExamples=false 可关闭示例。context_delivery 仅描述 handler 返回正文，不是 transport 确认、验证通过或当前任务成功。value.inject 仅记录旧 Gene 归因；sessionId 为 transcript 文件名去掉 .jsonl，真实复用结果另用 evolver_asset_reuse_result 回报。',
+            inputSchema: { type: 'object', properties: {
+                    limit: { type: 'number', minimum: 0 }, sessionId: { type: 'string' },
+                    contentMode: { type: 'string', enum: ['summary', 'strategy', 'context'], default: 'context' },
+                    includeExamples: { type: 'boolean', default: true },
+                    budget: { type: 'object', additionalProperties: false, description: 'Bounds supplemental context only; legacy Gene fields remain complete.', properties: {
+                            maxChars: { type: 'integer', minimum: 0, maximum: 128000 },
+                            maxExampleChars: { type: 'integer', minimum: 0, maximum: 32000 },
+                            maxExampleCharsPerGene: { type: 'integer', minimum: 0, maximum: 8000 },
+                        } },
+                    timeoutMs: { type: 'integer', minimum: 0, maximum: 60000, description: 'Shared deadline for supplemental context, not a timeout for legacy Gene selection.' },
+                } },
             annotations: LOCAL_WRITE,
             handler: async (a) => {
+                const contextOptions = recallContextOptions(a);
+                // Product MCP has no process supervisor for an arbitrary injected V1
+                // reader. Refuse before selection or any prompt-time callback; the
+                // installed stdio server supplies the concrete local reader.
+                if (contextOptions.contentMode === 'context' && (contextOptions.budget.maxExamplesPerGene ?? 0) > 0
+                    && !assetstore.isBuiltInPromptProvider(deps.store))
+                    throw new Error('unsupported_unsupervised_prompt_provider_v1');
                 const limit = optionalNonNegativeNumberArg(a, 'limit', 'evolver_recall limit must be a non-negative number') ?? 5;
                 const sessionId = typeof a['sessionId'] === 'string' && a['sessionId'].trim() ? a['sessionId'].trim() : undefined;
                 const review = assetstore.reviewLedgerForStore(deps.store);
@@ -295,6 +389,44 @@ export function buildEvolverTools(deps) {
                 const genes = await assetstore.listApprovedGenes(deps.store, review, limit, provenance, {
                     ...(benchmark ? { benchmark } : {}), onQualification: (receipts) => { sourceQualifications = receipts; },
                 });
+                // Supplemental assembly never changes curated selection or truncates the legacy strategy array.
+                // The core caps one assembly at 64 Genes; larger legacy requests retain ALL returned Genes and
+                // explicitly disclose those without supplemental context. No generic search/network fallback.
+                const deadlineAt = Date.now() + contextOptions.timeoutMs;
+                let context;
+                try {
+                    context = await assetstore.assembleGeneContext({
+                        selectedGenes: genes.slice(0, 64), store: deps.store,
+                        ...(contextOptions.contentMode === 'context' && (contextOptions.budget.maxExamplesPerGene ?? 0) > 0
+                            ? { assertPromptAdapter: () => {
+                                    if (!assetstore.isBuiltInPromptProvider(deps.store))
+                                        throw new Error('unsupported_unsupervised_prompt_provider_v1');
+                                } } : {}),
+                        eligibility: { provenance: provenance.snapshot(), review: review.snapshot(),
+                            ...(benchmark ? { benchmark } : {}), referenceScope },
+                        ...contextOptions, privacyMode: 'enforce', deadlineAt,
+                    });
+                }
+                catch {
+                    // Sidecar refresh/optional assembly failure cannot erase already-selected legacy Genes.
+                    // Construct only the empty, public rendering. Retrying the failed optional
+                    // assembler with the same expired deadline could reject again and discard
+                    // the already-selected legacy methods. No qualification or transport
+                    // acknowledgement can be inferred from this fallback.
+                    const empty = assetstore.renderGeneContext([], {
+                        contentMode: contextOptions.contentMode, budget: contextOptions.budget,
+                    });
+                    context = {
+                        ...empty, contentMode: contextOptions.contentMode, privacyMode: 'enforce',
+                        projections: [], qualifications: [], coverage: [],
+                        counts: { selected: Math.min(genes.length, 64), eligible: 0, rendered: 0, examples: 0 },
+                    };
+                    context.omissions.push({ reason: 'source_unavailable' });
+                }
+                context = caseAppendix(context);
+                const examples = new Map(context.projections.map((projection) => [projection.assetId,
+                    projection.examples.filter((example) => context.capsuleAssetIds.includes(example.assetId))
+                        .map(({ assetId, relation, evidence, verification }) => ({ assetId, relation, evidence, verification }))]));
                 const primed = genes.map((g) => {
                     const r = g;
                     const id = typeof r['id'] === 'string' ? r['id'] : String(r['asset_id']);
@@ -304,11 +436,25 @@ export function buildEvolverTools(deps) {
                         ...(typeof r['summary'] === 'string' ? { summary: r['summary'] } : {}),
                         ...(Array.isArray(r['signals_match']) ? { signals_match: r['signals_match'] } : {}),
                         ...(Array.isArray(r['strategy']) ? { strategy: r['strategy'] } : {}),
+                        examples: examples.get(g.asset_id) ?? [],
                     };
                 });
+                // Keep value.inject's existing Gene-only attribution contract. A handler return is NOT a
+                // transport acknowledgement: do not persist a gene-context delivery event or credit case reuse.
                 const injected = await emitInject(primed.map((p) => p.id), primed.map((p) => p.asset_id), sessionId, sourceQualifications);
                 return {
                     genes: primed,
+                    context_delivery: {
+                        status: 'handler_returned', transport_confirmed: false,
+                        context: context.text, receipt: ops.geneContextDeliveryReceipt(context),
+                        receipt_scope: 'context_delivery.context',
+                        examples_alias_of: 'metadata references to context_delivery.context example sections; not additional deliveries',
+                        legacy_fields_in_receipt: false,
+                        budget_scope: 'supplemental context and examples only; legacy Gene fields remain complete',
+                        selection_omitted_count: Math.max(0, genes.length - 64),
+                        counts: context.counts, coverage: context.coverage,
+                        ...(context.qualifications.length ? { sourceQualifications: context.qualifications } : {}),
+                    },
                     ...(sourceQualifications ? { sourceQualifications } : {}),
                     count: primed.length,
                     injected,
@@ -496,7 +642,7 @@ export function buildEvolverTools(deps) {
     // aggregation (prior behavior + return shape preserved).
     tools.push({
         name: 'evolver_asset_reuse_result',
-        description: '上报某复用资产的实际结果(success/failed/mismatched/stale/unsafe). 任何模式下 success 会在本地 value-ledger 记一笔 reuse(让经 MCP 接入的任何 AI 都能反哺本地经验环, #268);proxy 模式还会转发到 PHub.',
+        description: '上报某复用资产的实际结果(success/failed/mismatched/stale/unsafe). 任何模式下 success 会在本地 value-ledger 记一笔 reuse(让经 MCP 接入的任何 AI 都能反哺本地经验环, #268);proxy 模式还会转发到 PHub. taskId 标识该报告对应的任务; 省略时用本 MCP 会话 id. Hub 会记录每一次上报.',
         annotations: deps.proxy ? REMOTE_WRITE : LOCAL_WRITE,
         inputSchema: {
             type: 'object',
@@ -504,11 +650,12 @@ export function buildEvolverTools(deps) {
             properties: {
                 assetId: { type: 'string' },
                 outcome: { type: 'string', enum: ['success', 'failed', 'mismatched', 'stale', 'unsafe'] },
-                taskId: { type: 'string' },
+                taskId: { type: 'string', minLength: 1, maxLength: HUB_TASK_ID_MAX_LENGTH, pattern: HUB_TASK_ID_PATTERN, description: 'Labels which task the asset was reused for: at most 256 characters, plus an optional :correction or :retention suffix for a follow-up report on the same task. Omit to use this MCP session id. The Hub records every report.' },
                 traceId: { type: 'string' },
                 tokensSaved: { type: 'number', minimum: 0, description: 'Deprecated compatibility field. Ignored unless future measurement metadata proves a measured baseline.' },
                 timeSavedSeconds: { type: 'number', minimum: 0 },
                 reason: { type: 'string' },
+                evidence: { type: 'object', description: 'Reuse evidence forwarded verbatim to the Hub, e.g. {tier, applied, check, aborted, stage}. Serialized size must stay within 2KB.' },
             },
         },
         handler: async (a) => {
@@ -516,21 +663,22 @@ export function buildEvolverTools(deps) {
             // Keep validating the deprecated field for caller compatibility, but never forward it as ROI by itself.
             optionalNonNegativeNumberArg(a, 'tokensSaved', 'invalid_tokens_saved');
             const timeSavedSeconds = optionalNonNegativeNumberArg(a, 'timeSavedSeconds', 'invalid_time_saved_seconds');
+            const evidence = optionalEvidenceArg(a);
             const assetId = str(a['assetId']);
             if (!reference.isExecutionEligible(a, referenceScope))
                 return { recorded: false, reason: 'reference_not_execution_evidence' };
             const outcome = reuseOutcome(a['outcome']);
-            const taskId = typeof a['taskId'] === 'string' ? a['taskId'] : undefined;
+            const taskId = optionalTaskIdArg(a);
             // Local-first: feed the local experience loop even with no proxy/hub (the MCP-only path). SUCCESS credits the
             // $ rail (reuse_hit); a non-success records the keep/prune verdict (reuse_outcome) — the cross-runtime signal.
             let remoteResult;
             if (deps.proxy) {
                 remoteResult = await deps.proxy.recordReuseResult({
-                    assetId, outcome,
-                    ...(taskId !== undefined ? { taskId } : {}),
+                    assetId, outcome, taskId: taskId ?? sessionTaskId,
                     ...(typeof a['traceId'] === 'string' ? { traceId: a['traceId'] } : {}),
                     ...(timeSavedSeconds !== undefined ? { timeSavedSeconds } : {}),
                     ...(typeof a['reason'] === 'string' ? { reason: a['reason'] } : {}),
+                    ...(evidence !== undefined ? { evidence } : {}),
                 });
                 if (record(remoteResult)['reason'] === 'reference_not_execution_evidence')
                     return remoteResult;

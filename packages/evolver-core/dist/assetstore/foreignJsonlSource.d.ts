@@ -1,3 +1,5 @@
+import { type RelatedCapsuleQuery, type RelatedCapsuleResult } from './relatedCapsules.js';
+import { type GeneSnapshotQuery, type GeneReadSnapshot } from './boundedSnapshot.js';
 import type { AssetKind, AssetRecord, AssetStoreProvider, PutResult, SearchQuery } from './provider.js';
 /** Thrown by every mutating method: a foreign pool is readable, never writable. */
 export declare class ForeignStoreReadOnlyError extends Error {
@@ -16,13 +18,9 @@ export declare class ForeignStoreReadOnlyError extends Error {
  * documentation would silently get a union of the primary with itself and never read EvoX at all.
  */
 export declare function evoxAssetDir(env?: NodeJS.ProcessEnv): string;
-/**
- * Read-only provider over a foreign asset directory. Re-reads on every call rather than caching: the
- * owning engine appends to these files behind our back, and a stale cache would silently freeze a gene's
- * evidence at whatever it was when this process started.
- */
 export declare class ForeignJsonlSource implements AssetStoreProvider {
     readonly baseDir: string;
+    static isBuiltInPromptReader(value: unknown): value is ForeignJsonlSource;
     private readonly reportedUnreadable;
     constructor(baseDir: string);
     /**
@@ -39,6 +37,19 @@ export declare class ForeignJsonlSource implements AssetStoreProvider {
      */
     private readOrDegrade;
     private read;
+    queryGeneSnapshot(query?: GeneSnapshotQuery): Promise<GeneReadSnapshot>;
+    beginPromptGeneSnapshotV1(query: GeneSnapshotQuery): import("./provider.js").ContextReadOperationV1<GeneReadSnapshot>;
+    beginPromptRelatedCapsulesV1(query: RelatedCapsuleQuery): import("./provider.js").ContextReadOperationV1<RelatedCapsuleResult>;
+    beginPromptAssetGetV1(assetId: string, query: {
+        deadlineAt: number;
+        signal: AbortSignal;
+    }): import("./provider.js").ContextReadOperationV1<AssetRecord | null>;
+    beginPromptLogicalGeneLookupV1(id: string, query: {
+        deadlineAt: number;
+        signal: AbortSignal;
+    }): import("./provider.js").ContextReadOperationV1<AssetRecord[]>;
+    beginGeneScanV1(query?: GeneSnapshotQuery): import("./geneScanV1.js").GeneScanSessionV1;
+    queryRelatedCapsules(query: RelatedCapsuleQuery): Promise<RelatedCapsuleResult>;
     put(asset: AssetRecord): Promise<PutResult>;
     get(assetId: string): Promise<AssetRecord | null>;
     /** Filters by logical id BEFORE the cap, so `limit` bounds matches returned, never records scanned. */

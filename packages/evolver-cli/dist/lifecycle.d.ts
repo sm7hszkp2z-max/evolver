@@ -265,6 +265,24 @@ export declare function resolveSelfUpdatingExecutable(execPath: string, argv1: s
 export declare function resolveAutoexecDaemonCommand(env: NodeJS.ProcessEnv, execPath?: string, argv1?: string | undefined, autoexecHome?: string): DaemonCommand | undefined;
 export declare function resolveProxyBinPath(): string | undefined;
 export declare function resolveStableNodePath(): string;
+export interface RuntimeLoopStatus {
+    state: 'recent' | 'idle' | 'disabled' | 'overdue_or_blocked' | 'degraded' | 'unknown';
+    lastTickAt?: number;
+    nextTickDueAt?: number;
+    consecutiveFailures?: number;
+}
+export interface ProxyRuntimeStatus {
+    state: 'running' | 'stopped' | 'unknown';
+    ipc: 'reachable' | 'unreachable' | 'unknown';
+    pid?: number;
+    reason?: string;
+    loop: RuntimeLoopStatus;
+    hubAuth?: 'ok' | 'auth_failed' | 'retired' | 'rate_limited' | 'replacement_healthy' | 'unknown';
+    syncErrorPresent?: boolean;
+}
+export declare function proxyLoopStatus(health: Record<string, unknown>, now: number): RuntimeLoopStatus;
+/** A bounded, authenticated local observation. Unlike lifecycleStatus, it never removes stale state. */
+export declare function probeProxyRuntime(paths: LifecyclePaths, timeoutMs?: number): Promise<ProxyRuntimeStatus>;
 export declare function sessionStartHookVerboseEnabled(env?: NodeJS.ProcessEnv): boolean;
 export declare function proxyExpected(env?: NodeJS.ProcessEnv): boolean;
 declare function writeWindowsHelper(preferredPath: string, content: string): string;

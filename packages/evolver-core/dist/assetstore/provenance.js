@@ -10,6 +10,8 @@ import { assertTrustSidecarHealthy, parseProvenanceRecord, parseSidecarJsonl, } 
 import { computeAssetId } from '../wire/index.js';
 import { parseSourceQualifications, qualifySource } from './sourceQualification.js';
 export const UNVERIFIED_V1_IMPORT_REASON = 'unverified_v1_import';
+const HUB_DESTINATION_ID = /^sha256:[a-f0-9]{64}$/;
+const MAX_HUB_ORIGINS = 32;
 const UNVERIFIED_WRITE_PENDING_REASON = 'unverified_hub_write_pending';
 function unverifiedStageAction(current, source, frozenContentId) {
     if (!current)
@@ -120,7 +122,23 @@ export class SourceQualificationProvenanceRequiredError extends Error {
     }
 }
 function immutableRecord(record) {
-    return Object.freeze({ ...record });
+    return Object.freeze({ ...record,
+        ...(record.hubOriginDestinationIds
+            ? { hubOriginDestinationIds: Object.freeze([...record.hubOriginDestinationIds]) } : {}),
+    });
+}
+function checkedHubOrigins(source, origins) {
+    if (origins === undefined)
+        return [];
+    if (source !== 'hub' || !Array.isArray(origins) || origins.length === 0 || origins.length > MAX_HUB_ORIGINS
+        || origins.some((origin) => typeof origin !== 'string' || !HUB_DESTINATION_ID.test(origin))
+        || new Set(origins).size !== origins.length) {
+        throw new Error('invalid hub origin destination');
+    }
+    return origins;
+}
+function checkedHubOrigin(source, origin) {
+    return origin === undefined ? undefined : checkedHubOrigins(source, [origin]);
 }
 /**
  * Append-only JSONL sidecar (last-write-wins) at <baseDir>/provenance.jsonl. Default for an asset with NO
@@ -176,12 +194,22 @@ export class ProvenanceStore {
         if (full.sourceQualifications !== undefined && parseSourceQualifications(full.sourceQualifications, full.assetId) === null) {
             throw new Error('invalid_source_qualification');
         }
+        const suppliedOrigins = checkedHubOrigins(full.source, full.hubOriginDestinationIds);
+        const previous = this.index.get(full.assetId);
+        const previousOrigins = full.source === 'hub' && previous?.source === 'hub'
+            ? checkedHubOrigins('hub', previous.hubOriginDestinationIds) : [];
+        const origins = [...new Set([...previousOrigins, ...suppliedOrigins])];
+        if (origins.length > MAX_HUB_ORIGINS)
+            throw new Error('hub origin destination capacity exceeded');
         const qualifications = replaceQualifications ? full.sourceQualifications : this.index.get(full.assetId)?.sourceQualifications;
         const parsed = qualifications === undefined ? undefined : parseSourceQualifications(qualifications, full.assetId);
         if (parsed === null)
             throw new Error('invalid_source_qualification');
-        const { sourceQualifications: _callerQualifications, ...provenance } = full;
-        const stored = immutableRecord({ ...provenance, ...(parsed ? { sourceQualifications: parsed } : {}) });
+        const { sourceQualifications: _callerQualifications, hubOriginDestinationIds: _callerOrigins, ...provenance } = full;
+        const stored = immutableRecord({ ...provenance,
+            ...(origins.length > 0 ? { hubOriginDestinationIds: origins } : {}),
+            ...(parsed ? { sourceQualifications: parsed } : {}),
+        });
         appendUtf8Durable(this.path, `${JSON.stringify(stored)}\n`);
         this.index.set(stored.assetId, stored);
         this.fileState = regularFileFingerprint(this.path);
@@ -196,8 +224,25 @@ export class ProvenanceStore {
             return this.appendUnderLock(full);
         });
     }
+    /** Add a destination only after the caller verifies a current-Hub fetch against the stored body. */
+    recordHubOrigin(assetId, destinationId) {
+        checkedHubOrigins('hub', [destinationId]);
+        assertAssetStoreDirectory(dirname(this.path));
+        return withAssetStoreLock(this.lockPath, () => {
+            this.refreshUnderLock();
+            const current = this.index.get(assetId);
+            if (!current || current.source !== 'hub')
+                return null;
+            if (current.hubOriginDestinationIds?.includes(destinationId))
+                return current;
+            return this.appendUnderLock({ ...current, at: new Date(this.now()).toISOString(),
+                hubOriginDestinationIds: [destinationId],
+            });
+        });
+    }
     /** Stage a verified Hub write without replacing an in-flight conservative marker. */
-    stageUntrustedWriteTracked(assetId, source) {
+    stageUntrustedWriteTracked(assetId, source, hubOriginDestinationId) {
+        const origins = checkedHubOrigin(source, hubOriginDestinationId);
         assertAssetStoreDirectory(dirname(this.path));
         return withAssetStoreLock(this.lockPath, () => {
             this.refreshUnderLock();
@@ -213,6 +258,7 @@ export class ProvenanceStore {
                     assetId,
                     source,
                     trusted: false,
+                    ...(origins ? { hubOriginDestinationIds: origins } : {}),
                     at: new Date(this.now()).toISOString(),
                 }),
                 appended: true,
@@ -220,7 +266,8 @@ export class ProvenanceStore {
         });
     }
     /** Finalize a verified write unless an operator made an explicit decision during I/O. */
-    finalizeUntrustedWrite(assetId, source) {
+    finalizeUntrustedWrite(assetId, source, hubOriginDestinationId) {
+        const origins = checkedHubOrigin(source, hubOriginDestinationId);
         assertAssetStoreDirectory(dirname(this.path));
         return withAssetStoreLock(this.lockPath, () => {
             this.refreshUnderLock();
@@ -231,6 +278,7 @@ export class ProvenanceStore {
                 assetId,
                 source,
                 trusted: false,
+                ...(origins ? { hubOriginDestinationIds: origins } : {}),
                 at: new Date(this.now()).toISOString(),
             });
         });
@@ -274,6 +322,7 @@ export class ProvenanceStore {
                 source,
                 trusted: false,
                 reason,
+                ...(current?.hubOriginDestinationIds ? { hubOriginDestinationIds: current.hubOriginDestinationIds } : {}),
                 frozenContentId,
                 at: new Date(this.now()).toISOString(),
             });
@@ -394,9 +443,12 @@ export class ProvenanceStore {
  * remote-supplied asset_id is never trusted) and mark it untrusted in the sidecar. This is the ONLY path that
  * should bring hub-fetched assets into the local pool — trust-first from the first byte (#30.1).
  */
-export async function ingestUntrusted(store, prov, record, source = 'hub') {
+export async function ingestUntrusted(store, prov, record, source = 'hub', hubOriginDestinationId) {
     const normalized = normalizeForPut(record);
-    const mark = prov.mark({ assetId: normalized.record.asset_id, source, trusted: false });
+    const origins = checkedHubOrigin(source, hubOriginDestinationId);
+    const mark = prov.mark({ assetId: normalized.record.asset_id, source, trusted: false,
+        ...(origins ? { hubOriginDestinationIds: origins } : {}),
+    });
     const result = await store.put(record);
     // A thrown write has an ambiguous outcome: the asset may have reached disk before the acknowledgement was
     // lost. Keep the untrusted marker in that case so a persisted Hub asset can never fall through the default

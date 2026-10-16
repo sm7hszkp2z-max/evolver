@@ -246,7 +246,9 @@ export class EvolverProxyClient {
             ...(args.traceId ? { trace_id: args.traceId } : {}),
             ...(args.timeSavedSeconds !== undefined ? { time_saved_seconds: args.timeSavedSeconds } : {}),
             ...(args.reason ? { reason: args.reason } : {}),
+            ...(args.evidence ? { evidence: args.evidence } : {}),
             ...(expectedHubMode ? { expected_hub_mode: expectedHubMode } : {}),
+            ...(args.expectedHubDestinationId ? { expected_hub_destination_id: args.expectedHubDestinationId } : {}),
         });
     }
     modeBoundBody(input) {
@@ -256,48 +258,90 @@ export class EvolverProxyClient {
         return { ...body, expected_hub_mode: body['expected_hub_mode'] ?? this.expectedHubMode };
     }
     async call(method, path, body, opts = {}) {
+        const feedbackRequest = method.toUpperCase() === 'POST'
+            && new URL(path, 'http://127.0.0.1').pathname === '/asset/reuse-result';
+        const destination = recordValue(body)['expected_hub_destination_id'];
+        const declaredMode = recordValue(body)['expected_hub_mode'];
+        const recoveryMode = declaredMode === 'private' || declaredMode === 'public' ? declaredMode : this.expectedHubMode;
+        const recoveryDestination = feedbackRequest && typeof destination === 'string' && /^sha256:[0-9a-f]{64}$/.test(destination)
+            ? destination : undefined;
         let connection = this.connectionSnapshot();
+        let settingsReloaded = false;
+        let mutationDispatched = false;
+        let reuseResultDispatched = false;
+        let reuseResultAttempts = 0;
+        const dispatch = () => {
+            const requestPath = new URL(`${connection.baseUrl}${path}`).pathname;
+            mutationDispatched = !['GET', 'HEAD'].includes(method.toUpperCase()) && !isDiscoveryPath(requestPath);
+            reuseResultDispatched = method.toUpperCase() === 'POST'
+                && requestPath === '/asset/reuse-result';
+            if (reuseResultDispatched)
+                reuseResultAttempts++;
+            return this.callOnce(method, path, body, opts, connection);
+        };
+        let result;
         try {
             if (path !== '/proxy/status' && this.expectedHubMode === 'private') {
                 await this.verifyExpectedHubMode(connection, opts, isDiscoveryPath(path));
             }
-            const result = await this.callOnce(method, path, body, opts, connection);
-            if (result.ok)
-                return this.acceptResult(result, path);
-            if (result.status === 401 && this.reloadFromSettings()) {
-                connection = this.connectionSnapshot();
-                await this.verifyReloadedHubMode(path, connection, opts);
-                const retry = await this.callOnce(method, path, body, opts, connection);
-                if (retry.ok)
-                    return this.acceptResult(retry, path);
-                throw this.proxyError(retry, path);
-            }
-            throw this.proxyError(result, path);
+            result = await dispatch();
         }
         catch (err) {
-            if (this.reloadFromSettings()) {
-                connection = this.connectionSnapshot();
-                await this.verifyReloadedHubMode(path, connection, opts);
-                const retry = await this.callOnce(method, path, body, opts, connection);
-                if (retry.ok)
-                    return this.acceptResult(retry, path);
-                throw this.proxyError(retry, path);
+            // A lost/invalid response may follow a committed report. Changing settings
+            // does not authorize resending it, including legacy/MCP reports without a binding.
+            // The native transport can prove one narrower case: a loopback connect()
+            // refused before any POST bytes reached the old proxy. Never infer this from
+            // a custom fetch, response loss, timeout, or a second send attempt.
+            // No-start alone cannot authorize moving unbound feedback to another Hub.
+            if (reuseResultDispatched && reuseResultAttempts === 1 && this.expectedHubMode === 'private'
+                && recoveryDestination !== undefined
+                && nativeLoopbackConnectionRefused(err, this.fetchFn, connection, path)) {
+                mutationDispatched = false;
+                reuseResultDispatched = false;
             }
-            throw err;
+            // A stable request id only deduplicates inside one proxy store. A lost
+            // mutation response cannot authorize sending it to a replacement proxy.
+            if (!mutationDispatched && !reuseResultDispatched && (!feedbackRequest || recoveryDestination !== undefined)
+                && this.reloadFromSettings(connection)) {
+                settingsReloaded = true;
+                connection = this.connectionSnapshot();
+                await this.verifyReloadedHubMode(path, connection, opts, recoveryDestination, recoveryMode);
+                result = await dispatch();
+            }
+            else
+                throw err;
         }
+        // A Hub 401 can follow mutation/persistence. Only IPC's pre-handler auth
+        // signature proves no start; an unparseable response cannot authorize replay.
+        const refusal = recordValue(result.parsed);
+        if (result.status === 401 && !settingsReloaded
+            && (!mutationDispatched || refusal['code'] === 'unauthorized' && refusal['error'] === 'Unauthorized')
+            && (!feedbackRequest || recoveryDestination !== undefined)
+            && this.reloadFromSettings(connection)) {
+            connection = this.connectionSnapshot();
+            await this.verifyReloadedHubMode(path, connection, opts, recoveryDestination, recoveryMode);
+            result = await dispatch();
+        }
+        if (result.ok)
+            return this.acceptResult(result, path);
+        throw this.proxyError(result, path);
     }
-    async verifyExpectedHubMode(connection, opts, discovery = false) {
+    async verifyExpectedHubMode(connection, opts, discovery = false, expectedDestination, expectedMode = this.expectedHubMode ?? 'public') {
         // A proxy can restart on the same loopback URL with the same operator-supplied token. Verify every private
         // operation against the same immutable connection snapshot used for its payload. This prevents a concurrent
         // settings reload from moving the payload to an endpoint that the status probe never verified.
         const result = await this.callOnce('GET', '/proxy/status', undefined, opts, connection);
         if (!result.ok)
             throw discovery ? discoveryHttpError(result.status, result.parsed) : this.proxyError(result, '/proxy/status');
-        this.acceptResult(result, '/proxy/status');
+        const status = recordValue(this.acceptResult(result, '/proxy/status'));
+        if (expectedDestination !== undefined && (status['hub_mode'] !== expectedMode
+            || status['feedback_destination_id_format'] !== 'proxy-bound.v1'
+            || status['feedback_destination_id'] !== expectedDestination))
+            throw new Error('proxy_hub_destination_mismatch');
     }
-    async verifyReloadedHubMode(path, connection, opts) {
-        if (path !== '/proxy/status' && this.expectedHubMode === 'private') {
-            await this.verifyExpectedHubMode(connection, opts, isDiscoveryPath(path));
+    async verifyReloadedHubMode(path, connection, opts, expectedDestination, expectedMode) {
+        if (expectedDestination !== undefined || path !== '/proxy/status' && this.expectedHubMode === 'private') {
+            await this.verifyExpectedHubMode(connection, opts, isDiscoveryPath(path), expectedDestination, expectedMode);
         }
     }
     acceptResult(result, path) {
@@ -325,11 +369,10 @@ export class EvolverProxyClient {
             parsed = await res.json();
         }
         catch (error) {
-            if (!preserveHttpStatus) {
+            if (!preserveHttpStatus && (res.ok || opts.signal?.aborted)) {
                 if (!isDiscoveryPath(path) || opts.signal?.aborted)
                     throw error;
-                if (res.ok)
-                    throw new DiscoveryError('invalid_response', 502, false);
+                throw new DiscoveryError('invalid_response', 502, false);
             }
         }
         return { ok: res.ok, status: res.status, parsed };
@@ -474,6 +517,33 @@ function proxyBaseUrlFromEnv(env) {
 }
 function recordValue(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+function nativeLoopbackConnectionRefused(error, fetchFn, connection, path) {
+    if (fetchFn !== globalFetch || !(error instanceof TypeError) || !isLoopbackHttpUrl(connection.baseUrl))
+        return false;
+    let target;
+    try {
+        target = new URL(`${connection.baseUrl}${path}`);
+    }
+    catch {
+        return false;
+    }
+    const port = target.port ? Number(target.port) : target.protocol === 'https:' ? 443 : 80;
+    const hostname = target.hostname.toLowerCase();
+    const addressMatches = (address) => typeof address === 'string'
+        && (hostname === 'localhost' ? address === '127.0.0.1' || address === '::1'
+            : address === (hostname === '[::1]' ? '::1' : hostname));
+    const refused = (cause) => {
+        if (!cause || typeof cause !== 'object')
+            return false;
+        const detail = cause;
+        return detail.code === 'ECONNREFUSED' && detail.syscall === 'connect'
+            && detail.port === port && addressMatches(detail.address);
+    };
+    const cause = error.cause;
+    return cause instanceof AggregateError
+        ? cause.errors.length > 0 && cause.errors.every(refused)
+        : refused(cause);
 }
 async function proxyClientReachable(client, timeoutMs) {
     const controller = new AbortController();

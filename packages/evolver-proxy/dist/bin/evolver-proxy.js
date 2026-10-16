@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -663,6 +663,8 @@ export function createProxyDaemonDeps(options) {
     return {
         hub: options.runtime.hub,
         ...(options.runtime.currentNodeId ? { currentNodeId: options.runtime.currentNodeId } : {}),
+        ...(options.hubMode === 'private' && options.runtime.boundReuseFeedback
+            ? { boundReuseFeedback: options.runtime.boundReuseFeedback } : {}),
         ...(options.hubMode ? { hubMode: options.hubMode } : {}),
         store: options.store,
         ipcToken: options.ipcToken,
@@ -1222,6 +1224,7 @@ export async function connectHubRuntime(deps) {
         return {
             hub: runtime.hub,
             currentNodeId: deps.senderId,
+            ...(runtime.boundReuseFeedback ? { boundReuseFeedback: runtime.boundReuseFeedback } : {}),
             hello: runtime.hello,
             heartbeat: (opts) => runtime.hub.heartbeat(opts),
             helloMode: 'enterprise_token',

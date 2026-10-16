@@ -28,8 +28,8 @@ import { installAntigravity, uninstallAntigravity } from './antigravityInstaller
 import { installOpenCode, uninstallOpenCode } from './opencodeInstaller.js';
 import { installKiro, uninstallKiro } from './kiroInstaller.js';
 import { commitSharedFile, SharedFileConflictError } from './sharedFileCommit.js';
-import { EmptySharedConfigError, SymlinkRefusedError, UnparseableConfigError, } from './installerShared.js';
-export { EmptySharedConfigError, SymlinkRefusedError, UnparseableConfigError, } from './installerShared.js';
+import { EmptySharedConfigError, SymlinkRefusedError, UnparseableConfigError, resolveInstallComponents, } from './installerShared.js';
+export { EmptySharedConfigError, SymlinkRefusedError, UnparseableConfigError, resolveInstallComponents, } from './installerShared.js';
 /** Marks a config file as containing evolver-managed entries, so uninstall only removes what we added. */
 export const MANAGED_MARKER = '_evolver_managed';
 /** Official command-handler metadata, also gives custom commands an ownership marker for reinstall/uninstall. */
@@ -363,12 +363,14 @@ export function mergeHooksUnion(target, source) {
     return result;
 }
 /** Strip evolver-owned hook entries + the marker from a parsed config (uninstall). Returns [changed, data]. */
-export function stripManaged(data) {
+export function stripManaged(data, components) {
+    const selected = resolveInstallComponents(components);
+    const evolution = selected !== 'product-only';
     let changed = false;
     const out = { ...data };
     const trustManagedStatus = data[MANAGED_MARKER] === true;
     const hooks = out['hooks'];
-    if (isObj(hooks)) {
+    if (evolution && isObj(hooks)) {
         const nextHooks = {};
         for (const event of Object.keys(hooks)) {
             const arr = hooks[event];
@@ -394,11 +396,11 @@ export function stripManaged(data) {
     const mcp = out['mcpServers'];
     if (isObj(mcp)) {
         const next = { ...mcp };
-        if ('evolver' in next) {
+        if (evolution && 'evolver' in next) {
             delete next['evolver'];
             changed = true;
         }
-        if (PRODUCT_BRIDGE_SERVER_ID in next && isOwnedProductBridge(next[PRODUCT_BRIDGE_SERVER_ID])) {
+        if (selected !== 'evolution-only' && PRODUCT_BRIDGE_SERVER_ID in next && isOwnedProductBridge(next[PRODUCT_BRIDGE_SERVER_ID])) {
             const restored = restoreProductBridgeEntry(next[PRODUCT_BRIDGE_SERVER_ID]);
             if (restored.restored)
                 next[PRODUCT_BRIDGE_SERVER_ID] = restored.entry;
@@ -412,9 +414,9 @@ export function stripManaged(data) {
             delete out['mcpServers'];
         }
     }
-    if (MANAGED_MARKER in out) {
+    if (evolution && MANAGED_MARKER in out) {
         delete out[MANAGED_MARKER];
-        changed = changed || true;
+        changed = true;
     }
     return { changed, data: out };
 }
@@ -455,7 +457,7 @@ function hasEvolverMcpRegistration(config) {
  * silently do nothing outside $HOME). The SessionStart hook lands in ~/.claude/settings.json (already user-level).
  * PROJECT scope keeps the legacy paths under configRoot.
  */
-function claudeCodeTargets(scope, configRoot, homeDir = homedir()) {
+export function claudeCodeTargets(scope, configRoot, homeDir = homedir()) {
     if (scope === 'user') {
         const claudeDir = join(homeDir, '.claude');
         return {
@@ -487,6 +489,10 @@ function claudeCodeTargets(scope, configRoot, homeDir = homedir()) {
  * Idempotent + symlink-safe; passive runtimes (kiro/opencode) return ok:false (nothing to inject).
  */
 export function installInjection(plan, opts) {
+    const components = resolveInstallComponents(opts.components);
+    if (opts.components !== undefined && plan.runtime !== 'claude-code' && plan.runtime !== 'codex') {
+        throw new Error('[setup-hooks] component selection is available only for claude-code and codex');
+    }
     if (plan.mode === 'passive') {
         return { ok: false, runtime: plan.runtime, mode: plan.mode, files: [], error: `passive runtime ${plan.runtime}: no tool injection` };
     }
@@ -508,6 +514,8 @@ export function installInjection(plan, opts) {
     if (plan.runtime !== 'claude-code') {
         return { ok: false, runtime: plan.runtime, mode: plan.mode, files: [], error: `installer not yet implemented for ${plan.runtime} (supported: claude-code, codex, cursor, antigravity, opencode, kiro)` };
     }
+    const evolution = components !== 'product-only';
+    const product = components !== 'evolution-only';
     const hookCommand = opts.hookCommand ?? DEFAULT_HOOK_COMMAND;
     const promptRecallHookCommand = opts.promptRecallHookCommand ?? DEFAULT_PROMPT_RECALL_HOOK_COMMAND;
     const scope = opts.scope ?? 'project';
@@ -519,13 +527,17 @@ export function installInjection(plan, opts) {
         throw new Error('lifecycle target is outside the Claude Code adapter target set');
     }
     const writesMcp = targetPath === undefined || targetPath === resolve(mcpConfigPath);
-    const writesSettings = targetPath === undefined || targetPath === resolve(settingsPath);
+    const writesSettings = evolution && (targetPath === undefined || targetPath === resolve(settingsPath));
+    if (!evolution && !writesMcp)
+        throw new Error('lifecycle target is outside the selected component target set');
     // project scope owns configRoot; user scope writes only home-anchored paths, so configRoot is irrelevant there.
     if (scope === 'project')
         assertNotSymlink(opts.configRoot, 'config root');
     assertNotSymlink(mcpConfigPath, mcpLabel);
-    assertNotSymlink(claudeDir, mcpIsSharedUserConfig ? '~/.claude' : '.claude');
-    assertNotSymlink(settingsPath, settingsLabel);
+    if (writesSettings) {
+        assertNotSymlink(claudeDir, mcpIsSharedUserConfig ? '~/.claude' : '.claude');
+        assertNotSymlink(settingsPath, settingsLabel);
+    }
     // Full-scope installs validate both documents before either write. A lifecycle
     // target operation owns exactly one document, so an unrelated malformed sibling
     // must neither be parsed nor block that target's independently confirmed write.
@@ -535,15 +547,29 @@ export function installInjection(plan, opts) {
     const settingsInstalled = existingSettings[MANAGED_MARKER] === true
         && hasExactHookCommand(existingSettings, 'SessionStart', hookCommand)
         && hasExactHookCommand(existingSettings, 'UserPromptSubmit', promptRecallHookCommand);
-    const mcpInstalled = hasEvolverMcpRegistration(existingMcp);
-    const alreadyInstalled = (!writesSettings || settingsInstalled) && (!writesMcp || mcpInstalled);
+    const mcpInstalled = !evolution || hasEvolverMcpRegistration(existingMcp);
+    const mergeMcp = (current) => {
+        const evolutionSatisfied = (!writesSettings || settingsInstalled) && hasEvolverMcpRegistration(current);
+        const merged = evolution && (opts.force || !evolutionSatisfied)
+            ? deepMerge(current, plan.config) : current;
+        if (evolution && !mcpIsSharedUserConfig && merged !== current)
+            merged[MANAGED_MARKER] = true;
+        if (!product)
+            return { changed: JSON.stringify(merged) !== JSON.stringify(current), data: merged };
+        const bridged = withClaudeProductBridge(merged, opts.force === true, opts.productBridgeNodePath);
+        if (bridged.skipped && (!evolution || opts.dryRun))
+            throw new Error('[setup-hooks] product bridge is user-owned; explicit --force is required');
+        return { changed: bridged.changed || JSON.stringify(merged) !== JSON.stringify(current), data: bridged.data };
+    };
+    const mcpUpdate = writesMcp ? mergeMcp(existingMcp) : { changed: false, data: existingMcp };
+    const alreadyInstalled = (!writesSettings || settingsInstalled) && (!writesMcp || mcpInstalled && (evolution || !mcpUpdate.changed));
     if (opts.dryRun) {
         // Exercise the same pure transformations as the writer so plan failures are
         // discovered without creating directories, backups, locks, or config files.
-        const product = withClaudeProductBridge(deepMerge(existingMcp, plan.config), opts.force === true, opts.productBridgeNodePath);
-        mergeHooksUnion(existingSettings, runtimeHookPatch(hookCommand, promptRecallHookCommand));
+        if (writesSettings)
+            mergeHooksUnion(existingSettings, runtimeHookPatch(hookCommand, promptRecallHookCommand));
         const files = [
-            ...(writesMcp && (opts.force || !mcpInstalled || product.changed) ? [mcpConfigPath] : []),
+            ...(writesMcp && (opts.force || !mcpInstalled || mcpUpdate.changed) ? [mcpConfigPath] : []),
             ...(writesSettings && (opts.force || !settingsInstalled) ? [settingsPath] : []),
         ];
         return {
@@ -569,9 +595,8 @@ export function installInjection(plan, opts) {
     // registered the MCP in ~/.mcp.json (never ~/.claude.json), so a non-force reinstall returned alreadyInstalled
     // and left #290 unfixed. The hook and the MCP live in different files for user scope, so check both.
     if (!opts.force && alreadyInstalled) {
-        const product = withClaudeProductBridge(existingMcp, false, opts.productBridgeNodePath);
-        if (product.changed && writesMcp) {
-            writeSharedJsonWithRetry(mcpConfigPath, mcpLabel, (current) => withClaudeProductBridge(current, false, opts.productBridgeNodePath));
+        if (writesMcp && mcpUpdate.changed) {
+            writeSharedJsonWithRetry(mcpConfigPath, mcpLabel, mergeMcp);
             return { ok: true, runtime: plan.runtime, mode: plan.mode, files: [mcpConfigPath], alreadyInstalled: true };
         }
         return { ok: true, runtime: plan.runtime, mode: plan.mode, files: [], alreadyInstalled: true };
@@ -580,19 +605,7 @@ export function installInjection(plan, opts) {
     // top-level mcpServers (Claude Code's real user scope); we do NOT stamp the marker into ~/.claude.json because
     // it's Claude Code's own shared config, so uninstall keys off the mcpServers.evolver entry there instead.
     if (writesMcp) {
-        if (mcpIsSharedUserConfig) {
-            writeSharedJsonWithRetry(mcpConfigPath, mcpLabel, (current) => {
-                const merged = withClaudeProductBridge(deepMerge(current, plan.config), opts.force === true, opts.productBridgeNodePath);
-                return { changed: true, data: merged.data };
-            });
-        }
-        else {
-            writeSharedJsonWithRetry(mcpConfigPath, mcpLabel, (current) => {
-                const mcpMerged = deepMerge(current, plan.config);
-                mcpMerged[MANAGED_MARKER] = true;
-                return { changed: true, data: withClaudeProductBridge(mcpMerged, opts.force === true, opts.productBridgeNodePath).data };
-            });
-        }
+        writeSharedJsonWithRetry(mcpConfigPath, mcpLabel, mergeMcp);
     }
     // .claude/settings.json ← SessionStart hook (hooks-union preserves the user's own hooks). For user scope this
     // is ~/.claude/settings.json, which is already Claude Code's user-level hook config.
@@ -619,6 +632,10 @@ export function installInjection(plan, opts) {
  *  (default) cleans <configRoot>/.mcp.json + <configRoot>/.claude/settings.json. stripManaged only removes
  *  the mcpServers.evolver entry (and any evolver-owned hooks/marker), so it is safe on the shared ~/.claude.json. */
 export function uninstallInjection(runtime, opts) {
+    const components = resolveInstallComponents(opts.components);
+    if (opts.components !== undefined && runtime !== 'claude-code' && runtime !== 'codex') {
+        throw new Error('[setup-hooks] component selection is available only for claude-code and codex');
+    }
     if (runtime === 'codex') {
         return uninstallCodex(runtime, opts);
     }
@@ -642,7 +659,7 @@ export function uninstallInjection(runtime, opts) {
     const cleaned = [];
     const targets = [
         [mcpConfigPath, mcpIsSharedUserConfig ? '~/.claude.json' : '.mcp.json'],
-        [settingsPath, mcpIsSharedUserConfig ? '~/.claude/settings.json' : '.claude/settings.json'],
+        ...(components === 'product-only' ? [] : [[settingsPath, mcpIsSharedUserConfig ? '~/.claude/settings.json' : '.claude/settings.json']]),
     ];
     const targetPath = opts.targetPath === undefined ? undefined : resolve(opts.targetPath);
     const selectedTargets = targetPath === undefined
@@ -660,7 +677,7 @@ export function uninstallInjection(runtime, opts) {
         for (const [path, label] of selectedTargets) {
             if (!existsSync(path))
                 continue;
-            if (stripManaged(readJsonStrictShared(path, label)).changed)
+            if (stripManaged(readJsonStrictShared(path, label), components).changed)
                 cleaned.push(path);
         }
         return { ok: true, runtime, mode: 'uninstall', files: cleaned, dryRun: true };
@@ -668,7 +685,7 @@ export function uninstallInjection(runtime, opts) {
     for (const [path, label] of selectedTargets) {
         if (!existsSync(path))
             continue;
-        const changed = writeSharedJsonWithRetry(path, label, (current) => stripManaged(current));
+        const changed = writeSharedJsonWithRetry(path, label, (current) => stripManaged(current, components));
         if (changed)
             cleaned.push(path);
     }

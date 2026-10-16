@@ -12,6 +12,8 @@ export interface SolidifyInput {
     geneId: string;
     trigger: readonly string[];
     summary: string;
+    /** Optional method from the selected Gene. A plan, never a claim that these steps ran. */
+    plannedStrategy?: readonly string[];
     confidence: number;
     outcome: {
         status: 'success' | 'failed';

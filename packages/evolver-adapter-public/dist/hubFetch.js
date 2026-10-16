@@ -1,6 +1,7 @@
 import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 import { Buffer } from 'node:buffer';
 import { TextDecoder } from 'node:util';
+import { OAuthAuthenticationPreflightError } from './auth/oauthDeviceToken.js';
 export const HUB_ERROR_TEXT_MAX_BYTES = 8 * 1024;
 export const HUB_JSON_TEXT_MAX_BYTES = 4 * 1024 * 1024;
 export const HUB_UNREACHABLE_BACKOFF_BASE_MS = 60_000;
@@ -52,6 +53,28 @@ export class HubClientError extends Error {
         this.retryAfterMs = retryAfterMs;
         this.name = 'HubClientError';
     }
+}
+// Only these statuses say the request itself can never be accepted. Every other 4xx (auth, credit,
+// routing, throttling, cancellation, gateway conditions) describes the moment and stays retryable.
+const TERMINAL_HUB_REJECTION_STATUSES = new Set([400, 409, 410, 413, 422]);
+export function isTerminalHubRejectionStatus(status) {
+    return typeof status === 'number' && TERMINAL_HUB_REJECTION_STATUSES.has(status);
+}
+/**
+ * A Hub verdict that resending the same request can never change. Auth failures, throttling, 5xx and
+ * transport errors are not verdicts on the request and return undefined.
+ */
+export function terminalHubRejection(error) {
+    if (!(error instanceof HubClientError) || !isTerminalHubRejectionStatus(error.status))
+        return undefined;
+    const envelope = plainRecord(error.body);
+    const payload = plainRecord(envelope['payload']);
+    const reason = [envelope['reason'], envelope['error'], payload['reason'], payload['error']]
+        .find((value) => typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value));
+    return { reason: reason ?? 'hub_rejected', status: error.status };
+}
+function plainRecord(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 export class HubUnreachableError extends Error {
     details;
@@ -147,6 +170,10 @@ export async function authenticateHubRequest(deps, method, path, bodyObj) {
         return await awaitWithAbort(deps.auth.authenticate({ method, path, ...(draft ? { body: draft } : {}), signal: authDeadline.signal }), authDeadline.signal);
     }
     catch (error) {
+        // Bound feedback needs the proof that its business request never started.
+        // Preserve that typed refusal rather than reducing it to a generic timeout.
+        if (error instanceof OAuthAuthenticationPreflightError)
+            throw error;
         if (isAuthTransportTimeout(error)) {
             throw new HubUnreachableError('hub authentication timed out', {
                 context: `${method} ${path}`,

@@ -1,8 +1,5 @@
-import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { events as ev } from '@evomap/evolver-core';
-const ARCHIVE_SEGMENT_PATTERN = /^root-events-\d{16}-\d{16}\.jsonl$/;
 const MAX_VERSIONED_READ_ATTEMPTS = 2;
 const EVENT_SNAPSHOT_WORKER_SOURCE = `
 import { parentPort, workerData } from 'node:worker_threads';
@@ -23,46 +20,6 @@ try {
 }
 `;
 const EVENT_SNAPSHOT_WORKER_URL = new URL(`data:text/javascript,${encodeURIComponent(EVENT_SNAPSHOT_WORKER_SOURCE)}`);
-function isMissing(error) {
-    return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
-}
-function statFingerprint(value) {
-    return `${value.dev}:${value.ino}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`;
-}
-async function pathFingerprint(path) {
-    try {
-        return statFingerprint(await stat(path, { bigint: true }));
-    }
-    catch (error) {
-        if (isMissing(error))
-            return 'missing';
-        throw error;
-    }
-}
-async function archiveFingerprint(eventsPath) {
-    const archiveDir = ev.rootEventArchiveDir(eventsPath);
-    let entries;
-    try {
-        entries = (await readdir(archiveDir)).filter((entry) => ARCHIVE_SEGMENT_PATTERN.test(entry)).sort();
-    }
-    catch (error) {
-        if (isMissing(error))
-            return 'missing';
-        throw error;
-    }
-    const fingerprints = [];
-    for (const entry of entries) {
-        fingerprints.push(`${entry}:${await pathFingerprint(join(archiveDir, entry))}`);
-    }
-    return `${await pathFingerprint(archiveDir)}:[${fingerprints.join(',')}]`;
-}
-async function fileSnapshotVersion(eventsPath) {
-    const [active, archive] = await Promise.all([
-        pathFingerprint(eventsPath),
-        archiveFingerprint(eventsPath),
-    ]);
-    return `active=${active};archive=${archive}`;
-}
 function workerFailure(error) {
     const restored = new Error(error.message);
     restored.name = error.name;
@@ -103,7 +60,7 @@ function readEventsInWorker(eventsPath) {
 }
 export function fileEventSnapshotSource(eventsPath, readEvents = readEventsInWorker) {
     return {
-        version: () => fileSnapshotVersion(eventsPath),
+        version: () => ev.rootEventHistoryVersion(eventsPath),
         read: () => readEvents(eventsPath),
     };
 }

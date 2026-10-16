@@ -311,6 +311,14 @@ export function createProductionWorkflowAgentBridge(config, options = {}, expect
 function createProductionWorkflowAgentBridgeFromSnapshot(config, options, policyContext, allowedRoots) {
     const assetsDir = resolveWorkflowAssetsDir(options);
     const store = options.store ?? new assetstore.LocalJsonlProvider(assetsDir);
+    assetstore.assertPromptProviderNotProxy(store);
+    // Execution context can be attached only by a provider whose prompt V1
+    // operation is owned by the built-in reader tree. A benchmark store without
+    // prompt V1 remains usable for execution without supplemental cases.
+    if (!assetstore.isBuiltInPromptProvider(store)
+        && [store.beginPromptGeneSnapshotV1, store.beginGeneScanV1, store.beginPromptRelatedCapsulesV1,
+            store.beginPromptAssetGetV1, store.beginPromptLogicalGeneLookupV1].some(capability => capability !== undefined))
+        throw classified('safety', 'unsupported_unsupervised_prompt_provider_v1');
     const provenance = options.provenance ?? new assetstore.ProvenanceStore(assetsDir);
     const review = options.review ?? new assetstore.ReviewLedger(assetsDir);
     const runValidation = options.runValidation ?? verify.runSandboxedValidation;
@@ -361,6 +369,10 @@ function createProductionWorkflowAgentBridgeFromSnapshot(config, options, policy
                 requireTrustedGene: true,
                 ...(bridgeOptions?.signal ? { signal: bridgeOptions.signal } : {}),
             }, {
+                assertPromptAdapter: () => {
+                    if (!assetstore.isBuiltInPromptProvider(store))
+                        throw classified('safety', 'unsupported_unsupervised_prompt_provider_v1');
+                },
                 provenance,
                 review,
                 ...(benchmark ? { benchmark } : {}),

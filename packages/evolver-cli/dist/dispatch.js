@@ -5,6 +5,7 @@
 // config for a verb the CLI never actually dispatches — a green build hides it, the user hits a usage error.
 import { runCli, runMigrate, runAssetLog, runDistill, runIngest, runInject, runReview, runDaily, } from './index.js';
 import { runAutoExec } from './autoexec.js';
+import { runAutoExecFeedbackCommand } from './feedbackOutboxCli.js';
 import { runAtpCommand, runBuyCommand, runOrdersCommand, runVerifyCommand } from './atp.js';
 import { runLogin, runLogout } from './login.js';
 import { runSetupHooks } from './setupHooks.js';
@@ -26,6 +27,8 @@ import { runSyncCommand } from './sync.js';
 import { runAntiGeneBenchmarkCommand } from './antiGeneBenchmark.js';
 import { runAntiGeneRolloutCommand } from './antiGeneRollout.js';
 import { runLifecycleCommand } from './lifecycle.js';
+import { runLiveStatus } from './liveStatus.js';
+import { isReadOnlyStatusInvocation } from './cliEntry.js';
 import { runCycleCommand } from './cycleConsumer.js';
 import { runProxyToken } from './proxyToken.js';
 import { runMaterialCommand } from './materialPackage.js';
@@ -57,6 +60,7 @@ const ASYNC_COMMAND_TABLE = {
     'skill-md-update': runSkillMdUpdate,
     thesis: runThesisCommand,
     autoexec: runAutoExec,
+    'autoexec-feedback': runAutoExecFeedbackCommand,
     login: runLogin,
     logout: runLogout,
     'proxy-token': runProxyToken,
@@ -113,6 +117,8 @@ export function v1TopLevelRunArgs(argv) {
 }
 /** Run a top-level argv against the registry: async handler if present, else the synchronous runCli core. */
 export function dispatch(argv) {
+    if (isReadOnlyStatusInvocation(argv))
+        return runLiveStatus(argv.slice(1));
     const topLevelRunArgs = v1TopLevelRunArgs(argv);
     if (topLevelRunArgs)
         return runV1RunCompat(topLevelRunArgs);

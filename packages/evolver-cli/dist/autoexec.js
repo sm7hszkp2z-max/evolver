@@ -3,13 +3,15 @@
 // by single-flight so a slow pass never stacks. DENY-BY-DEFAULT: allowedRoots starts empty (refuses every
 // repo) until the operator explicitly allowlists one — autonomous edits to a real repo never happen by accident.
 import { homedir } from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { events, assetstore, algo, exec, ops, observers, hooks, material as materialNs, util, verify, hub as hubNs, daemon as daemonNs, personality, signals as signalNs } from '@evomap/evolver-core';
 import { runRequiredSandboxedValidation } from './requiredSandboxValidation.js';
 import { startResidentLoop } from './daemonLoop.js';
-import { connectPublicHub, createSolidifyPermitCheck, getMinReuseScore, ReuseCache, reuseBeforeSolve, resolveConfiguredHubUrl, resolveHubUrl, searchHubMetadata, } from '@evomap/evolver-adapter-public';
+import { autoexecHeartbeatTelemetry } from './runtimeTelemetry.js';
+import { connectPublicHub, OAuthAuthenticationPreflightError, OAuthCredentialBindingError, readPublicOAuthCredentialBinding, createSolidifyPermitCheck, getMinReuseScore, isTerminalHubRejectionStatus, ReuseCache, reuseBeforeSolve, resolveConfiguredHubUrl, resolveHubUrl, searchHubMetadata, } from '@evomap/evolver-adapter-public';
 import { loadEnvFileFromEnv, proxyClientFromEnv } from '@evomap/evolver-mcp';
 import { resolveValueDigestObserver } from './valueDigest.js';
 import { resolveReflectionObserver } from './reflectionObserver.js';
@@ -19,7 +21,7 @@ import { resolveDistillObserver } from './distillObserver.js';
 import { resolveAutoDistillLlm } from './autoDistillLlm.js';
 import { resolveAutoDistillAntiGene as resolveAntiGeneDistill } from './autoDistillAntiGene.js';
 import { runTranscriptDistillTick, transcriptDistillMode } from './autoDistillTranscript.js';
-import { runSessionIngestTick, scanSessionDirs } from './sessionIngest.js';
+import { resolveContextObservationWriter, runSessionIngestTick, scanSessionDirs } from './sessionIngest.js';
 import { LocalMemoryGraph, resolveLocalMemoryUserIdentity } from './localMemoryGraph.js';
 import { resolveAtpAutoDeliver } from './atpAutoDeliver.js';
 import { memoryEventsFromCycleLog, resolveTaskReceiver } from './taskReceiver.js';
@@ -35,6 +37,8 @@ import { readAutoExecConfig } from './autoexecConfig.js';
 import { makeCurriculumCapabilityGapsProvider } from './curriculumCapabilityGaps.js';
 import { resolveLearningTrace } from './learningTrace.js';
 import { semanticIdfEnabled } from './semanticIdfConfig.js';
+import { FeedbackNotDispatchedError, FeedbackOutbox } from './feedbackOutbox.js';
+import { TaskOutcomeOutbox, taskOutcomeIdentity } from './taskOutcomeOutbox.js';
 import { selectionFloorFromEnv, selectionGuardFromEnv, selectionPolicyFromEnv, } from './selectionPolicyConfig.js';
 export { readAutoExecConfig } from './autoexecConfig.js';
 export { semanticIdfEnabled } from './semanticIdfConfig.js';
@@ -105,9 +109,21 @@ function createAutoExecPersonalityStore() {
 }
 const CLAIMED_TASK_SUFFIX = '.claimed.json';
 const STARTED_TASK_SUFFIX = '.started.json';
+const FEEDBACK_PREPARATION_FAILURE = /^(?:EIO|ENOSPC|EROFS|EACCES|EPERM|ENOENT|EMFILE|ENFILE|EDQUOT|EEXIST|EBUSY|EINVAL|unknown)$/;
 const AMBIGUOUS_RECOVERY_REASON = 'autoexec_crash_recovery_ambiguous: execution may have started before shutdown; refusing automatic retry, explicitly requeue after inspecting prior side effects';
 function receiptDir(dirs) {
     return join(dirs.base, 'receipts');
+}
+function syncQueueDirectory(path) {
+    if (process.platform === 'win32')
+        return;
+    const fd = openSync(path, 'r');
+    try {
+        fsyncSync(fd);
+    }
+    finally {
+        closeSync(fd);
+    }
 }
 const RECEIPT_TEMP_SUFFIX = /^(.*\.started\.json)\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/i;
 function receiptArtifactClaimName(name) {
@@ -163,7 +179,22 @@ function cleanupOrphanReceiptArtifacts(dirs) {
     catch {
         return;
     }
-    cleanupReceiptArtifacts(dirs, (claimName) => !activeClaims.has(claimName));
+    cleanupReceiptArtifacts(dirs, (claimName) => !activeClaims.has(claimName)
+        && !hasRecoverableClaimReceipt(dirs, claimName));
+}
+function hasRecoverableClaimReceipt(dirs, claimName) {
+    try {
+        const path = join(receiptDir(dirs), claimName);
+        if (!lstatSync(path).isFile())
+            return false;
+        const value = JSON.parse(readFileSync(path, 'utf8'));
+        return !!value && typeof value === 'object'
+            && ('archiveName' in value || 'executionDestinationId' in value || 'taskOutcomeEnabled' in value || 'postCommit' in value);
+    }
+    catch (error) {
+        // Unknown durable bytes are evidence, not disposable temp files.
+        return error.code !== 'ENOENT';
+    }
 }
 function parseAutoExecClaim(name) {
     const separator = name.indexOf('--');
@@ -226,13 +257,39 @@ function persistedClaimReceipt(dirs, claim, taskId) {
         if (!value || typeof value !== 'object')
             return null;
         const receipt = value;
+        const ownerTaskId = taskId ?? receipt.verdict?.taskId;
         if (receipt.claimName !== claim.name
             || (receipt.destination !== 'done' && receipt.destination !== 'refused')
-            || !isAutoExecVerdict(receipt.verdict, taskId))
+            || typeof ownerTaskId !== 'string' || !ownerTaskId.trim()
+            || !isAutoExecVerdict(receipt.verdict, ownerTaskId))
             return null;
         const expectedDestination = receipt.verdict.status === 'refused' || receipt.verdict.status === 'unsafe_to_replay' ? 'refused' : 'done';
         if (receipt.destination !== expectedDestination)
             return null;
+        if (receipt.archiveName !== undefined
+            && (typeof receipt.archiveName !== 'string' || /[\\/]/.test(receipt.archiveName)
+                || (receipt.archiveName !== `task-${claim.originalName}` && receipt.archiveName !== `task-${claim.name}`))) {
+            throw new Error('claim receipt archive identity mismatch');
+        }
+        if (receipt.executionDestinationId !== undefined && receipt.executionDestinationId !== null
+            && (typeof receipt.executionDestinationId !== 'string'
+                || !/^sha256:[a-f0-9]{64}$/.test(receipt.executionDestinationId))) {
+            throw new Error('claim receipt execution destination invalid');
+        }
+        if (receipt.postCommit !== undefined && receipt.postCommit !== 'pending' && receipt.postCommit !== 'dispatching') {
+            throw new Error('claim receipt post-commit state invalid');
+        }
+        if (receipt.taskOutcomeEnabled !== undefined && typeof receipt.taskOutcomeEnabled !== 'boolean') {
+            throw new Error('claim receipt task-outcome eligibility invalid');
+        }
+        if (receipt.feedbackPreparationFailure !== undefined
+            && (typeof receipt.feedbackPreparationFailure !== 'string'
+                || !FEEDBACK_PREPARATION_FAILURE.test(receipt.feedbackPreparationFailure))) {
+            throw new Error('claim receipt feedback-preparation state invalid');
+        }
+        if (receipt.feedbackPreparationPending !== undefined && typeof receipt.feedbackPreparationPending !== 'boolean') {
+            throw new Error('claim receipt feedback-preparation marker invalid');
+        }
         return receipt;
     }
     catch (error) {
@@ -246,11 +303,19 @@ function persistClaimReceipt(dirs, receipt) {
     const receipts = receiptDir(dirs);
     const receiptPath = join(receipts, receipt.claimName);
     const tempPath = join(receipts, `${receipt.claimName}.${randomUUID()}.tmp`);
+    let fd;
     try {
-        writeFileSync(tempPath, JSON.stringify(receipt, null, 2), { encoding: 'utf8', flag: 'wx' });
+        fd = openSync(tempPath, 'wx', 0o600);
+        writeFileSync(fd, JSON.stringify(receipt, null, 2), 'utf8');
+        fsyncSync(fd);
+        closeSync(fd);
+        fd = undefined;
         renameSync(tempPath, receiptPath);
+        syncQueueDirectory(receipts);
     }
     finally {
+        if (fd !== undefined)
+            closeSync(fd);
         try {
             if (lstatSync(tempPath).isFile())
                 unlinkSync(tempPath);
@@ -260,23 +325,154 @@ function persistClaimReceipt(dirs, receipt) {
         }
     }
 }
-function recoverAmbiguousClaim(dirs, claim) {
+function finishCommittedClaim(dirs, claim, task, receipt, options, archived, recovering) {
+    if (task.id !== receipt.verdict.taskId || task.generation !== receipt.verdict.generation) {
+        throw new Error('claim receipt task identity mismatch');
+    }
+    const dest = receipt.destination === 'refused' ? dirs.refused : dirs.done;
+    const archiveName = receipt.archiveName ?? basename(archiveTaskPath(dest, claim.originalName, claim.name));
+    const archivePath = join(dest, archiveName);
+    if (!archived && existsSync(archivePath))
+        throw new Error('claim archive destination occupied');
+    receipt.archiveName = archiveName;
+    const canonicalVerdict = join(dest, claim.originalName);
+    // Queue filenames own the flat archive namespace; snapshots have a disjoint directory.
+    const archivedVerdictDir = join(dest, 'verdicts');
+    const archivedVerdict = join(archivedVerdictDir, claim.name);
+    let verdictPath = canonicalVerdict;
+    if (recovering && existsSync(archivedVerdictDir)
+        && (!lstatSync(archivedVerdictDir).isDirectory() || lstatSync(archivedVerdictDir).isSymbolicLink())) {
+        throw new Error('unsafe archived verdict directory');
+    }
+    if (recovering && existsSync(archivedVerdict)) {
+        if (!lstatSync(archivedVerdict).isFile()
+            || !isDeepStrictEqual(JSON.parse(readFileSync(archivedVerdict, 'utf8')), receipt.verdict)) {
+            throw new Error('archived claim verdict identity mismatch');
+        }
+    }
+    if (recovering && existsSync(canonicalVerdict)) {
+        if (!lstatSync(canonicalVerdict).isFile())
+            throw new Error('archived verdict is not a regular file');
+        const existing = JSON.parse(readFileSync(canonicalVerdict, 'utf8'));
+        // Preparation is owned by the exact receipt and archived task above.
+        // The filename-level verdict may already belong to a newer filing; never overwrite it.
+        const currentTaskId = existing && typeof existing === 'object' ? existing.taskId : undefined;
+        if (typeof currentTaskId !== 'string' || !isAutoExecVerdict(existing, currentTaskId)) {
+            throw new Error('archived verdict identity mismatch');
+        }
+        if (!isDeepStrictEqual(existing, receipt.verdict))
+            verdictPath = archivedVerdict;
+    }
+    // An earlier rename may have succeeded while receipt-directory fsync failed.
+    // Recommit the saved identity before reconstructing debt, never today's identity.
+    if (options.prepareFeedback && receipt.feedbackPreparationPending !== false)
+        receipt.feedbackPreparationPending = true;
+    if (recovering)
+        persistClaimReceipt(dirs, receipt);
+    if (verdictPath === archivedVerdict) {
+        mkdirSync(archivedVerdictDir, { recursive: true, mode: 0o700 });
+        if (!lstatSync(archivedVerdictDir).isDirectory() || lstatSync(archivedVerdictDir).isSymbolicLink()) {
+            throw new Error('unsafe archived verdict directory');
+        }
+    }
+    if (recovering ? !existsSync(verdictPath) : !archived || !existsSync(canonicalVerdict)) {
+        // Recovery owns only its saved verdict; a newly appeared path must never be truncated.
+        const fd = openSync(verdictPath, recovering ? 'wx' : 'w', 0o600);
+        try {
+            writeFileSync(fd, JSON.stringify(receipt.verdict, null, 2));
+            fsyncSync(fd);
+        }
+        finally {
+            closeSync(fd);
+        }
+    }
+    else if (recovering) {
+        // Visible bytes may remain after a failed fsync. Recommit the exact opened file without truncation.
+        const fd = openSync(verdictPath, 'r+', 0o600);
+        try {
+            if (!isDeepStrictEqual(JSON.parse(readFileSync(fd, 'utf8')), receipt.verdict)) {
+                throw new Error('claim verdict identity changed');
+            }
+            fsyncSync(fd);
+        }
+        finally {
+            closeSync(fd);
+        }
+    }
+    if (verdictPath === archivedVerdict)
+        syncQueueDirectory(archivedVerdictDir);
+    if (!archived) {
+        renameSync(join(dirs.inflight, claim.name), archivePath);
+    }
+    syncQueueDirectory(dest);
+    syncQueueDirectory(dirs.inflight);
+    if ((receipt.feedbackPreparationPending || receipt.feedbackPreparationFailure !== undefined)
+        && !options.prepareFeedback)
+        return receipt.verdict;
+    try {
+        if (receipt.feedbackPreparationPending !== false) {
+            options.prepareFeedback?.(claim.name.slice(0, claim.name.indexOf('--')), task, receipt.verdict, receipt.executionDestinationId, receipt.taskOutcomeEnabled === true);
+        }
+    }
+    catch (error) {
+        const code = error instanceof Error ? error.code : undefined;
+        receipt.feedbackPreparationFailure = typeof code === 'string' && FEEDBACK_PREPARATION_FAILURE.test(code) ? code : 'unknown';
+        persistClaimReceipt(dirs, receipt);
+        return receipt.verdict;
+    }
+    if (receipt.feedbackPreparationPending) {
+        receipt.feedbackPreparationPending = false;
+        delete receipt.feedbackPreparationFailure;
+        persistClaimReceipt(dirs, receipt);
+    }
+    if (receipt.postCommit === 'dispatching')
+        return receipt.verdict;
+    if (receipt.postCommit === 'pending') {
+        if (!options.afterCommit)
+            return receipt.verdict;
+        receipt.postCommit = 'dispatching';
+        persistClaimReceipt(dirs, receipt);
+        try {
+            options.afterCommit(task, receipt.verdict);
+        }
+        catch {
+            return receipt.verdict; /* unknown optional dispatch remains inspectable and is never replayed */
+        }
+    }
+    cleanupCommittedClaimReceipt(dirs, claim.name);
+    return receipt.verdict;
+}
+function recoverArchivedClaim(dirs, claim, options) {
+    const receipt = persistedClaimReceipt(dirs, claim);
+    if (!receipt?.archiveName)
+        throw new Error('archived claim receipt unavailable');
+    const dest = receipt.destination === 'refused' ? dirs.refused : dirs.done;
+    const path = join(dest, receipt.archiveName);
+    if (!lstatSync(path).isFile())
+        throw new Error('archived claim task is not a regular file');
+    const task = exec.normalizeAutoExecTask(JSON.parse(readFileSync(path, 'utf8')));
+    const noNewVerdict = receipt.feedbackPreparationPending === false || receipt.feedbackPreparationFailure !== undefined
+        || (receipt.feedbackPreparationPending && !options.prepareFeedback) || receipt.postCommit === 'dispatching'
+        || (receipt.postCommit === 'pending' && !options.afterCommit);
+    const verdict = finishCommittedClaim(dirs, claim, task, receipt, options, true, true);
+    return noNewVerdict ? undefined : verdict;
+}
+function recoverAmbiguousClaim(dirs, claim, options) {
     const taskPath = join(dirs.inflight, claim.name);
     let taskId = `recovery-${claim.name.slice(0, 64)}`;
+    let task;
     try {
-        taskId = exec.normalizeAutoExecTask(JSON.parse(readFileSync(taskPath, 'utf8'))).id;
+        task = exec.normalizeAutoExecTask(JSON.parse(readFileSync(taskPath, 'utf8')));
+        taskId = task.id;
     }
     catch {
         // The task may have been only partially published before the prior process stopped.
     }
     const receipt = persistedClaimReceipt(dirs, claim, taskId);
     if (receipt) {
-        const dest = receipt.destination === 'refused' ? dirs.refused : dirs.done;
-        const canonicalVerdict = join(dest, claim.originalName);
-        writeFileSync(canonicalVerdict, JSON.stringify(receipt.verdict, null, 2));
-        renameSync(taskPath, archiveTaskPath(dest, claim.originalName, claim.name));
-        cleanupCommittedClaimReceipt(dirs, claim.name);
-        return receipt.verdict;
+        if (!task)
+            throw new Error('feedback claim task unavailable during recovery');
+        return finishCommittedClaim(dirs, claim, task, receipt, options, false, true);
     }
     const verdict = {
         taskId,
@@ -300,12 +496,20 @@ export async function autoExecPass(dirs, runOne, options = {}) {
         .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
         .map((entry) => parseAutoExecClaim(entry.name))
         .filter((claim) => claim !== null);
-    cleanupOrphanReceiptArtifacts(dirs);
     const pendingClaims = existingClaims.filter((claim) => claim.phase === 'claimed');
     const out = [];
-    for (const claim of existingClaims.filter((item) => item.phase !== 'claimed')) {
+    const activeNames = new Set(existingClaims.map(claim => claim.name));
+    const archivedClaims = readdirSync(receiptDir(dirs), { withFileTypes: true })
+        .filter(entry => entry.isFile() && receiptArtifactClaimName(entry.name) === entry.name
+        && !activeNames.has(entry.name) && hasRecoverableClaimReceipt(dirs, entry.name))
+        .map(entry => parseAutoExecClaim(entry.name))
+        .filter((claim) => claim !== null);
+    for (const claim of [...archivedClaims, ...existingClaims.filter((item) => item.phase !== 'claimed')]) {
         try {
-            out.push(recoverAmbiguousClaim(dirs, claim));
+            const recovered = activeNames.has(claim.name)
+                ? recoverAmbiguousClaim(dirs, claim, options) : recoverArchivedClaim(dirs, claim, options);
+            if (recovered)
+                out.push(recovered);
         }
         catch (error) {
             const errorCode = error.code;
@@ -349,14 +553,37 @@ export async function autoExecPass(dirs, runOne, options = {}) {
         const startedName = claim.name.slice(0, -CLAIMED_TASK_SUFFIX.length) + STARTED_TASK_SUFFIX;
         const startedPath = join(dirs.inflight, startedName);
         renameSync(taskPath, startedPath);
-        const v = await runOne(task).catch((e) => ({ taskId: task.id, status: 'failed', reason: e instanceof Error ? e.message : String(e) }));
+        const returned = await runOne(task).catch((e) => ({ taskId: task.id, status: 'failed',
+            ...(task.generation !== undefined ? { generation: task.generation } : {}),
+            reason: e instanceof Error ? e.message : String(e) }));
+        // The queue owns the invoked filing. Older/early kernel verdicts may omit
+        // this optional field; an explicitly different filing must still fail closed.
+        const v = returned.generation === undefined && task.generation !== undefined
+            ? { ...returned, generation: task.generation } : returned;
         const destination = v.status === 'refused' || v.status === 'unsafe_to_replay' ? 'refused' : 'done';
         const dest = destination === 'refused' ? dirs.refused : dirs.done;
-        persistClaimReceipt(dirs, { claimName: startedName, destination, verdict: v });
-        writeFileSync(join(dest, claim.originalName), JSON.stringify(v, null, 2));
-        renameSync(startedPath, archiveTaskPath(dest, claim.originalName, startedName));
-        cleanupCommittedClaimReceipt(dirs, startedName);
-        out.push(v);
+        let executionDestinationId;
+        try {
+            executionDestinationId = options.captureFeedbackDestination?.(task);
+            if (executionDestinationId !== undefined && executionDestinationId !== null
+                && !/^sha256:[a-f0-9]{64}$/.test(executionDestinationId))
+                throw new Error('execution feedback destination invalid');
+        }
+        catch {
+            // Optional destination evidence may fail, but the completed verdict must still converge.
+            // Null keeps recovered feedback unbound instead of adopting a later Hub identity.
+            executionDestinationId = null;
+        }
+        const receipt = {
+            claimName: startedName, destination, verdict: v,
+            archiveName: basename(archiveTaskPath(dest, claim.originalName, startedName)),
+            ...(executionDestinationId !== undefined ? { executionDestinationId } : {}),
+            taskOutcomeEnabled: options.taskOutcomeEnabled === true,
+            ...(options.prepareFeedback ? { feedbackPreparationPending: true } : {}),
+            ...(options.afterCommit ? { postCommit: 'pending' } : {}),
+        };
+        persistClaimReceipt(dirs, receipt);
+        out.push(finishCommittedClaim(dirs, { ...claim, name: startedName, phase: 'started' }, task, receipt, options, false, false));
     }
     cleanupOrphanReceiptArtifacts(dirs);
     return out;
@@ -378,8 +605,8 @@ export function canExecuteQueue(runner) {
     return runner === 'gemini' || runner === 'llm';
 }
 /** Keep unsupported built-in runners away from the execution queue without stopping the resident daemon. */
-export function runnerBoundAutoExecPass(runner, dirs, runOne) {
-    return () => autoExecPass(dirs, runOne, { executePendingTasks: canExecuteQueue(runner) });
+export function runnerBoundAutoExecPass(runner, dirs, runOne, options = {}) {
+    return () => autoExecPass(dirs, runOne, { executePendingTasks: canExecuteQueue(runner), ...options });
 }
 const ATP_CAPABILITY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
 function atpCapabilityGaps(signals) {
@@ -428,35 +655,24 @@ export function resolveAtpAutoBuyer(env = process.env, createClient = createAtpC
         return undefined;
     }
 }
-export function makeHubReuseSeam(cap, cache, ingestor, onAssetReused, onVerifiedSearchMiss, audit = {}) {
+export function makeHubReuseSeam(cap, cache, _ingestor, onAssetReused, onVerifiedSearchMiss, audit = {}) {
     return async (signals, ctx) => {
         const searchSignals = normalizedCapabilityGapSignals(signals);
-        // Pending value.reuse_hit ingests (#112). The onReuseHit callback is synchronous, so it cannot await the
-        // ingest itself; it stashes the (error-swallowing) promise here and the seam awaits them before returning,
-        // making the emission deterministically durable without letting an ingest error ever break reuse.
-        const pending = [];
         const r = await reuseBeforeSolve(cap, cache, searchSignals, {
             ...(ctx?.cycleId ? { cycleId: ctx.cycleId } : {}),
             ...(audit.env ? { env: audit.env } : {}),
-            // Two consumers hang off a reuse HIT:
-            //  - value-ledger emission (#112): a `value.reuse_hit` root_event so the ledger derives a real
-            //    source=reuse entry (refs → assetId + cycleId) — live wiring, not a fixture;
-            //  - used-asset tracking: the assetId feeds the fetch->outcome attribution claim the outcome
-            //    report sends back to the hub (used_asset_ids). Fires on cache hits too — a cached payload
-            //    is still a USE of that asset.
+            // A fetched candidate is only an acquisition, not an application or a successful reuse.
+            // The caller may use this for neutral search telemetry. Terminal feedback is emitted only
+            // after the selected asset actually executes and the task has a committed outcome.
             onReuseHit: (hit) => {
                 try {
                     onAssetReused?.(hit.assetId);
                 }
                 catch { /* tracking must never break reuse */ }
-                if (ingestor)
-                    pending.push(emitReuseHit(ingestor, hit));
             },
         });
-        if (pending.length > 0)
-            await Promise.all(pending); // emitReuseHit never rejects (it swallows ingest errors)
         const runId = ctx?.cycleId ?? null;
-        const taskId = runId?.startsWith('autoexec-') ? runId.slice('autoexec-'.length) : undefined;
+        const taskId = ctx?.taskId ?? (runId?.startsWith('autoexec-') ? runId.slice('autoexec-'.length) : undefined);
         if (r.action === 'fetch') {
             const rawAsset = r.asset;
             const assetId = r.candidate?.assetId ?? stringField(rawAsset, 'asset_id');
@@ -598,19 +814,99 @@ function scheduleAssetCallBestEffort(log, entry) {
         return;
     setImmediate(() => { appendAssetCallBestEffort(log, entry); });
 }
-/** Append a `value.reuse_hit` root_event for a reuse hit (#112). Never throws (reuse stays an optimization). */
-async function emitReuseHit(ingestor, hit) {
-    try {
-        const payload = {
-            assetId: hit.assetId, cycleId: hit.cycleId, signalFingerprint: hit.signalFingerprint, fetchTokens: hit.fetchTokens,
-        };
-        await ingestor.ingest({
+/** Project only a committed, exact selected/executed use, never a fetched candidate. */
+export function committedFeedbackEvent(row) {
+    const use = row.appliedUse;
+    const payload = {
+        assetId: use.assetId, geneId: use.geneId, cycleId: use.cycleId,
+        source: use.source, sourceEventId: row.sourceEventId,
+        applicationBinding: use.applicationBinding, verification: use.verification,
+        producedValue: use.producedValue,
+        ...(use.capsuleId ? { capsuleId: use.capsuleId } : {}),
+        ...(use.eventId ? { eventId: use.eventId } : {}),
+        ...(use.terminalDisposition ? { terminalDisposition: use.terminalDisposition } : {}),
+    };
+    if (use.outcome === 'success') {
+        payload['fetchTokens'] = 0;
+        payload['signalFingerprint'] = `sha256:${createHash('sha256').update(JSON.stringify(row.signals)).digest('hex')}`;
+        return {
             type: ops.VALUE_REUSE_HIT_EVENT,
-            human: { title: `reuse hit: ${hit.assetId}`, detail: `cycle ${hit.cycleId}` },
-            payload: payload,
-        });
+            human: { title: 'applied reuse success', detail: `cycle ${use.cycleId}` },
+            payload,
+        };
     }
-    catch { /* emission must never break the reuse path */ }
+    payload['outcome'] = use.outcome;
+    return {
+        type: ops.VALUE_REUSE_OUTCOME_EVENT,
+        human: { title: `applied reuse ${use.outcome}`, detail: `cycle ${use.cycleId}` },
+        payload,
+    };
+}
+/** Local projection is owed before network delivery; ambiguous sends are never replayed automatically. */
+export async function flushAutoExecFeedback(outbox, ingestor, sender, destinationId) {
+    let projected = 0;
+    let delivered = 0;
+    let ambiguous = 0;
+    const localPending = outbox.localPending();
+    if (localPending.length > 0) {
+        // A crash may occur after Ingestor durably appends the event but before the
+        // outbox acknowledgement. Recover by its stable source id, not by emitting a
+        // second RootEvent and hoping every future consumer deduplicates it.
+        const existing = new Map();
+        for (const event of ingestor.readAll()) {
+            const payload = event.payload;
+            const sourceId = payload['sourceEventId'];
+            if (typeof sourceId === 'string' && sourceId.startsWith('autoexec-applied-use:')) {
+                const previous = existing.get(sourceId);
+                if (previous && (previous.type !== event.type
+                    || !isDeepStrictEqual(previous.payload, payload))) {
+                    throw new Error('conflicting applied-use source event');
+                }
+                existing.set(sourceId, { type: event.type, payload });
+            }
+        }
+        for (const row of localPending) {
+            const expected = committedFeedbackEvent(row);
+            const prior = existing.get(row.sourceEventId);
+            if (prior) {
+                const payload = expected.payload;
+                if (prior.type !== expected.type || !isDeepStrictEqual(prior.payload, payload)) {
+                    throw new Error('conflicting applied-use projection');
+                }
+            }
+            else {
+                await ingestor.ingest(expected);
+                existing.set(row.sourceEventId, { type: expected.type, payload: expected.payload });
+                projected++;
+            }
+            outbox.acknowledgeLocal(row.operationId);
+        }
+    }
+    if (sender && destinationId) {
+        for (const row of outbox.pending()) {
+            // A changed Hub endpoint or principal must never inherit another Hub's debt.
+            if (row.destinationId !== destinationId)
+                continue;
+            const result = await outbox.deliver(row.operationId, destinationId, sender);
+            if (result.networkStatus === 'acknowledged')
+                delivered++;
+            if (result.networkStatus === 'ambiguous')
+                ambiguous++;
+        }
+    }
+    return { projected, delivered, ambiguous };
+}
+/** A slow durable outbox drain must neither block Hub-task completion nor overlap the next beat. */
+export function makeDeferredAutoExecFeedbackDrain(drain, onFailure) {
+    const single = exec.singleFlight(drain);
+    return () => {
+        try {
+            void single().catch(onFailure);
+        }
+        catch {
+            onFailure();
+        }
+    };
 }
 /** Build the same event for byte-budget admission and durable emission. */
 export function injectEvent(info) {
@@ -654,6 +950,54 @@ export function makeInjectEmitter(ingestor) {
         onInject: (info) => { pending.push(emitInject(ingestor, info)); },
         flush: async () => { if (pending.length > 0)
             await Promise.all(pending); }, // emitInject never rejects
+    };
+}
+/** Both public HTTP and private proxy must explicitly acknowledge the exact asset use. */
+function exactBoundFeedbackReport(row) {
+    const use = row.appliedUse;
+    const report = row.report;
+    return !!report && use.schemaVersion === 'applied-use.v1'
+        && use.applicationBinding === 'selected_execution'
+        && use.verification === 'unverified'
+        && (use.outcome === 'success' || use.outcome === 'failed')
+        && (use.outcome !== 'success' || use.producedValue === true)
+        && use.source === 'hub'
+        && /^sha256:[a-f0-9]{64}$/.test(row.destinationId ?? '')
+        && use.hubOriginDestinationId === row.destinationId
+        && report.assetId === use.assetId
+        && report.outcome === use.outcome
+        && report.taskId === row.taskId
+        && report.traceId === use.cycleId;
+}
+export function makeAppliedUseFeedbackSender(cap, expectedDestinationId, reportEnabled = true) {
+    if (!/^sha256:[a-f0-9]{64}$/.test(expectedDestinationId)) {
+        throw new Error('bound Hub feedback destination required');
+    }
+    return async (row) => {
+        if (!row.report)
+            return { status: 'terminal', reason: 'no_reportable_applied_use' };
+        // The public sender can also be called directly by an embedder. Never let a
+        // forged or stale row escape merely because it carries a report object.
+        if (!exactBoundFeedbackReport(row)) {
+            return { status: 'terminal', reason: 'hub_origin_destination_mismatch' };
+        }
+        if (row.destinationId !== expectedDestinationId) {
+            throw new FeedbackNotDispatchedError('hub_feedback_destination_changed');
+        }
+        if (!reportEnabled)
+            throw new FeedbackNotDispatchedError('outcome_reporting_disabled');
+        if (!cap.recordReuseResult)
+            return { status: 'terminal', reason: 'reuse_result_not_supported' };
+        try {
+            return reuseReceiptSendResult(await cap.recordReuseResult(row.report));
+        }
+        catch (error) {
+            if (error instanceof OAuthCredentialBindingError || error instanceof OAuthAuthenticationPreflightError) {
+                throw new FeedbackNotDispatchedError(error instanceof OAuthCredentialBindingError
+                    ? 'oauth_credential_binding_changed' : 'oauth_authentication_preflight_failed');
+            }
+            return { status: 'ambiguous', reason: 'reuse_result_transport_unknown' };
+        }
     };
 }
 const DEFAULT_QUESTION_SUBMIT_TIMEOUT_MS = 3_000;
@@ -1022,19 +1366,19 @@ export async function submitDistillTickExplorationQuestion(questions, source) {
     });
 }
 export function scheduleAutoExecHubSideEffects(task, verdict, links) {
-    if (links.questions && verdictToOutcomeStatus(verdict.status) !== null && shouldSubmitProactiveQuestionsForTask(task)) {
+    if (links.questions && verdict.producedValue === true
+        && verdictToOutcomeStatus(verdict.status) !== null && shouldSubmitProactiveQuestionsForTask(task)) {
         void links.questions.submitForTask(task).catch(() => undefined);
     }
     if (links.outcome)
         void links.outcome.reportOutcome(task, verdict).catch(() => undefined);
 }
 /**
- * Compose the reuse seam and the outcome reporter. Reuse HITs still emit value-ledger observability, but the
- * Hub outcome `used_asset_ids` claim comes only from the finished verdict's selected/executed asset. A fetched
- * candidate can be withheld by trust/review gates or lose selection, so fetch-time attribution would overclaim.
- * Reporting never throws and never blocks the verdict.
+ * Compose the reuse seam and the outcome reporters. A fetched candidate is neutral.
+ * Exact applied-use delivery is owned by sendAppliedUse and the durable outbox;
+ * the legacy task-wide outcome path cannot send a duplicate reuse-result claim.
  */
-export function makeHubLink(cap, ingestor, reportEnabled = true, onVerifiedSearchMiss, assetLog, env) {
+export function makeHubLink(cap, ingestor, reportEnabled = true, onVerifiedSearchMiss, assetLog, env, appliedUseSender, reportingCap = cap, reportingDestinationId) {
     const maxPendingAuditRuns = 256;
     const searchHitsByRun = new Map();
     const seam = makeHubReuseSeam(cap, new ReuseCache(), ingestor, undefined, onVerifiedSearchMiss, {
@@ -1050,25 +1394,105 @@ export function makeHubLink(cap, ingestor, reportEnabled = true, onVerifiedSearc
             }
             // One reuse-before-solve invocation can fetch at most one winner. Replace any stale state left by an
             // unexpectedly aborted earlier run that reused the same task id.
-            searchHitsByRun.set(hit.runId, new Map([[hit.assetId, hit]]));
+            searchHitsByRun.set(hit.runId, new Map([[hit.assetId, {
+                        ...hit, signals: [...hit.signals], audited: false,
+                    }]]));
         },
     });
+    const sendExactUse = appliedUseSender ?? (reportingDestinationId
+        ? makeAppliedUseFeedbackSender(reportingCap, reportingDestinationId, reportEnabled) : undefined);
     return {
         seam,
+        ...(reportingDestinationId ? { feedbackDestinationId: reportingDestinationId } : {}),
+        ...(reportEnabled ? { sendTaskOutcome: async (report) => {
+                let receipt;
+                try {
+                    receipt = await reportingCap.recordOutcome(report);
+                }
+                catch (error) {
+                    if (error instanceof OAuthCredentialBindingError || error instanceof OAuthAuthenticationPreflightError) {
+                        throw new FeedbackNotDispatchedError(error instanceof OAuthCredentialBindingError
+                            ? 'oauth_credential_binding_changed' : 'oauth_authentication_preflight_failed');
+                    }
+                    throw error;
+                }
+                // The public adapter intentionally converts HTTP/transport failures into
+                // recorded:false. Those may have reached the paid endpoint; only a known
+                // local preflight refusal is terminal. Throw to leave other sends ambiguous.
+                if (receipt.recorded === false
+                    && receipt.reason !== 'no_signals'
+                    && receipt.reason !== 'reference_not_execution_evidence'
+                    && receipt.reason !== 'proxy_outcome_not_configured') {
+                    throw new Error('outcome_receipt_unconfirmed');
+                }
+                return receipt;
+            } } : {}),
+        ...(reportEnabled && sendExactUse ? { sendAppliedUse: async (row) => {
+                if (row.report && !exactBoundFeedbackReport(row)) {
+                    return { status: 'terminal', reason: 'hub_origin_destination_mismatch' };
+                }
+                if (reportingDestinationId && row.destinationId !== reportingDestinationId) {
+                    throw new FeedbackNotDispatchedError('hub_feedback_destination_changed');
+                }
+                // The row exists only after a durable queue verdict; a search hit alone is not use.
+                const hit = searchHitsByRun.get(row.appliedUse.cycleId)?.get(row.appliedUse.assetId);
+                if (row.report && hit && !hit.audited) {
+                    hit.audited = true;
+                    appendAssetCallBestEffort(assetLog, {
+                        run_id: row.appliedUse.cycleId,
+                        action: hit.mode === 'reference' ? 'asset_reference' : 'asset_reuse',
+                        asset_id: row.appliedUse.assetId,
+                        ...(hit.assetType ? { asset_type: hit.assetType } : {}),
+                        ...(hit.sourceNodeId ? { source_node_id: hit.sourceNodeId } : {}),
+                        ...(hit.chainId ? { chain_id: hit.chainId } : {}),
+                        ...(hit.score !== undefined ? { score: hit.score } : {}),
+                        mode: hit.mode,
+                        tokens_saved: hit.tokensSaved, tokens_saved_basis: hit.tokensSavedBasis,
+                        signals: hit.signals,
+                        extra: { task_id: row.taskId, outcome_status: row.report.outcome },
+                    });
+                }
+                return sendExactUse(row);
+            } } : {}),
         reportOutcome: async (task, verdict) => {
-            const status = verdictToOutcomeStatus(verdict.status);
-            const runId = `autoexec-${task.id}`;
+            const disposition = verdict.execution_terminal?.disposition;
+            const status = verdict.agentInvoked !== true
+                || (verdict.status === 'failed' && verdict.outcome?.status !== 'failed')
+                || verdict.failureKind === 'cancelled' || verdict.failureKind === 'timeout'
+                || verdict.failureKind === 'spawn_failed' || verdict.failureKind === 'permission_denied'
+                || disposition === 'cancelled' || disposition === 'timed_out' || disposition === 'denied'
+                || disposition === 'unsafe_to_replay' || disposition === 'crashed'
+                || (verdict.status === 'solidified' && verdict.producedValue !== true)
+                || (verdict.status === 'solidified' && verdict.appliedUse?.outcome === 'failed')
+                || (verdict.status === 'failed' && verdict.appliedUse?.outcome === 'success')
+                || verdict.appliedUse?.outcome === 'inert'
+                || verdict.appliedUse?.outcome === 'inconclusive'
+                ? null : verdictToOutcomeStatus(verdict.status);
+            const applied = verdict.appliedUse;
+            const runId = applied?.cycleId ?? `autoexec-${task.id}`;
             const searchHits = searchHitsByRun.get(runId);
-            searchHitsByRun.delete(runId);
-            const usedAssetIds = Array.isArray(verdict.usedAssetIds)
-                ? [...new Set(verdict.usedAssetIds.filter((id) => typeof id === 'string' && id.length > 0))]
-                : [];
-            // Drain attribution synchronously (before a duplicate task id can start), then yield before the production
-            // sink's synchronous append and all Hub I/O. The detached side effect cannot delay routing to done/.
+            const usedAssetIds = status !== null && applied?.source === 'hub'
+                && !!reportingDestinationId
+                && applied.hubOriginDestinationId === reportingDestinationId
+                && applied.applicationBinding === 'selected_execution'
+                && applied.verification === 'unverified'
+                && (applied.outcome === 'success' || applied.outcome === 'failed')
+                ? [applied.assetId] : [];
+            // Both reporting paths share one audit claim. Capture and claim its owned
+            // metadata before yielding; the bounded cache retains it for the other path.
+            const audits = usedAssetIds.flatMap(assetId => {
+                const hit = searchHits?.get(assetId);
+                if (hit?.audited)
+                    return [];
+                if (hit)
+                    hit.audited = true;
+                return [{ assetId, hit }];
+            });
+            // Yield before the production sink's synchronous append and all Hub I/O.
+            // The detached side effect cannot delay routing to done/.
             await new Promise((resolve) => { setImmediate(resolve); });
             if (status !== null) {
-                for (const assetId of usedAssetIds) {
-                    const hit = searchHits?.get(assetId);
+                for (const { assetId, hit } of audits) {
                     const mode = hit?.mode;
                     appendAssetCallBestEffort(assetLog, {
                         run_id: runId,
@@ -1089,7 +1513,7 @@ export function makeHubLink(cap, ingestor, reportEnabled = true, onVerifiedSearc
             if (!reportEnabled || status === null)
                 return;
             try {
-                await cap.recordOutcome({
+                await reportingCap.recordOutcome({
                     signals: task.signals,
                     status,
                     ...(verdict.outcome?.score !== undefined ? { score: verdict.outcome.score } : {}),
@@ -1097,43 +1521,13 @@ export function makeHubLink(cap, ingestor, reportEnabled = true, onVerifiedSearc
                 });
             }
             catch { /* recordOutcome never throws by contract; belt-and-braces — reporting must never break the pass */ }
-            if (usedAssetIds.length > 0 && cap.recordReuseResult) {
-                await Promise.all(usedAssetIds.map(async (assetId) => {
-                    try {
-                        const receipt = await cap.recordReuseResult?.({
-                            assetId,
-                            outcome: status === 'success' ? 'success' : 'failed',
-                            taskId: task.id,
-                            ...(verdict.reason ? { reason: verdict.reason } : {}),
-                        });
-                        appendAssetCallBestEffort(assetLog, {
-                            run_id: runId,
-                            action: receipt?.recorded ? 'hub_review_submitted' : 'hub_review_rejected',
-                            asset_id: assetId,
-                            signals: task.signals,
-                            ...(safeAssetCallReason(receipt?.reason) ? { reason: safeAssetCallReason(receipt?.reason) } : {}),
-                            extra: { task_id: task.id, outcome_status: status, ...(receipt?.id ? { receipt_id: receipt.id } : {}) },
-                        });
-                    }
-                    catch {
-                        appendAssetCallBestEffort(assetLog, {
-                            run_id: runId,
-                            action: 'hub_review_failed',
-                            asset_id: assetId,
-                            signals: task.signals,
-                            reason: 'record_reuse_result_failed',
-                            extra: { task_id: task.id, outcome_status: status },
-                        });
-                    }
-                }));
-            }
         },
     };
 }
 function safeAssetCallReason(value) {
     return typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(value) ? value : undefined;
 }
-function resolvePublicHub(env = process.env, connectHub = connectPublicHub) {
+function resolvePublicHub(env = process.env, connectHub = connectPublicHub, expectedOAuthTokenBinding) {
     if (hubMode(env) !== 'public')
         return undefined;
     const dir = resolveIdentityHome(env);
@@ -1144,7 +1538,10 @@ function resolvePublicHub(env = process.env, connectHub = connectPublicHub) {
         const resolvedSenderId = resolveAtpSenderId(env);
         if (!resolvedSenderId)
             return undefined;
-        const { hub } = connectHub({ hubUrl, authMode: 'oauth', evomapDir: dir, senderId: () => resolvedSenderId });
+        const { hub } = connectHub({
+            hubUrl, authMode: 'oauth', evomapDir: dir, senderId: () => resolvedSenderId,
+            ...(expectedOAuthTokenBinding ? { expectedOAuthTokenBinding } : {}),
+        });
         return hub;
     }
     catch {
@@ -1154,6 +1551,112 @@ function resolvePublicHub(env = process.env, connectHub = connectPublicHub) {
 function hubMode(env) {
     const mode = String(env['EVOMAP_HUB_MODE'] ?? 'public').trim().toLowerCase();
     return mode === 'public' || mode === 'private' ? mode : undefined;
+}
+/** Opaque nonsecret binding to the effective Hub principal and route, never a credential. */
+export function feedbackDestinationIdentity(mode, endpoint, principal, namespace = '') {
+    if (!endpoint || !principal || [...endpoint, ...principal, ...namespace]
+        .some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)) {
+        throw new Error('feedback destination identity unavailable');
+    }
+    return `sha256:${createHash('sha256').update(JSON.stringify([mode, endpoint, principal, namespace])).digest('hex')}`;
+}
+function publicFeedbackDestinationId(env) {
+    try {
+        const sender = resolveAtpSenderId(env);
+        if (!sender)
+            return undefined;
+        const binding = readPublicOAuthCredentialBinding(join(resolveIdentityHome(env), 'token.json'));
+        return binding ? feedbackDestinationIdentity('public', resolveHubUrl(env), sender, binding) : undefined;
+    }
+    catch {
+        // A missing, malformed, or unsafe credential path cannot establish a reporting principal.
+        return undefined;
+    }
+}
+/** The proxy attests the final identity it also checks on the feedback POST. */
+export function privateFeedbackDestinationIdFromStatus(value) {
+    const status = record(value);
+    const nodeId = status['node_id'];
+    const namespace = status['runtime_namespace'];
+    const destination = status['feedback_destination_id'];
+    // Older proxies expose a raw adapter fingerprint under the same field name.
+    // Only the versioned final identity can be used for a durable outbox claim.
+    if (status['hub_mode'] !== 'private' || status['feedback_destination_id_format'] !== 'proxy-bound.v1'
+        || typeof nodeId !== 'string' || !nodeId.trim()
+        || typeof namespace !== 'string' || !namespace.trim()
+        || typeof destination !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(destination))
+        return undefined;
+    return destination;
+}
+/** A private proxy must attest its effective Hub destination, not merely its local node. */
+export async function resolveFeedbackDestinationId(env) {
+    const mode = hubMode(env);
+    if (mode === 'public') {
+        return publicFeedbackDestinationId(env);
+    }
+    if (mode !== 'private')
+        return undefined;
+    const proxy = proxyClientFromEnv(env);
+    if (!proxy)
+        return undefined;
+    try {
+        return privateFeedbackDestinationIdFromStatus(await proxy.status({ signal: AbortSignal.timeout(1_000) }));
+    }
+    catch {
+        return undefined;
+    }
+}
+export function makeAutoExecFeedbackBinding(candidate, mode, probe) {
+    let boundDestinationId;
+    let currentDestinationId;
+    let refreshGeneration = 0;
+    const bound = () => candidate && boundDestinationId ? { link: candidate, destinationId: boundDestinationId } : undefined;
+    const current = () => candidate && currentDestinationId ? { link: candidate, destinationId: currentDestinationId } : undefined;
+    return {
+        bound,
+        current,
+        refresh: async () => {
+            const generation = ++refreshGeneration;
+            currentDestinationId = undefined;
+            if (!candidate || !mode)
+                return undefined;
+            let destinationId;
+            try {
+                destinationId = await probe();
+            }
+            catch {
+                return undefined;
+            }
+            if (generation !== refreshGeneration)
+                return undefined;
+            if (!destinationId || !/^sha256:[a-f0-9]{64}$/.test(destinationId)
+                || (mode === 'public' && candidate.feedbackDestinationId !== destinationId)
+                || (boundDestinationId && boundDestinationId !== destinationId))
+                return undefined;
+            boundDestinationId ??= destinationId;
+            currentDestinationId = destinationId;
+            return current();
+        },
+    };
+}
+/** One task may only create Hub debt if its execution and completion saw the same binding. */
+export function confirmedTaskFeedbackDestination(started, completed) {
+    return started && completed && started.link === completed.link
+        && started.destinationId === completed.destinationId ? started.destinationId : undefined;
+}
+/** A recovered claim has no verified execution-time Hub binding; never adopt today's endpoint. */
+export function committedTaskFeedbackDestination(taskDestination, current) {
+    return taskDestination && current?.destinationId === taskDestination ? taskDestination : undefined;
+}
+/** A committed claim can finish recovering an existing row even while its Hub is unavailable. */
+export function prepareCommittedTaskOutcomeFeedback(outbox, claimRoot, task, verdict, destinationId) {
+    const existing = outbox.get(taskOutcomeIdentity(claimRoot).operationId);
+    const ownerDestination = existing?.destinationId ?? destinationId;
+    if (!ownerDestination)
+        return;
+    const row = outbox.prepare({ claimRoot, task, verdict, destinationId: ownerDestination });
+    if (row)
+        outbox.acknowledgeLocal(row.operationId);
 }
 /**
  * Resolve public/private reuse wiring. Reuse remains default-off. When a public ATP miss handler is supplied,
@@ -1174,9 +1677,52 @@ export function resolveHubLink(env = process.env, ingestor, connectHub = connect
         if (!reuseEnabled)
             return undefined;
         const proxy = proxyClientFromEnv(env);
-        return proxy ? makeHubLink(makeProxyHubCapability(proxy), ingestor, env['EVOLVER_OUTCOME_REPORT'] !== '0', undefined, resolvedAssetLog, env) : undefined;
+        if (!proxy)
+            return undefined;
+        const reportEnabled = env['EVOLVER_OUTCOME_REPORT'] !== '0';
+        const privateSender = async (row) => {
+            if (!reportEnabled)
+                throw new FeedbackNotDispatchedError('outcome_reporting_disabled');
+            if (!row.report || !row.destinationId)
+                return { status: 'terminal', reason: 'reuse_result_not_reportable' };
+            try {
+                const receipt = reuseReceipt(await proxy.recordReuseResult({
+                    ...row.report,
+                    expectedHubMode: 'private', expectedHubDestinationId: row.destinationId,
+                }));
+                return reuseReceiptSendResult(receipt);
+            }
+            catch (error) {
+                // These proxy rejections happen before the bound adapter sees the POST.
+                // Preserve the debt as unsent so a later valid binding can handle it.
+                if (error instanceof Error && (error.message === 'proxy_hub_destination_mismatch'
+                    || error.message === 'proxy_hub_mode_mismatch')) {
+                    throw new FeedbackNotDispatchedError(error.message);
+                }
+                return { status: 'ambiguous', reason: 'reuse_result_transport_unknown' };
+            }
+        };
+        const link = makeHubLink(makeProxyHubCapability(proxy), ingestor, reportEnabled, undefined, resolvedAssetLog, env, privateSender);
+        // The external private adapter has no task-wide memory endpoint today; its
+        // explicit false stub is not an acknowledgement and must not create debt.
+        delete link.sendTaskOutcome;
+        return link;
     }
-    const hub = resolvePublicHub(env, connectHub);
+    // A fetched candidate may become durable provenance for a later feedback claim.
+    // Bind the reuse capability itself to the same exact credential as the reporter:
+    // checking only before a run would allow an OAuth replacement during search/fetch
+    // to attribute an asset from principal B to the stored destination for A.
+    const binding = (() => {
+        try {
+            return readPublicOAuthCredentialBinding(join(resolveIdentityHome(env), 'token.json'));
+        }
+        catch {
+            return undefined;
+        }
+    })();
+    if (reuseEnabled && !binding)
+        return undefined;
+    const hub = resolvePublicHub(env, connectHub, reuseEnabled ? binding : undefined);
     if (!hub)
         return undefined;
     if (!reuseEnabled && onVerifiedSearchMiss) {
@@ -1192,9 +1738,23 @@ export function resolveHubLink(env = process.env, ingestor, connectHub = connect
             reportOutcome: async () => undefined,
         };
     }
+    const reportingHub = binding ? hub : undefined;
+    const boundDestinationId = reportingHub && binding ? (() => {
+        try {
+            const sender = resolveAtpSenderId(env);
+            return sender ? feedbackDestinationIdentity('public', resolveHubUrl(env), sender, binding) : undefined;
+        }
+        catch {
+            return undefined;
+        }
+    })() : undefined;
     // Pass the ingestor so a reuse hit emits a value.reuse_hit root_event (#112) — the live source the value
     // ledger derives source=reuse entries from.
-    return makeHubLink(hub, ingestor, env['EVOLVER_OUTCOME_REPORT'] !== '0', onVerifiedSearchMiss, resolvedAssetLog, env);
+    const link = makeHubLink(hub, ingestor, env['EVOLVER_OUTCOME_REPORT'] !== '0' && !!reportingHub, onVerifiedSearchMiss, resolvedAssetLog, env, undefined, reportingHub, boundDestinationId === publicFeedbackDestinationId(env) ? boundDestinationId : undefined);
+    if (boundDestinationId && boundDestinationId === publicFeedbackDestinationId(env)) {
+        link.feedbackDestinationId = boundDestinationId;
+    }
+    return link;
 }
 export function resolveHubQuestionLink(env = process.env, connectHub = connectPublicHub) {
     if (env['EVOLVER_OUTCOME_REPORT'] === '0')
@@ -1303,6 +1863,21 @@ export function resolveSolidifyPermitGate(env = process.env, connectHub = connec
         return undefined;
     }
 }
+// Only an accepted duplicate receipt confirms the same (asset, node, task_id) claim.
+function reuseReceiptSendResult(receipt) {
+    if (receipt.terminal === true) {
+        return receipt.recorded === false && terminalReuseStatus(receipt.status)
+            ? { status: 'terminal', reason: safeAssetCallReason(receipt.reason) ?? 'hub_rejected' }
+            : { status: 'ambiguous', reason: 'reuse_receipt_unconfirmed' };
+    }
+    if (receipt.recorded === true || (receipt.recorded === false && receipt.reason === 'duplicate_report')) {
+        return { status: 'acknowledged', ...(receipt.id ? { receiptId: receipt.id } : {}) };
+    }
+    return { status: 'ambiguous', reason: safeAssetCallReason(receipt.reason) ?? 'reuse_receipt_unconfirmed' };
+}
+function terminalReuseStatus(status) {
+    return status === undefined || isTerminalHubRejectionStatus(status);
+}
 export function makeProxyHubCapability(proxy) {
     const auth = {
         kind: 'enterprise_sso',
@@ -1334,6 +1909,7 @@ export function makeProxyHubCapability(proxy) {
             ...(report.traceId ? { traceId: report.traceId } : {}),
             ...(report.timeSavedSeconds !== undefined ? { timeSavedSeconds: report.timeSavedSeconds } : {}),
             ...(report.reason ? { reason: report.reason } : {}),
+            ...(report.evidence ? { evidence: report.evidence } : {}),
             expectedHubMode: 'private',
         })),
         task: {
@@ -1378,11 +1954,32 @@ function assetMatchesId(asset, assetId) {
 function reuseReceipt(value) {
     const r = record(value);
     const payload = record(r['payload']);
-    const source = Object.keys(payload).length > 0 ? payload : r;
+    const source = r['payload'] === undefined ? r : payload;
+    const permitsSuccess = (value) => value === undefined || value === true;
+    const rejected = !permitsSuccess(r['ok']) || !permitsSuccess(payload['ok'])
+        || (source !== r && r['recorded'] !== undefined && r['recorded'] !== source['recorded'])
+        || (source !== r && r['terminal'] !== undefined && source['terminal'] !== undefined
+            && r['terminal'] !== source['terminal'])
+        || (r['error'] !== undefined && r['error'] !== null)
+        || (payload['error'] !== undefined && payload['error'] !== null);
+    const terminalDeclared = source['terminal'] === true || r['terminal'] === true;
+    const recorded = source['recorded'] === true && !rejected && !terminalDeclared;
+    const reason = typeof source['reason'] === 'string' ? source['reason'] : undefined;
+    const confirmedDuplicate = source['recorded'] === false && !rejected && !terminalDeclared;
+    const status = source['status'];
+    const outerStatus = r['status'];
+    const terminal = source['recorded'] === false && !rejected && terminalDeclared
+        && terminalReuseStatus(status) && terminalReuseStatus(outerStatus)
+        && (status === undefined || outerStatus === undefined || status === outerStatus);
     return {
-        recorded: source['recorded'] !== false && source['ok'] !== false,
-        ...(typeof source['reason'] === 'string' ? { reason: source['reason'] } : {}),
-        ...(typeof source['id'] === 'string' ? { id: source['id'] } : {}),
+        recorded,
+        ...(reason !== undefined ? { reason: reason === 'duplicate_report' && !recorded && !confirmedDuplicate && !terminal
+                ? 'reuse_receipt_unconfirmed' : reason } : {}),
+        ...(recorded && typeof source['id'] === 'string' ? { id: source['id'] } : {}),
+        ...(recorded && typeof source['eligible'] === 'boolean' ? { eligible: source['eligible'] } : {}),
+        ...(recorded && typeof source['counted'] === 'boolean' ? { counted: source['counted'] } : {}),
+        ...(recorded && typeof source['weight'] === 'number' && Number.isFinite(source['weight']) ? { weight: source['weight'] } : {}),
+        ...(terminal ? { terminal: true, ...(typeof status === 'number' ? { status } : {}) } : {}),
     };
 }
 function record(value) {
@@ -1448,7 +2045,8 @@ export function resolveDistillProducer(env, opts) {
     const watermarkStore = opts.watermarkStore ?? new materialNs.WatermarkStore(events.materialWatermarkPath());
     const consumer = opts.consumer ?? new materialNs.ConsumerGroups({ store: materialStore, path: join(dirname(events.materialStorePath()), 'distill-consumer.json') });
     const observer = resolveDistillObserver({ consumer, store, review, ingestor: opts.ingestor, ...(opts.maxPerTick !== undefined ? { maxPerTick: opts.maxPerTick } : {}) });
-    const tick = () => runSessionIngestTick(sessionDirs, { materialStore, watermarkStore, ingestor: opts.ingestor });
+    const tick = () => runSessionIngestTick(sessionDirs, { materialStore, watermarkStore,
+        ingestor: opts.ingestor, ...(opts.contextIngestor !== undefined ? { contextIngestor: opts.contextIngestor } : {}) });
     return { enabled: true, observer, tick, sessionDirs };
 }
 export function shouldRunIdleDistill(intensity) {
@@ -1580,6 +2178,9 @@ export async function runAutoExec(argv) {
     if (cursorRewrite.observer)
         bus.register(cursorRewrite.observer);
     const ingestor = new events.Ingestor({ path: events.rootEventsPath(), sink: bus });
+    // Material/cycle events still fan out on the bus. Context receipts require a
+    // sink-free built-in writer whose durable result cannot be held by callbacks.
+    const contextIngestor = new events.Ingestor({ path: events.rootEventsPath() });
     const reflection = resolveReflectionObserver(process.env, { ingestor });
     if (reflection.observer)
         bus.register(reflection.observer);
@@ -1598,7 +2199,7 @@ export async function runAutoExec(argv) {
     // Reuse-before-solve (#110) + outcome report-back: wire the adapter's reuseBeforeSolve as the hub-reuse
     // seam when enabled + credentialed (default OFF → undefined → zero hub calls, exactly today's behavior).
     // The seam injects hub candidates into the same selection pool as local genes, trust-first; the link's
-    // reporter closes the loop by sending the cycle outcome + used-asset claim back to the hub.
+    // sender is enabled only when the effective Hub principal can be bound to an outbox debt.
     let atpAutoBuyer;
     const onVerifiedHubSearchMiss = (miss) => {
         // Resolve lazily: the first-run consent prompt happens after the daemon lock is acquired below, while Hub
@@ -1607,7 +2208,11 @@ export async function runAutoExec(argv) {
         if (atpAutoBuyer)
             scheduleAtpAutoBuyForVerifiedMiss(miss, atpAutoBuyer);
     };
-    const hubLink = resolveHubLink(process.env, ingestor, connectPublicHub, onVerifiedHubSearchMiss);
+    const candidateHubLink = resolveHubLink(process.env, ingestor, connectPublicHub, onVerifiedHubSearchMiss);
+    const feedbackMode = hubMode(process.env);
+    const feedbackBinding = makeAutoExecFeedbackBinding(candidateHubLink, feedbackMode, () => feedbackMode === hubMode(process.env)
+        ? resolveFeedbackDestinationId(process.env) : Promise.resolve(undefined));
+    await feedbackBinding.refresh();
     const hubQuestionLink = resolveHubQuestionLink(process.env);
     const solidifyPermit = resolveSolidifyPermitGate(process.env);
     const strategyName = process.env['EVOLVE_STRATEGY'];
@@ -1626,6 +2231,10 @@ export async function runAutoExec(argv) {
     };
     const deps = withAutoExecSelectionConfig({
         engine, store, provenance, review, personality: personalityStore, memoryGraph,
+        assertPromptAdapter: () => {
+            if (!assetstore.isBuiltInPromptProvider(store))
+                throw new Error('unsupported_unsupervised_prompt_provider_v1');
+        },
         ...(process.env['EVOLVER_BENCHMARK_ID'] !== undefined ? { benchmark: assetstore.benchmarkContext(process.env['EVOLVER_BENCHMARK_ID']) } : {}),
         executionBinding: {
             journal: new exec.ExecutionBindingJournal(ingestor),
@@ -1638,7 +2247,6 @@ export async function runAutoExec(argv) {
         // strategy embedded) so the cross-AI loop self-closes — contained by the proven exec gates + worktree isolation.
         ...(probationOn ? { includeProbation: true } : {}),
         ...(!semanticIdfOn ? { disableSemanticIdf: true } : {}),
-        ...(hubLink ? { hubReuse: hubLink.seam } : {}),
         ...(solidifyPermit ? { solidifyPermit } : {}),
         ...(strategyName !== undefined ? { strategyName } : {}),
         // Validate through the hardened sandbox verifier so a validation command can't exfiltrate or phone home to game
@@ -1682,24 +2290,55 @@ export async function runAutoExec(argv) {
     // multi-minute agent run, and the daemon does one pass per task — revisit only if the log grows large (rotation
     // is still deferred). The recall rail stays empty until EVOLVER_AUTO_RECALL=1 separately enables value.recall.
     const reuseSignalOn = reuseSignalEnabled();
+    const feedbackOutbox = new FeedbackOutbox(join(dirs.base, 'feedback-outbox'));
+    const taskOutcomeOutbox = new TaskOutcomeOutbox(join(dirs.base, 'task-outcome-outbox'));
+    // Capture the confirmed run binding in its receipt before feedback preparation.
+    // Recovery uses that saved identity and eligibility, never today's credentials.
+    const taskFeedbackDestinations = new WeakMap();
     const runOne = async (task) => {
+        taskFeedbackDestinations.set(task, null);
         // One read of root_events (per pass) feeds BOTH rails: reported reuse outcomes (#268) and observed recall (#274
         // slice 3, folded at a lower weight). value.recall rides the SAME flag — it is the same soft re-order actuator.
         const evts = reuseSignalOn ? events.readEvents(events.rootEventsPath()) : null;
-        const taskDeps = evts
-            ? { ...deps, reuseOutcomes: ops.summarizeReuseOutcomes(evts), recallEvents: evts.filter((e) => e.type === ops.VALUE_RECALL_EVENT) }
-            : deps;
+        const activeBinding = await feedbackBinding.refresh();
+        const taskDeps = {
+            ...deps,
+            ...(evts ? { reuseOutcomes: ops.summarizeReuseOutcomes(evts),
+                recallEvents: evts.filter((e) => e.type === ops.VALUE_RECALL_EVENT) } : {}),
+            hubReuse: activeBinding?.link.seam,
+            // The private proxy attests report POSTs, but not search/fetch. Never mint
+            // Hub origin evidence for an asset fetched through that unbound path.
+            hubFeedbackDestinationId: feedbackMode === 'public' ? activeBinding?.destinationId : undefined,
+        };
         const v = await exec.runAutoExecTask(taskDeps, task, safety);
-        // Hub writes are best-effort side effects. Schedule them after the verdict exists, but never hold the queue's
-        // task->done move on network I/O or hub availability.
-        scheduleAutoExecHubSideEffects(task, v, { questions: hubQuestionLink, outcome: hubLink });
+        const completedBinding = await feedbackBinding.refresh();
+        taskFeedbackDestinations.set(task, confirmedTaskFeedbackDestination(activeBinding, completedBinding) ?? null);
         return v;
     };
-    const guarded = exec.singleFlight(runnerBoundAutoExecPass(cfg.runner, dirs, runOne));
+    const guarded = exec.singleFlight(runnerBoundAutoExecPass(cfg.runner, dirs, runOne, {
+        // Solo may roll the entire worktree back after this pass; no successful applied-use
+        // claim is stable until that decision. It has no Hub egress by design.
+        ...(solo ? {} : {
+            taskOutcomeEnabled: feedbackMode === 'public' && !!candidateHubLink?.sendTaskOutcome,
+            captureFeedbackDestination: (task) => taskFeedbackDestinations.get(task) ?? null,
+            prepareFeedback: (claimRoot, task, verdict, executionDestinationId, taskOutcomeEnabled) => {
+                // The durable receipt owns this snapshot before the volatile entry is consumed.
+                taskFeedbackDestinations.delete(task);
+                feedbackOutbox.prepare({ claimRoot, task, verdict,
+                    ...(executionDestinationId ? { destinationId: executionDestinationId } : {}) });
+                // Existing debts retain their original destination even when today's Hub
+                // is absent, private, opted out, or bound to another principal.
+                prepareCommittedTaskOutcomeFeedback(taskOutcomeOutbox, claimRoot, task, verdict, taskOutcomeEnabled ? executionDestinationId ?? undefined : undefined);
+            },
+        }),
+        afterCommit: (task, verdict) => {
+            scheduleAutoExecHubSideEffects(task, verdict, { questions: hubQuestionLink });
+        },
+    }));
     // Auto-distill producer+consumer (#106): register the distillObserver on THIS bus, then a producer tick scans
     // the session dirs and records material on THIS Ingestor → material.batch_ready → observer drafts a quarantined
     // gene (A1) → human `review --approve` lifts it into inject/cursor (A2a/A2b). Off via EVOLVER_AUTO_DISTILL=0.
-    const distill = resolveDistillProducer(process.env, { ingestor, store, review });
+    const distill = resolveDistillProducer(process.env, { ingestor, contextIngestor, store, review });
     if (distill.observer)
         bus.register(distill.observer);
     const llmDistill = resolveAutoDistillLlm(process.env, { store, review, ingestor, cwd: process.cwd() });
@@ -1721,7 +2360,7 @@ export async function runAutoExec(argv) {
         } },
     });
     const uninstallBrokenPipeGuards = installAutoexecBrokenPipeGuards();
-    const reuseEnabled = process.env['EVOLVER_REUSE_BEFORE_SOLVE'] === '1' && hubLink !== undefined;
+    const reuseEnabled = process.env['EVOLVER_REUSE_BEFORE_SOLVE'] === '1' && feedbackBinding.bound() !== undefined;
     process.stdout.write(`evolver autoexec: runner=${cfg.runner} queue=${dirs.tasks} allowlist=${JSON.stringify(cfg.allowedRoots)} poll=${cfg.pollMs}ms reuse=${reuseEnabled ? 'on' : 'off'} reuse-signal=${reuseSignalOn ? 'on' : 'off'} semantic-idf=${semanticIdfOn ? 'on' : 'off'} selection-policy=${selectionPolicy} selection-guard=${selectionGuard} selection-floor=${selectionFloor === undefined ? 'unset' : selectionFloor} probation=${probationOn ? 'on' : 'off'} questions=${hubQuestionLink ? 'on' : 'off'} permit=${solidifyPermit ? 'on' : 'off'} value-digest=${digest.enabled ? 'on' : 'off'} reflection=${reflection.enabled ? 'on' : 'off'} learning-trace=${learningTrace.enabled ? `on(upload=${learningTrace.upload})` : 'off'} memory-event-mirror=${memoryEventMirror.enabled ? 'on' : `off(${memoryEventMirror.reason ?? 'no_hub'})`} cursor-rewrite=${cursorRewrite.enabled ? 'on' : `off(${cursorRewrite.reason})`} auto-distill=${distill.enabled ? 'on' : 'off'} auto-distill-llm=${llmDistill.enabled ? llmDistill.mode : 'off'} auto-distill-anti-gene=${antiGeneDistill.enabled ? antiGeneDistill.mode : 'off'} auto-distill-transcript=${transcriptDistill.enabled ? transcriptDistill.mode : 'off'} atp-autodeliver=${atpAutoDeliver.enabled ? 'on' : `off(${atpAutoDeliver.reason})`} task-receiver=${taskReceiver.enabled ? `on(repo=${taskReceiverRepo(process.env, cfg.allowedRoots)})` : `off(${taskReceiver.reason})`}\n`);
     if (cfg.allowedRoots.length === 0)
         process.stdout.write('  (allowlist empty → deny-by-default: nothing runs until you add a repo to config.json)\n');
@@ -1733,8 +2372,9 @@ export async function runAutoExec(argv) {
     // consumes one try (unlink + continue), so maxTries:1 would reclaim then immediately time out, wrongly refusing
     // the FIRST restart (Bugbot #149). A few short tries reclaim a dead owner's lock yet still refuse a LIVE holder
     // fast (~maxTries×waitMs ≈ 50ms) — reclaim/refuse behavior is covered by fileLock.test.
+    let runtimeOwner;
     try {
-        util.acquireLock(lockPath, { maxTries: 5 });
+        runtimeOwner = util.acquireLock(lockPath, { maxTries: 5 });
     }
     catch (error) {
         process.stderr.write(autoexecLockFailureMessage(error));
@@ -1770,6 +2410,24 @@ export async function runAutoExec(argv) {
     // SINGLE-FLIGHT the producer tick (same as autoExecPass): a session scan that outlasts pollMs must not let two
     // ticks interleave in recordSessionMaterial (which would re-emit material.batch_ready before watermarks settle).
     const guardedDistill = distill.enabled && distill.observer ? exec.singleFlight(() => distill.tick()) : null;
+    const guardedContextDelivery = exec.singleFlight(() => {
+        const writer = resolveContextObservationWriter(ingestor, contextIngestor);
+        return writer ? writer.recoverContextDeliveries({ deadlineAt: Date.now() + 200 }) : Promise.resolve(undefined);
+    });
+    const contextDeliveryRootReady = () => {
+        const writer = resolveContextObservationWriter(ingestor, contextIngestor);
+        if (!writer)
+            return true;
+        try {
+            const journal = events.Ingestor.contextDeliveryStatus(writer.path);
+            return journal.confirmedPending === 0 && !journal.reasons.cleanup_pending;
+        }
+        catch {
+            return false;
+        }
+    };
+    let contextDeliveryTurnReady = false;
+    let ingestionTelemetry = { state: distill.enabled ? 'unknown' : 'disabled' };
     const guardedLlmDistill = llmDistill.enabled ? exec.singleFlight(() => llmDistill.tick()) : null;
     const guardedAntiGeneDistill = antiGeneDistill.enabled ? exec.singleFlight(() => antiGeneDistill.tick()) : null;
     const guardedTranscriptDistill = transcriptDistill.enabled ? exec.singleFlight(() => transcriptDistill.tick()) : null;
@@ -1788,7 +2446,31 @@ export async function runAutoExec(argv) {
             return `commitment expired, asset ${assetId} not sent`;
         return `${ack.pending ? 'owed, will retry' : 'failed'} ${ack.error ?? ''}`;
     };
+    // Reporting has its own durable outboxes and may encounter a slow Hub or an arbitrary backlog.
+    // It must never hold the resident beat ahead of a committed Hub-task completion or its owed retries.
+    const scheduleFeedbackDrain = makeDeferredAutoExecFeedbackDrain(async () => {
+        const activeBinding = await feedbackBinding.refresh();
+        const feedback = await flushAutoExecFeedback(feedbackOutbox, ingestor, activeBinding?.link.sendAppliedUse, activeBinding?.destinationId);
+        if (activeBinding?.link.sendTaskOutcome) {
+            const outcomes = await taskOutcomeOutbox.flush(activeBinding.destinationId, activeBinding.link.sendTaskOutcome);
+            if (outcomes.delivered || outcomes.terminal || outcomes.ambiguous) {
+                process.stdout.write(`  task-outcome-feedback: delivered=${outcomes.delivered} terminal=${outcomes.terminal} ambiguous=${outcomes.ambiguous}\n`);
+            }
+        }
+        if (feedback.projected || feedback.delivered || feedback.ambiguous) {
+            process.stdout.write(`  applied-use-feedback: projected=${feedback.projected} delivered=${feedback.delivered} ambiguous=${feedback.ambiguous}\n`);
+        }
+    }, () => {
+        process.stderr.write('[autoexec] feedback_drain_failed; durable outbox remains for recovery\n');
+    });
     const tick = async (beat) => {
+        contextDeliveryTurnReady = false;
+        // Join the actual projection/cleanup before any synchronous root writer.
+        // Its 200ms admission deadline remains unchanged; cleanup owns its resources.
+        await guardedContextDelivery().catch(() => undefined);
+        contextDeliveryTurnReady = contextDeliveryRootReady();
+        if (!contextDeliveryTurnReady)
+            return { failed: false };
         let failed = false;
         const r = await guarded();
         if (r && !('skipped' in r) && r.length) {
@@ -1884,6 +2566,11 @@ export async function runAutoExec(argv) {
         }
         if (guardedDistill) {
             const d = await guardedDistill();
+            if (d && !('skipped' in d))
+                ingestionTelemetry = {
+                    state: (d.parseFailures ?? 0) > 0 || (d.invalidJsonRows ?? 0) > 0 ? 'degraded' : 'observed',
+                    lastTickAt: Date.now(), recorded: d.recorded, parseFailures: d.parseFailures ?? 0,
+                };
             void submitDistillTickExplorationQuestion(hubQuestionLink, d).catch(() => undefined);
         }
         await runIdleLlmDistillForBeat(beat, guardedLlmDistill);
@@ -1928,29 +2615,52 @@ export async function runAutoExec(argv) {
                 process.stderr.write(`[Solo] shutdown drain failed: ${error instanceof Error ? error.message : String(error)}\n`);
             }).finally(() => { cleanupAutoexecRuntime(); process.exit(1); });
         }
+        return { failed: !ok };
     };
     // Heartbeat (#106): record liveness + pacing on the AE spine for the WebUI console, THROTTLED so a fast poll does
     // not flood the log — emit on an intensity change or at most once per EVOLVER_HEARTBEAT_MS (default 60s).
     const heartbeatMinMs = Math.max(0, Number(process.env['EVOLVER_HEARTBEAT_MS'] ?? 60_000));
     let lastBeatAt = 0;
     let lastIntensity = '';
+    let lastTickAt = 0;
+    let lastTickOutcome = 'completed';
     await cursorRewrite.start?.();
     const loop = startResidentLoop({
-        tick: solo ? soloTick : tick,
+        tick: async (beat) => {
+            try {
+                const result = await (solo ? soloTick(beat) : tick(beat));
+                lastTickOutcome = !contextDeliveryTurnReady ? 'blocked' : result?.failed ? 'failed' : 'completed';
+            }
+            catch (error) {
+                lastTickOutcome = 'failed';
+                throw error;
+            }
+            finally {
+                lastTickAt = Date.now();
+            }
+        },
         basePollMs: cfg.pollMs,
         idleAware: process.env['EVOLVER_IDLE_AWARE'] !== '0',
         onBeat: (b) => {
-            const now = Date.now();
-            if (b.intensity === lastIntensity && now - lastBeatAt < heartbeatMinMs)
+            // A later session-recovery turn may retain cleanup after SQL committed.
+            // Neither heartbeat nor optional feedback may write through that owner.
+            if (!contextDeliveryTurnReady || !contextDeliveryRootReady())
                 return;
-            lastBeatAt = now;
-            lastIntensity = b.intensity;
-            void ingestor.ingest({
-                type: 'cycle.heartbeat', // a registered EVENT_TYPE (an unknown type would throw UnknownEventTypeError)
-                human: { title: `autoexec 心跳 (${b.intensity})`, severity: 'info' },
-                payload: { intensity: b.intensity, idleSeconds: b.idleSeconds, nextDelayMs: b.delayMs, runner: cfg.runner },
-                actor: { kind: 'machine', id: 'autoexec' },
-            }).catch(() => { });
+            const now = Date.now();
+            if (!(b.intensity === lastIntensity && now - lastBeatAt < heartbeatMinMs)) {
+                lastBeatAt = now;
+                lastIntensity = b.intensity;
+                void ingestor.ingest({
+                    type: 'cycle.heartbeat', // a registered EVENT_TYPE (an unknown type would throw UnknownEventTypeError)
+                    human: { title: `autoexec 心跳 (${b.intensity})`, severity: 'info' },
+                    payload: { intensity: b.intensity, idleSeconds: b.idleSeconds, nextDelayMs: b.delayMs, runner: cfg.runner,
+                        runtime: autoexecHeartbeatTelemetry(runtimeOwner, lastTickAt, lastTickOutcome, heartbeatMinMs, ingestionTelemetry) },
+                    actor: { kind: 'machine', id: 'autoexec' },
+                }).catch(() => { });
+            }
+            // Mandatory session ingestion and heartbeat admission precede synchronous
+            // optional outbox checks; throttled beats still recover durable feedback.
+            scheduleFeedbackDrain();
         },
     });
     // SIGINT/SIGTERM drain the in-flight beat before cleanup. SIGHUP cannot hot-reload this composition safely,

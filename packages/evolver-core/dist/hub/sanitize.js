@@ -1,1 +1,718 @@
-const _0x43665d=_0x2e12;(function(_0x23db58,_0x501e1f){const _0x56557f=_0x2e12,_0xe03770=_0x23db58();while(!![]){try{const _0x244a12=parseInt(_0x56557f(0x1eb,'\x55\x51\x50\x70'))/(-0x8b*-0x3d+0x1480+-0x359e)+parseInt(_0x56557f(0x346,'\x6a\x33\x35\x24'))/(0x48e+-0x16*-0x161+0x1171*-0x2)*(-parseInt(_0x56557f(0x2dd,'\x43\x50\x4f\x52'))/(0x1c*0x61+0xccd+-0x1*0x1766))+parseInt(_0x56557f(0x1fa,'\x31\x4e\x6e\x36'))/(0xf6b*-0x2+-0x869+0x1b5*0x17)+parseInt(_0x56557f(0x345,'\x71\x33\x6a\x26'))/(0x38*-0x3d+-0x109f+0x1dfc)+parseInt(_0x56557f(0x1f0,'\x34\x61\x4e\x5b'))/(0x1718+-0x1*-0x1a05+-0x3117)*(parseInt(_0x56557f(0x21c,'\x41\x66\x58\x4b'))/(0x139*0x17+-0x1890+-0x1c4*0x2))+-parseInt(_0x56557f(0x315,'\x71\x33\x6a\x26'))/(0x41c*-0x8+-0x149f*-0x1+0xc49)*(-parseInt(_0x56557f(0x25b,'\x47\x56\x26\x6a'))/(0xed+0x2e0+0xf1*-0x4))+-parseInt(_0x56557f(0x34b,'\x59\x38\x56\x4f'))/(0xecb+0x1a29+-0x28ea);if(_0x244a12===_0x501e1f)break;else _0xe03770['push'](_0xe03770['shift']());}catch(_0x560fe0){_0xe03770['push'](_0xe03770['shift']());}}}(_0x4da6,0x85108+0x7520+-0x5d*0x2a9));import{computeAssetId}from'\x2e\x2e\x2f\x77\x69\x72\x65\x2f\x69\x6e\x64\x65\x78\x2e\x6a\x73';import{sanitizeExecutionCommand,sanitizeExecutionPayload}from'\x2e\x2e\x2f\x76\x65\x72\x69\x66\x79\x2f\x65\x78\x65\x63\x75\x74\x69\x6f\x6e\x52\x65\x64\x61\x63\x74\x69\x6f\x6e\x2e\x6a\x73';import{checkEmbeddedSourceIntegrity,embeddedSourceTexts,sanitizeEmbeddedSourceContent}from'\x2e\x2f\x65\x6d\x62\x65\x64\x64\x65\x64\x53\x6f\x75\x72\x63\x65\x2e\x6a\x73';export{checkEmbeddedSourceIntegrity}from'\x2e\x2f\x65\x6d\x62\x65\x64\x64\x65\x64\x53\x6f\x75\x72\x63\x65\x2e\x6a\x73';export const REDACTED=_0x43665d(0x26c,'\x6c\x68\x58\x23')+'\x44\x5d';const REDACT_PATTERNS=[/Bearer\s+[A-Za-z0-9-._~+/]+=*/g,/\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}(?=$|[\s,;)}\]])/gi,/\b(?:AIza[0-9A-Za-z_-]{20,}|ya29\.[0-9A-Za-z_-]{20,}|(?:xai|hf|glpat|dop_v1|pk_live|pk_test|sk_live|sk_test|rk_live|rk_test)[-_][A-Za-z0-9_-]{16,}|sq0(?:atp|csp)-[A-Za-z0-9_-]{16,})\b/g,/sk-[A-Za-z0-9]{20,}/g,/ghp_[A-Za-z0-9]{36,}/g,/gho_[A-Za-z0-9]{36,}/g,/ghu_[A-Za-z0-9]{36,}/g,/ghs_[A-Za-z0-9]{36,}/g,/ghr_[A-Za-z0-9]{36,}/g,/github_pat_[A-Za-z0-9_]{22,}/g,/AKIA[0-9A-Z]{16}/g,/sk-proj-[A-Za-z0-9-_]{20,}/g,/sk-ant-[A-Za-z0-9-_]{20,}/g,/npm_[A-Za-z0-9]{36,}/g,/xox[baprsv]-[A-Za-z0-9-]{10,}/g,/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}/g,/AccountKey=[^;\s]+/gi,/client_secret=[A-Za-z0-9~._-]{8,}/gi,/instrumentationkey=[0-9a-fA-F-]{20,}/gi,/\b[MNO][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/g,/-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,/(?<=:\/\/)[^@\s]+:[^@\s]+(?=@)/g,/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,/\.env\.[a-zA-Z]+\b/g,/(?<=[\\/])\.env\b/g],STRUCTURED_CREDENTIAL_PREFIX=/(?<![A-Za-z0-9_-])(["']?)(node[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|token|secret|password|passwd|passphrase|credential|credentials|authorization|auth|bearer|cookie|dsn|webhook|signature)\1(\s*(?:#[^\r\n]*\r?\n\s*)*[:=]\s*)/gi,OPAQUE_CREDENTIAL_PATTERN=/(?<![A-Za-z0-9_-])[A-Za-z0-9][A-Za-z0-9._~+=-]{31,}(?![A-Za-z0-9_-])/g,AMBIGUOUS_STRUCTURED_KEYS=new Set([_0x43665d(0x236,'\x75\x35\x67\x54'),_0x43665d(0x203,'\x71\x47\x63\x47'),'\x63\x72\x65\x64\x65\x6e\x74\x69'+'\x61\x6c',_0x43665d(0x302,'\x51\x34\x40\x49')+_0x43665d(0x1f3,'\x30\x6f\x5d\x5b'),_0x43665d(0x33a,'\x7a\x40\x48\x41')+_0x43665d(0x379,'\x58\x7a\x4e\x4f'),'\x61\x75\x74\x68',_0x43665d(0x3b6,'\x46\x49\x4b\x73'),'\x73\x69\x67\x6e\x61\x74\x75\x72'+'\x65']),DIAGNOSTIC_STATUS_VALUE=/^(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|refresh needed|not configured|not found|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i,DIAGNOSTIC_ASSIGNMENT_VALUE=/^(?:policy|mode|state|status|configured|enabled)=(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i;function unquoteStructuredValue(_0x1f68c4){const _0x49ff1f=_0x43665d,_0x5cc699=_0x1f68c4['\x74\x72\x69\x6d']();if(_0x5cc699[_0x49ff1f(0x211,'\x71\x33\x6a\x26')]>=0x2422+-0x2df*-0x6+-0x355a&&(_0x5cc699[_0x49ff1f(0x356,'\x33\x6b\x21\x63')+'\x74\x68']('\x22')&&_0x5cc699[_0x49ff1f(0x237,'\x35\x44\x51\x33')]('\x22')||_0x5cc699[_0x49ff1f(0x2e3,'\x58\x53\x56\x4b')+'\x74\x68']('\x27')&&_0x5cc699[_0x49ff1f(0x398,'\x38\x65\x44\x68')]('\x27')))return _0x5cc699[_0x49ff1f(0x38b,'\x5b\x36\x39\x41')](-0x1577+-0xb*0x2cb+0x3431,-(-0x6*0x1fc+0x1cb6+-0x10cd))[_0x49ff1f(0x35e,'\x31\x4e\x6e\x36')]();return _0x5cc699;}function shouldRedactStructuredField(_0x3460a1,_0x482bb3){const _0x204533=_0x43665d,_0x392c41=_0x3460a1[_0x204533(0x253,'\x5a\x37\x29\x21')+_0x204533(0x395,'\x55\x61\x53\x51')]()[_0x204533(0x24b,'\x5b\x36\x39\x41')](/[_-]/g,'');if(_0x392c41===_0x204533(0x220,'\x71\x4b\x68\x32')&&/^(?:None|"test-key"|'test-key')$/[_0x204533(0x2da,'\x33\x6b\x21\x63')](_0x482bb3))return![];if(!AMBIGUOUS_STRUCTURED_KEYS[_0x204533(0x226,'\x6a\x33\x35\x24')](_0x392c41))return!![];const _0x2d7a55=unquoteStructuredValue(_0x482bb3),_0x26767b=_0x2d7a55[_0x204533(0x365,'\x5b\x2a\x64\x38')](/[_-]+/g,'\x20')[_0x204533(0x37c,'\x42\x23\x4a\x6b')](/\s+/g,'\x20')[_0x204533(0x28d,'\x75\x5a\x64\x74')]();if(!_0x2d7a55||/^\[redacted\]$/i[_0x204533(0x2e1,'\x42\x23\x4a\x6b')](_0x2d7a55)||DIAGNOSTIC_STATUS_VALUE[_0x204533(0x267,'\x30\x6f\x5d\x5b')](_0x26767b)||DIAGNOSTIC_ASSIGNMENT_VALUE[_0x204533(0x31f,'\x58\x7a\x4e\x4f')](_0x2d7a55))return![];if(/^(?:Bearer|Digest|NTLM|Negotiate|AWS)\s+\S+/i[_0x204533(0x3a4,'\x63\x65\x76\x25')](_0x2d7a55))return!![];if(/^Basic\s+[A-Za-z0-9+/]{8,}={0,2}$/i[_0x204533(0x354,'\x35\x6e\x7a\x70')](_0x2d7a55))return!![];return!/\s/[_0x204533(0x21d,'\x4f\x62\x70\x6f')](_0x2d7a55)&&_0x2d7a55[_0x204533(0x3b8,'\x71\x47\x63\x47')]>=0xe73*0x1+-0x1bc4+0x1*0xd59;}function readBlockStructuredValue(_0x1a53be,_0x4994f8,_0x3c638b){const _0x19fc78=_0x43665d;if(!_0x19fc78(0x292,'\x35\x6e\x7a\x70')[_0x19fc78(0x24c,'\x6f\x4a\x29\x4d')](_0x1a53be[_0x3c638b]??'\x00'))return undefined;let _0x895ac8=_0x3c638b;while(_0x1a53be[_0x895ac8]==='\x21'||_0x1a53be[_0x895ac8]==='\x26'){if(_0x19fc78(0x30b,'\x38\x65\x44\x68')!==_0x19fc78(0x31a,'\x6f\x4a\x29\x4d'))_0x5531c9[_0x19fc78(0x38e,'\x6f\x4a\x29\x4d')+'\x78']=0xde*-0x1+0x1*-0x4ca+-0x2d4*-0x2,_0x2e6d0e=_0x4dfcef['\x72\x65\x70\x6c\x61\x63\x65'](_0x990e9a,_0x4ece87=>_0x399312(_0x4ece87)?_0x4ece87:_0x61532);else{const _0x2e4457=_0x895ac8++;while(_0x895ac8<_0x1a53be[_0x19fc78(0x32e,'\x4f\x62\x70\x6f')]&&!/\s/[_0x19fc78(0x287,'\x55\x61\x53\x51')](_0x1a53be[_0x895ac8]))_0x895ac8++;if(_0x1a53be[_0x2e4457]==='\x26'&&_0x895ac8===_0x2e4457+(-0x6d9*0x4+-0x2bb+0x8*0x3c4))return undefined;for(;;){while(_0x895ac8<_0x1a53be['\x6c\x65\x6e\x67\x74\x68']&&/\s/[_0x19fc78(0x2d5,'\x35\x44\x51\x33')](_0x1a53be[_0x895ac8]))_0x895ac8++;if(_0x1a53be[_0x895ac8]!=='\x23')break;const _0x314980=_0x1a53be[_0x19fc78(0x343,'\x71\x4b\x68\x32')]('\x0a',_0x895ac8);if(_0x314980<0x265+-0x773+0x50e)return undefined;_0x895ac8=_0x314980+(0x42f+-0x106b+0xf1*0xd);}}}const _0x8d2102=/^[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)/[_0x19fc78(0x2d4,'\x75\x35\x67\x54')](_0x1a53be[_0x19fc78(0x325,'\x45\x58\x67\x43')](_0x895ac8));if(!_0x8d2102)return undefined;let _0x20cd0f=_0x895ac8+_0x8d2102[-0x38d*0x3+0x1031+-0x58a][_0x19fc78(0x1ed,'\x37\x35\x43\x48')];while(_0x20cd0f<_0x1a53be[_0x19fc78(0x30c,'\x34\x61\x4e\x5b')]){const _0x28bc7f=_0x1a53be[_0x19fc78(0x350,'\x5b\x2a\x64\x38')]('\x0a',_0x20cd0f),_0x39739a=_0x28bc7f<0x201b+-0x4ff+-0x1b1c?_0x1a53be[_0x19fc78(0x32e,'\x4f\x62\x70\x6f')]:_0x28bc7f;let _0x3eca62=_0x20cd0f;while(_0x3eca62<_0x39739a&&(_0x1a53be[_0x3eca62]==='\x20'||_0x1a53be[_0x3eca62]==='\x09'))_0x3eca62++;const _0x53068c=_0x3eca62===_0x39739a||_0x3eca62===_0x39739a-(0x11f+-0xbf9+0xadb)&&_0x1a53be[_0x3eca62]==='\x0d';if(!_0x53068c&&_0x3eca62-_0x20cd0f<=_0x4994f8)break;_0x20cd0f=_0x28bc7f<0xf*0x14f+0x1d*0x2b+-0x1880?_0x39739a:_0x28bc7f+(0x24cc+0x124+-0x25ef);}const _0x4e5e77=_0x1a53be[_0x19fc78(0x37b,'\x58\x53\x56\x4b')](_0x3c638b,_0x20cd0f),_0x1b685e=_0x4e5e77[_0x19fc78(0x210,'\x37\x35\x43\x48')]('\x0d\x0a')?'\x0d\x0a':_0x4e5e77[_0x19fc78(0x381,'\x35\x6e\x7a\x70')]('\x0a')?'\x0a':'';return{'\x65\x6e\x64':_0x20cd0f,'\x72\x61\x77':_0x4e5e77,'\x71\x75\x6f\x74\x65':'','\x62\x6c\x6f\x63\x6b\x53\x75\x66\x66\x69\x78':_0x1b685e};}function readQuotedStructuredValue(_0x4325b3,_0x303856){const _0x268ecc=_0x43665d,_0x5308e7=_0x4325b3[_0x303856];if(_0x5308e7!=='\x22'&&_0x5308e7!=='\x27')return undefined;let _0x23bb35=![];for(let _0x5b18f6=_0x303856+(-0x13e7+0x3*-0x114+0x1724);_0x5b18f6<_0x4325b3[_0x268ecc(0x34a,'\x61\x63\x65\x52')];_0x5b18f6+=-0x2410+0xd64+0x16ad){const _0x5584da=_0x4325b3[_0x5b18f6];if(_0x23bb35){_0x23bb35=![];continue;}if(_0x5584da==='\x5c'){_0x23bb35=!![];continue;}if(_0x5584da===_0x5308e7){const _0x5a5604=_0x5b18f6+(-0xf8*-0x1+0x1*0xe35+0x4*-0x3cb);return{'\x65\x6e\x64':_0x5a5604,'\x72\x61\x77':_0x4325b3[_0x268ecc(0x285,'\x6f\x4a\x29\x4d')](_0x303856,_0x5a5604),'\x71\x75\x6f\x74\x65':_0x5308e7};}if(_0x5584da==='\x0d'||_0x5584da==='\x0a')break;}return undefined;}function readUnquotedStructuredValue(_0x1edd61,_0x2bc95c){const _0x23087e=_0x43665d;if(_0x1edd61[_0x23087e(0x21b,'\x47\x68\x74\x69')+'\x74\x68'](REDACTED,_0x2bc95c))return{'\x65\x6e\x64':_0x2bc95c+REDACTED[_0x23087e(0x30c,'\x34\x61\x4e\x5b')],'\x72\x61\x77':REDACTED,'\x71\x75\x6f\x74\x65':''};let _0x106f7b=_0x2bc95c;while(_0x106f7b<_0x1edd61[_0x23087e(0x2ac,'\x34\x55\x44\x56')]){const _0x1ff4b2=_0x1edd61[_0x106f7b]??'';if(/[\s,;)}\]]/[_0x23087e(0x1f2,'\x6a\x33\x35\x24')](_0x1ff4b2)||_0x1ff4b2==='\x3a'&&/\s/[_0x23087e(0x1f2,'\x6a\x33\x35\x24')](_0x1edd61[_0x106f7b+(-0x1001+0x1d*0xa1+-0x23b)]??''))break;_0x106f7b+=-0x1e3b+0xf+0x1e2d;}if(_0x106f7b===_0x2bc95c)return undefined;return{'\x65\x6e\x64':_0x106f7b,'\x72\x61\x77':_0x1edd61[_0x23087e(0x325,'\x45\x58\x67\x43')](_0x2bc95c,_0x106f7b),'\x71\x75\x6f\x74\x65':''};}function redactStructuredCredentials(_0x24ea22){const _0x33ae6e=_0x43665d;let _0x54499c=0x27*0x92+0xafc+0x1*-0x213a,_0x148b56='',_0x935ef0=0x11ad+-0x26b*0xd+0xdc2,_0x4a396b=_0x24ea22['\x69\x6e\x64\x65\x78\x4f\x66']('\x0a');const _0x35a7bb=()=>{const _0x810eea=_0x2e12;if(_0x810eea(0x317,'\x30\x6f\x5d\x5b')!==_0x810eea(0x238,'\x5b\x2a\x64\x38')){const _0xed7078=_0x4a396b<-0x5*-0x33d+0xd*0x289+-0x3126?_0x24ea22['\x6c\x65\x6e\x67\x74\x68']:_0x4a396b;let _0x25b81d=_0x935ef0;const _0xfc0353=_0x5cb4e0=>_0x24ea22[_0x5cb4e0]==='\x20'||_0x24ea22[_0x5cb4e0]==='\x09',_0x5cf570=()=>{while(_0x25b81d<_0xed7078&&_0xfc0353(_0x25b81d))_0x25b81d++;};_0x5cf570();while(_0x24ea22[_0x25b81d]==='\x2d'&&_0xfc0353(_0x25b81d+(-0xdbd*0x2+-0xb28+0x26a3))){if(_0x810eea(0x1f4,'\x35\x44\x51\x33')!==_0x810eea(0x391,'\x30\x6f\x5d\x5b'))_0x25b81d++,_0x5cf570();else{const _0x5d3c21=_0x27fed1(_0x214a03);!_0x5d3c21['\x6f\x6b']&&(_0x537e9=!![],!_0xe460d0[_0x810eea(0x2f8,'\x37\x35\x43\x48')](_0x44282d=>_0x44282d['\x74\x79\x70\x65']==='\x65\x6d\x62\x65\x64\x64\x65\x64'+'\x5f\x73\x6f\x75\x72\x63\x65\x5f'+_0x810eea(0x201,'\x7a\x40\x48\x41')+'\x79'&&_0x44282d[_0x810eea(0x369,'\x33\x51\x39\x75')+'\x6f\x6e']===_0x5d3c21[_0x810eea(0x28b,'\x36\x32\x5e\x37')])&&_0x1227ee[_0x810eea(0x3a2,'\x6f\x4a\x29\x4d')]({'\x74\x79\x70\x65':_0x810eea(0x2db,'\x33\x57\x67\x50')+_0x810eea(0x28c,'\x33\x51\x39\x75')+_0x810eea(0x3a7,'\x78\x6f\x24\x54')+'\x79','\x76\x61\x6c\x75\x65':_0x12ca19,'\x73\x75\x67\x67\x65\x73\x74\x69\x6f\x6e':_0x5d3c21[_0x810eea(0x3a1,'\x47\x56\x26\x6a')]}));}}_0x24ea22[_0x25b81d]==='\x3f'&&_0xfc0353(_0x25b81d+(0x1d41+0xf29*0x1+-0x1*0x2c69))&&(_0x25b81d++,_0x5cf570());const _0x5f1c47=_0x25b81d-_0x935ef0;while(_0x25b81d<_0xed7078&&(_0x24ea22[_0x25b81d]==='\x21'||_0x24ea22[_0x25b81d]==='\x26')){const _0x4cd727=_0x25b81d++;if(_0x24ea22[_0x4cd727]==='\x21'&&_0x24ea22[_0x25b81d]==='\x3c'){if(_0x810eea(0x231,'\x42\x48\x76\x56')===_0x810eea(0x295,'\x6a\x33\x35\x24')){_0x25b81d++;while(_0x25b81d<_0xed7078&&_0x24ea22[_0x25b81d]!=='\x3e'&&!/\s/[_0x810eea(0x1f7,'\x71\x47\x63\x47')](_0x24ea22[_0x25b81d]))_0x25b81d++;if(_0x24ea22[_0x25b81d]!=='\x3e')return{'\x73\x74\x61\x72\x74':-(-0x220+-0x75*0x27+0x13f4*0x1),'\x69\x6e\x64\x65\x6e\x74':_0x5f1c47};_0x25b81d++;}else{const _0x273f8b=_0x2941aa+(-0x1*-0x1974+-0x2e2+-0x1691);return{'\x65\x6e\x64':_0x273f8b,'\x72\x61\x77':_0x4bb639[_0x810eea(0x304,'\x55\x61\x53\x51')](_0xe884dd,_0x273f8b),'\x71\x75\x6f\x74\x65':_0xbe9822};}}else{if(_0x810eea(0x323,'\x71\x4b\x68\x32')!==_0x810eea(0x36f,'\x31\x4e\x6e\x36')){while(_0x25b81d<_0xed7078&&!/\s/[_0x810eea(0x23c,'\x64\x48\x79\x40')](_0x24ea22[_0x25b81d]))_0x25b81d++;if(_0x24ea22[_0x4cd727]==='\x26'&&_0x25b81d===_0x4cd727+(-0xd28+0x4a6+0x883))return{'\x73\x74\x61\x72\x74':-(-0x256b+0x1cd*0x13+-0x335*-0x1),'\x69\x6e\x64\x65\x6e\x74':_0x5f1c47};}else{_0x5032ee++;while(_0x10d5e7<_0x3661e4&&_0x2b282f[_0x354fd3]!=='\x3e'&&!/\s/[_0x810eea(0x271,'\x45\x58\x67\x43')](_0x4eb90a[_0x265b7b]))_0x5e23a1++;if(_0x169745[_0x87265f]!=='\x3e')return{'\x73\x74\x61\x72\x74':-(0x457*-0x7+0xf*-0x26a+0x4298),'\x69\x6e\x64\x65\x6e\x74':_0xd787d};_0x43a621++;}}if(_0x25b81d<_0xed7078&&!_0xfc0353(_0x25b81d))return{'\x73\x74\x61\x72\x74':-(-0x23d1+0x52f*-0x3+-0x1*-0x335f),'\x69\x6e\x64\x65\x6e\x74':_0x5f1c47};_0x5cf570();}return{'\x73\x74\x61\x72\x74':_0x25b81d,'\x69\x6e\x64\x65\x6e\x74':_0x5f1c47};}else return _0x11eb78[_0x810eea(0x29c,'\x30\x6f\x5d\x5b')](_0x11351d=>_0x11351d['\x74\x79\x70\x65']+'\u2192'+_0x11351d[_0x810eea(0x26a,'\x37\x35\x43\x48')+'\x6f\x6e'])[_0x810eea(0x376,'\x61\x63\x65\x52')]('\x3b\x20');};let _0x3e38cc=_0x35a7bb();STRUCTURED_CREDENTIAL_PREFIX['\x6c\x61\x73\x74\x49\x6e\x64\x65'+'\x78']=0x82d+-0x173*0x11+0x1076;let _0x375cec=STRUCTURED_CREDENTIAL_PREFIX[_0x33ae6e(0x36b,'\x6a\x33\x35\x24')](_0x24ea22);while(_0x375cec){if(_0x375cec[_0x33ae6e(0x387,'\x73\x33\x45\x63')]<_0x54499c){_0x375cec=STRUCTURED_CREDENTIAL_PREFIX['\x65\x78\x65\x63'](_0x24ea22);continue;}while(_0x4a396b>=-0x887+-0x76*-0x21+0x1d*-0x3b&&_0x4a396b<_0x375cec[_0x33ae6e(0x384,'\x61\x63\x65\x52')]){_0x935ef0=_0x4a396b+(-0x5*-0x7b5+-0x1*0x118c+0x11*-0x13c),_0x4a396b=_0x24ea22[_0x33ae6e(0x248,'\x63\x65\x76\x25')]('\x0a',_0x935ef0),_0x3e38cc=_0x35a7bb();}const _0xbd242=STRUCTURED_CREDENTIAL_PREFIX[_0x33ae6e(0x28f,'\x75\x35\x67\x54')+'\x78'];let _0x33d730;if(_0x375cec[_0x33ae6e(0x375,'\x43\x50\x4f\x52')]===_0x3e38cc[_0x33ae6e(0x214,'\x45\x58\x67\x43')]){if(_0x33ae6e(0x20d,'\x47\x68\x74\x69')===_0x33ae6e(0x22f,'\x71\x47\x63\x47')){const _0x246d94=_0x375cec[-0xd30+0x53d+0x7f6],_0x4e5d3a=_0xbd242-_0x246d94[_0x33ae6e(0x24a,'\x47\x68\x74\x69')]+_0x246d94[_0x33ae6e(0x330,'\x47\x68\x74\x69')]()[_0x33ae6e(0x331,'\x61\x66\x51\x46')]-(-0x13*-0x15+-0x2402+0x2274),_0x2a2f17=_0x24ea22[_0x33ae6e(0x373,'\x6c\x68\x58\x23')+_0x33ae6e(0x284,'\x47\x56\x26\x6a')]('\x0a',_0x4e5d3a)+(-0x3*-0x745+-0x1cc8+0x6fa),_0x2335f1=_0x2a2f17===_0x935ef0?_0x3e38cc[_0x33ae6e(0x352,'\x5b\x2a\x64\x38')]:_0x4e5d3a-_0x2a2f17;_0x33d730=readBlockStructuredValue(_0x24ea22,_0x2335f1,_0xbd242);}else return![];}const _0x5e69bd=_0x33d730??readQuotedStructuredValue(_0x24ea22,_0xbd242)??readUnquotedStructuredValue(_0x24ea22,_0xbd242);if(!_0x5e69bd){_0x375cec=STRUCTURED_CREDENTIAL_PREFIX[_0x33ae6e(0x2e2,'\x38\x65\x44\x68')](_0x24ea22);continue;}_0x148b56+=_0x24ea22['\x73\x6c\x69\x63\x65'](_0x54499c,_0xbd242),_0x148b56+=_0x5e69bd[_0x33ae6e(0x30d,'\x47\x56\x26\x6a')+_0x33ae6e(0x260,'\x24\x4b\x4b\x5a')]!==undefined?'\x22'+REDACTED+'\x22'+_0x5e69bd[_0x33ae6e(0x2f7,'\x51\x34\x40\x49')+_0x33ae6e(0x29f,'\x75\x5a\x64\x74')]:shouldRedactStructuredField(_0x375cec[0x1b41*0x1+-0x205f*0x1+-0x290*-0x2]??'',_0x5e69bd[_0x33ae6e(0x208,'\x47\x68\x74\x69')])?''+_0x5e69bd[_0x33ae6e(0x36d,'\x78\x6f\x24\x54')]+REDACTED+_0x5e69bd['\x71\x75\x6f\x74\x65']:_0x5e69bd[_0x33ae6e(0x334,'\x47\x56\x26\x6a')],_0x54499c=_0x5e69bd[_0x33ae6e(0x2f3,'\x75\x35\x67\x54')],STRUCTURED_CREDENTIAL_PREFIX[_0x33ae6e(0x2b8,'\x5a\x37\x29\x21')+'\x78']=_0x5e69bd[_0x33ae6e(0x2f1,'\x5a\x37\x29\x21')],_0x375cec=STRUCTURED_CREDENTIAL_PREFIX[_0x33ae6e(0x2e2,'\x38\x65\x44\x68')](_0x24ea22);}return _0x54499c===-0x29*0xe3+0x1197*-0x1+0x35f2?_0x24ea22:_0x148b56+_0x24ea22[_0x33ae6e(0x322,'\x34\x61\x4e\x5b')](_0x54499c);}function _0x4da6(){const _0x405f39=['\x78\x6d\x6b\x41\x6b\x38\x6b\x38\x6c\x78\x4f','\x57\x34\x44\x37\x41\x77\x37\x63\x56\x53\x6b\x53\x43\x6d\x6f\x72','\x77\x6d\x6f\x46\x57\x4f\x4e\x64\x4d\x38\x6b\x4c\x57\x36\x2f\x64\x54\x43\x6f\x77','\x57\x4f\x6c\x64\x4b\x53\x6b\x73\x65\x75\x48\x4b\x69\x61','\x73\x53\x6f\x39\x57\x35\x6c\x64\x4c\x43\x6b\x73\x67\x57\x35\x2f','\x41\x48\x37\x64\x52\x67\x2f\x63\x54\x75\x43\x44\x57\x34\x30','\x57\x35\x44\x57\x75\x53\x6b\x78\x77\x38\x6f\x73\x57\x51\x42\x64\x51\x61','\x75\x5a\x64\x64\x53\x47','\x57\x4f\x5a\x64\x4d\x6d\x6f\x45','\x72\x64\x4e\x64\x50\x67\x52\x63\x48\x32\x4c\x56\x57\x34\x57\x4c\x57\x35\x4b','\x57\x37\x74\x64\x55\x4c\x62\x38\x67\x38\x6b\x2f\x67\x43\x6b\x52','\x62\x62\x5a\x63\x55\x47\x50\x42','\x57\x37\x2f\x64\x54\x75\x75','\x71\x64\x2f\x64\x51\x62\x4e\x63\x4c\x67\x30\x68\x6a\x57','\x72\x6d\x6f\x56\x57\x51\x74\x64\x4a\x6d\x6b\x63','\x57\x37\x66\x53\x57\x35\x4a\x63\x52\x57','\x57\x50\x38\x53\x57\x52\x53','\x71\x59\x70\x64\x48\x71\x6c\x63\x55\x31\x65\x68\x57\x34\x30','\x75\x5a\x70\x64\x50\x48\x78\x63\x4c\x67\x47\x77\x6b\x47','\x57\x51\x2f\x63\x4c\x72\x2f\x64\x54\x71','\x42\x53\x6f\x69\x7a\x71','\x6c\x67\x34\x53\x69\x43\x6b\x53\x6a\x58\x6e\x56','\x71\x38\x6b\x74\x6c\x6d\x6b\x34\x70\x61','\x74\x31\x6e\x31\x6e\x76\x47','\x41\x6d\x6f\x31\x70\x75\x31\x55','\x57\x52\x33\x64\x53\x43\x6b\x38\x70\x67\x57','\x57\x34\x4f\x63\x57\x4f\x4a\x63\x4c\x38\x6f\x7a\x57\x36\x4a\x63\x53\x6d\x6b\x64','\x57\x50\x78\x63\x48\x53\x6f\x43\x57\x35\x78\x64\x4d\x5a\x68\x63\x4d\x6d\x6f\x43','\x45\x43\x6f\x41\x42\x6d\x6f\x74\x57\x50\x43\x31','\x6a\x43\x6f\x4a\x57\x35\x57','\x57\x36\x64\x64\x4a\x48\x52\x64\x4f\x53\x6b\x61\x41\x73\x34','\x57\x36\x68\x63\x4e\x43\x6b\x77\x6f\x38\x6f\x53\x64\x59\x65\x66','\x57\x52\x42\x63\x4c\x73\x68\x64\x4c\x48\x4f','\x57\x35\x4c\x71\x57\x36\x6c\x63\x50\x38\x6f\x6e\x73\x74\x64\x63\x4a\x71','\x57\x4f\x52\x64\x4d\x75\x62\x2f\x57\x34\x69\x4f','\x61\x53\x6b\x78\x7a\x5a\x65','\x78\x38\x6f\x53\x57\x35\x4a\x64\x4e\x43\x6b\x4b\x62\x4a\x75','\x57\x52\x43\x6d\x66\x63\x4e\x63\x49\x64\x57','\x43\x53\x6b\x6f\x78\x4a\x6c\x64\x52\x6d\x6b\x76\x72\x73\x57','\x57\x4f\x30\x4c\x57\x50\x71\x64\x57\x4f\x70\x63\x53\x43\x6b\x47\x45\x57','\x57\x35\x44\x32\x43\x71','\x57\x52\x43\x67\x68\x78\x57','\x79\x38\x6b\x53\x64\x43\x6b\x65\x67\x65\x46\x64\x4c\x30\x30','\x57\x35\x74\x64\x56\x77\x5a\x63\x55\x61','\x57\x35\x66\x63\x57\x37\x78\x63\x49\x43\x6f\x66\x57\x37\x6c\x64\x49\x38\x6b\x68','\x6b\x43\x6b\x79\x57\x36\x4a\x64\x4a\x47\x34\x6d','\x57\x35\x5a\x63\x54\x6d\x6b\x61\x62\x31\x69\x4c\x74\x53\x6b\x55','\x6b\x72\x44\x78\x44\x4a\x75','\x6d\x73\x30\x37\x79\x53\x6b\x66\x74\x5a\x6a\x71','\x6b\x57\x33\x63\x50\x57','\x67\x38\x6b\x72\x76\x73\x56\x63\x47\x6d\x6f\x43\x57\x51\x38','\x66\x6d\x6f\x61\x6d\x38\x6f\x39\x67\x47','\x79\x43\x6f\x6a\x44\x43\x6f\x6e','\x42\x53\x6b\x7a\x78\x5a\x42\x64\x56\x43\x6b\x6f','\x79\x4e\x35\x67\x78\x75\x78\x63\x49\x48\x4a\x64\x56\x57','\x42\x4e\x35\x75\x66\x4e\x78\x63\x49\x4a\x6d','\x6e\x53\x6b\x73\x68\x43\x6b\x44\x57\x51\x57\x68\x57\x34\x6a\x74','\x72\x4a\x37\x64\x4f\x77\x64\x64\x53\x5a\x7a\x54\x57\x34\x34\x46\x57\x36\x6d\x76\x57\x34\x6d','\x6f\x43\x6b\x2f\x72\x43\x6b\x53\x57\x36\x39\x66\x57\x34\x5a\x64\x4a\x77\x56\x63\x56\x72\x35\x61','\x57\x51\x4a\x63\x48\x62\x37\x64\x51\x62\x57\x7a','\x43\x32\x4c\x61\x66\x47','\x57\x52\x30\x61\x66\x4a\x52\x63\x4d\x73\x79','\x57\x34\x48\x4d\x76\x6d\x6b\x56\x77\x38\x6f\x42','\x57\x4f\x42\x64\x48\x6d\x6f\x6e\x57\x37\x66\x32\x57\x51\x66\x77\x67\x43\x6b\x48\x57\x36\x54\x59\x57\x37\x78\x63\x4a\x47','\x57\x35\x70\x63\x53\x4a\x52\x64\x51\x43\x6b\x6f\x41\x65\x56\x63\x49\x71','\x76\x33\x75\x48\x6a\x31\x62\x62\x57\x52\x31\x6f\x57\x37\x53\x63\x57\x52\x64\x64\x4f\x71','\x74\x53\x6b\x44\x57\x37\x43\x49','\x57\x50\x74\x64\x4d\x76\x35\x30\x57\x35\x43\x4a\x57\x37\x50\x64','\x67\x38\x6b\x6d\x43\x64\x5a\x63\x49\x53\x6f\x59\x57\x52\x61','\x6c\x43\x6b\x58\x75\x72\x52\x63\x4f\x6d\x6f\x34\x57\x4f\x69','\x67\x38\x6b\x6d\x43\x64\x5a\x63\x4e\x6d\x6f\x6a','\x57\x37\x6a\x48\x57\x35\x6c\x63\x55\x6d\x6f\x2b\x57\x36\x4b','\x57\x36\x74\x64\x54\x4c\x62\x52','\x57\x37\x70\x64\x49\x6d\x6b\x77\x57\x52\x64\x64\x53\x4b\x61\x43\x6d\x61','\x57\x37\x52\x64\x49\x74\x52\x64\x4f\x53\x6b\x67\x45\x57\x64\x63\x4b\x47','\x74\x53\x6f\x57\x57\x34\x46\x63\x4e\x47','\x57\x35\x54\x78\x57\x36\x64\x64\x4f\x43\x6f\x35\x43\x74\x52\x63\x51\x57','\x57\x34\x33\x63\x54\x4a\x4e\x64\x53\x43\x6b\x4d\x7a\x75\x4f','\x63\x63\x7a\x48','\x57\x37\x78\x63\x52\x43\x6b\x38\x57\x4f\x57\x6e\x57\x35\x57\x4f\x67\x47','\x74\x38\x6f\x54\x57\x50\x68\x64\x4b\x43\x6b\x70\x64\x68\x66\x55','\x57\x52\x5a\x63\x54\x74\x78\x63\x55\x4b\x30\x54\x57\x36\x37\x63\x53\x71','\x57\x50\x52\x63\x49\x61\x5a\x63\x4e\x47','\x57\x52\x4e\x64\x4b\x43\x6b\x68\x6c\x4d\x53','\x57\x4f\x53\x4d\x57\x35\x6d\x32\x57\x50\x56\x63\x55\x38\x6b\x33','\x7a\x47\x5a\x64\x49\x5a\x42\x63\x55\x75\x61\x32','\x57\x51\x78\x64\x4b\x77\x76\x58\x63\x53\x6f\x6a\x57\x36\x64\x63\x4f\x61','\x41\x53\x6b\x6c\x45\x43\x6f\x66\x6e\x6d\x6f\x6e\x76\x38\x6f\x50','\x57\x37\x74\x64\x49\x75\x5a\x63\x47\x57','\x61\x6d\x6b\x68\x7a\x64\x78\x63\x4b\x38\x6f\x45\x57\x52\x6d','\x6e\x47\x37\x63\x4e\x59\x47','\x62\x38\x6f\x7a\x57\x37\x4c\x6f\x57\x50\x6d','\x44\x38\x6f\x69\x42\x53\x6b\x67\x64\x38\x6b\x33\x44\x38\x6f\x74','\x57\x34\x6d\x44\x74\x32\x53\x4a\x72\x38\x6b\x46\x6a\x47','\x57\x4f\x33\x63\x4a\x58\x46\x63\x4d\x4e\x4f\x6c\x57\x4f\x6c\x63\x4c\x71','\x41\x6d\x6f\x30\x65\x43\x6f\x2f','\x6e\x71\x33\x63\x55\x61\x4c\x35\x6b\x43\x6b\x35\x57\x52\x4b','\x74\x38\x6b\x44\x57\x36\x53\x2b\x57\x51\x4b','\x74\x43\x6f\x61\x57\x4f\x74\x64\x4e\x43\x6b\x4b\x57\x37\x4a\x64\x4f\x38\x6b\x43','\x57\x52\x42\x63\x4c\x62\x64\x63\x4d\x4b\x79','\x57\x51\x5a\x64\x51\x6d\x6f\x34\x57\x37\x2f\x64\x50\x57\x78\x64\x51\x53\x6f\x4b','\x78\x38\x6f\x37\x57\x34\x6c\x64\x48\x61','\x57\x52\x4f\x74\x64\x5a\x5a\x63\x4d\x71\x54\x2f\x6c\x61','\x6d\x66\x46\x64\x48\x30\x54\x68\x57\x51\x4f\x6e\x68\x71','\x76\x59\x56\x64\x53\x62\x4a\x63\x4e\x33\x34\x41\x6e\x61','\x57\x34\x33\x64\x50\x4e\x56\x63\x54\x75\x79','\x57\x34\x35\x53\x75\x38\x6b\x4d','\x57\x35\x64\x63\x55\x63\x5a\x64\x53\x57','\x79\x43\x6f\x50\x67\x53\x6f\x37\x57\x51\x30\x44','\x57\x52\x52\x63\x48\x61\x78\x64\x52\x48\x65','\x76\x73\x4a\x64\x48\x57','\x6e\x53\x6b\x72\x57\x36\x2f\x64\x49\x48\x38','\x6a\x43\x6b\x6e\x67\x6d\x6b\x64\x57\x51\x47\x37\x57\x34\x57','\x57\x36\x71\x4f\x57\x50\x2f\x63\x4a\x6d\x6f\x55','\x71\x6d\x6f\x63\x57\x50\x78\x64\x4a\x6d\x6b\x55\x57\x37\x33\x64\x51\x38\x6b\x44','\x76\x66\x76\x4a\x69\x65\x74\x63\x49\x48\x53','\x57\x52\x52\x63\x47\x61\x78\x64\x4e\x48\x71\x69\x57\x36\x4b','\x57\x37\x78\x64\x56\x75\x44\x53\x69\x38\x6b\x4b\x63\x43\x6b\x43','\x67\x59\x2f\x63\x50\x65\x6d\x69\x57\x36\x78\x64\x53\x31\x53','\x69\x77\x65\x50','\x57\x34\x31\x54\x78\x53\x6b\x54\x76\x57','\x57\x35\x53\x6e\x72\x49\x58\x55\x75\x43\x6b\x42\x6a\x57','\x79\x6d\x6b\x2b\x66\x53\x6b\x69\x63\x76\x52\x64\x4b\x75\x71','\x57\x37\x74\x64\x50\x53\x6b\x42\x6d\x6d\x6f\x37','\x57\x4f\x38\x34\x57\x34\x58\x68\x57\x51\x78\x63\x4a\x43\x6b\x6c\x61\x61','\x6a\x43\x6b\x6e\x68\x61','\x57\x50\x6c\x63\x56\x73\x4e\x64\x51\x68\x4e\x63\x48\x78\x33\x64\x4c\x38\x6f\x2b\x57\x34\x4b','\x57\x35\x47\x75\x57\x50\x74\x63\x48\x53\x6f\x7a','\x6e\x57\x70\x63\x4d\x61\x39\x51\x6c\x43\x6b\x2f\x57\x50\x6d','\x57\x52\x46\x63\x4c\x71\x6c\x64\x50\x47\x53\x66','\x72\x6d\x6f\x6d\x57\x50\x78\x64\x4a\x6d\x6b\x6a\x57\x37\x6c\x64\x4f\x53\x6b\x44','\x57\x35\x48\x64\x57\x36\x64\x64\x48\x53\x6f\x4f\x57\x36\x70\x64\x52\x38\x6b\x55','\x65\x49\x74\x63\x56\x61\x4f\x39\x57\x35\x30','\x63\x71\x64\x63\x4a\x64\x62\x73','\x57\x37\x56\x63\x48\x53\x6b\x66\x6f\x43\x6f\x37\x65\x4a\x71\x61','\x63\x5a\x6c\x63\x54\x58\x38\x4e\x57\x35\x74\x64\x4a\x4e\x43','\x57\x50\x33\x63\x4e\x57\x42\x63\x47\x77\x53\x67','\x6e\x53\x6b\x59\x46\x71','\x63\x67\x38\x32\x7a\x6d\x6b\x54','\x78\x38\x6f\x36\x75\x38\x6f\x31\x57\x51\x75\x6a\x61\x53\x6f\x6d','\x67\x59\x2f\x63\x54\x48\x34\x45\x57\x35\x5a\x64\x4c\x33\x4f','\x77\x6d\x6f\x33\x57\x35\x42\x64\x4e\x53\x6b\x61\x68\x63\x72\x35','\x6a\x43\x6b\x4b\x45\x73\x61\x69\x57\x4f\x71','\x6d\x53\x6b\x35\x46\x74\x61\x73\x57\x50\x35\x79\x57\x35\x71','\x57\x36\x2f\x63\x4f\x43\x6b\x57\x57\x4f\x6d\x70','\x57\x37\x64\x63\x49\x43\x6b\x66','\x77\x74\x78\x64\x4f\x72\x34','\x65\x68\x70\x64\x50\x32\x57','\x57\x37\x4e\x64\x4a\x5a\x74\x64\x50\x53\x6b\x78\x7a\x4a\x42\x63\x4c\x71','\x57\x35\x44\x59\x7a\x33\x37\x63\x55\x53\x6b\x72','\x77\x6d\x6f\x79\x57\x50\x78\x64\x4b\x61','\x45\x38\x6f\x69\x45\x38\x6f\x65\x6f\x38\x6b\x65\x71\x43\x6f\x2f','\x65\x38\x6f\x6a\x6b\x43\x6f\x51','\x69\x38\x6b\x68\x6a\x6d\x6b\x61\x57\x52\x34\x39\x57\x35\x54\x31','\x72\x6d\x6b\x41\x6e\x53\x6b\x56','\x76\x38\x6b\x67\x57\x37\x61\x56\x57\x51\x56\x64\x4b\x4b\x70\x63\x50\x71','\x45\x38\x6f\x63\x43\x6d\x6f\x64','\x76\x6d\x6b\x58\x57\x51\x65\x64\x57\x50\x71','\x57\x36\x35\x4f\x57\x35\x78\x63\x55\x53\x6f\x53\x57\x37\x4b','\x6d\x6d\x6b\x6a\x65\x43\x6b\x39\x57\x50\x6d','\x76\x4a\x4a\x64\x47\x65\x71','\x57\x35\x72\x58\x76\x43\x6b\x52\x73\x53\x6f\x61\x57\x51\x46\x63\x4f\x71','\x6d\x6d\x6b\x6f\x57\x36\x70\x64\x4d\x58\x71\x66\x57\x4f\x4b\x65','\x57\x34\x71\x74\x57\x50\x4a\x63\x49\x57','\x57\x36\x4a\x64\x4e\x65\x75','\x57\x50\x75\x55\x7a\x77\x75','\x74\x64\x52\x64\x48\x57','\x57\x50\x65\x4c\x6e\x74\x2f\x64\x50\x53\x6f\x6b\x73\x6d\x6f\x4b\x57\x35\x30\x61\x41\x67\x30','\x64\x73\x37\x63\x56\x57\x47','\x6e\x53\x6b\x72\x57\x36\x46\x64\x49\x48\x65\x37\x57\x50\x61\x6f','\x57\x52\x42\x64\x4a\x67\x76\x35\x62\x53\x6f\x46','\x57\x50\x4b\x49\x57\x34\x47\x43\x57\x50\x33\x63\x55\x38\x6b\x47\x6a\x47','\x57\x37\x68\x63\x4a\x43\x6b\x42\x57\x52\x4a\x64\x51\x30\x75','\x79\x53\x6f\x75\x44\x38\x6f\x6c\x6b\x38\x6b\x74\x76\x38\x6b\x49','\x57\x35\x4b\x42\x41\x78\x34\x30\x76\x43\x6b\x73','\x78\x6d\x6f\x59\x72\x38\x6f\x4f\x57\x52\x43\x63','\x73\x6d\x6f\x55\x6f\x65\x4c\x73','\x57\x37\x64\x64\x50\x38\x6b\x42\x6d\x61','\x57\x34\x34\x4e\x57\x50\x68\x63\x47\x6d\x6f\x44\x57\x35\x57','\x57\x50\x6d\x4b\x42\x77\x64\x64\x4d\x71','\x44\x38\x6f\x45\x46\x43\x6f\x6c\x6f\x38\x6b\x75\x74\x43\x6f\x4a','\x61\x63\x4c\x4e\x71\x72\x43\x76\x57\x4f\x7a\x4a','\x7a\x38\x6b\x70\x57\x4f\x79\x56\x57\x51\x4e\x64\x53\x6d\x6f\x76\x71\x61','\x57\x37\x78\x64\x56\x76\x44\x54\x68\x43\x6b\x4f\x64\x47','\x57\x36\x64\x63\x4a\x43\x6b\x76\x6f\x43\x6f\x4e\x63\x64\x57\x6e','\x6c\x67\x34\x53\x69\x43\x6b\x56\x6d\x61\x48\x56','\x57\x36\x4c\x38\x57\x35\x74\x63\x48\x38\x6f\x33\x7a\x63\x71','\x57\x34\x4c\x69\x57\x36\x78\x63\x4e\x61','\x46\x6d\x6f\x73\x7a\x38\x6f\x69\x57\x50\x43\x49','\x44\x76\x52\x64\x50\x4c\x65\x56\x43\x6d\x6f\x39\x57\x4f\x46\x63\x50\x6d\x6f\x57\x72\x43\x6f\x45\x57\x37\x38','\x6a\x53\x6b\x79\x57\x37\x78\x64\x4d\x47\x4b\x6e\x57\x4f\x6d\x70','\x57\x4f\x56\x64\x49\x38\x6b\x41\x65\x31\x39\x53\x6e\x38\x6b\x71','\x57\x34\x42\x63\x50\x38\x6b\x36\x67\x43\x6f\x68','\x57\x37\x37\x63\x48\x57\x57','\x57\x4f\x38\x5a\x79\x32\x4a\x64\x4a\x32\x47\x39\x57\x52\x65','\x57\x4f\x33\x64\x4f\x78\x4e\x63\x50\x6d\x6f\x32\x6d\x33\x4a\x63\x54\x61\x5a\x64\x55\x4c\x65\x64','\x71\x6d\x6b\x6e\x6b\x53\x6b\x34\x70\x67\x68\x64\x53\x63\x53','\x63\x73\x6a\x2f\x45\x72\x75\x43','\x77\x4a\x2f\x64\x54\x57\x74\x63\x55\x77\x69\x78\x6b\x57','\x7a\x68\x39\x45\x62\x32\x4a\x63\x51\x59\x65','\x62\x53\x6b\x76\x6e\x53\x6b\x31\x6f\x4b\x4a\x64\x4a\x57','\x61\x78\x4a\x63\x4f\x64\x56\x63\x52\x4d\x71','\x45\x43\x6f\x50\x62\x38\x6f\x4f','\x69\x47\x64\x63\x50\x57','\x72\x43\x6b\x6a\x57\x50\x4f\x31\x57\x51\x79','\x57\x35\x4a\x63\x52\x38\x6b\x63','\x57\x52\x34\x68\x64\x61','\x57\x36\x4e\x63\x4a\x43\x6b\x67\x57\x51\x53','\x7a\x53\x6f\x6a\x76\x6d\x6f\x68\x6f\x43\x6b\x66\x76\x53\x6f\x70','\x57\x34\x71\x6e\x77\x33\x47','\x57\x35\x33\x64\x4a\x31\x46\x64\x48\x64\x39\x6c\x57\x50\x4e\x63\x4a\x43\x6f\x79\x42\x33\x74\x64\x53\x67\x30','\x69\x4d\x75\x4a','\x57\x34\x46\x63\x55\x38\x6b\x30\x64\x47','\x57\x4f\x4f\x36\x57\x51\x33\x63\x55\x61','\x77\x43\x6f\x37\x69\x4c\x76\x6c\x69\x76\x72\x4a','\x57\x36\x4c\x73\x72\x30\x42\x63\x49\x53\x6b\x38\x74\x43\x6f\x59','\x57\x50\x42\x64\x4a\x4b\x44\x55\x57\x35\x43\x30\x57\x37\x50\x44','\x57\x35\x74\x63\x52\x38\x6b\x61\x63\x4c\x4f\x4c\x74\x53\x6b\x47','\x75\x43\x6b\x6b\x57\x36\x34\x56\x57\x51\x2f\x64\x4c\x61','\x57\x36\x37\x63\x4a\x43\x6b\x77\x57\x51\x33\x64\x55\x4c\x4b','\x57\x50\x6d\x59\x6c\x67\x33\x64\x4d\x68\x71\x4a\x57\x52\x38','\x57\x35\x54\x78\x57\x36\x64\x64\x4f\x43\x6f\x59\x46\x64\x53','\x61\x38\x6b\x54\x6f\x53\x6b\x49\x57\x50\x79\x69\x57\x37\x54\x35','\x57\x36\x68\x63\x4e\x6d\x6b\x45\x6c\x53\x6f\x53\x67\x68\x75\x66','\x77\x43\x6f\x2f\x57\x34\x79','\x79\x64\x5a\x64\x56\x4e\x78\x63\x4a\x47','\x42\x43\x6f\x50\x57\x51\x2f\x64\x52\x6d\x6b\x70\x57\x34\x34','\x57\x35\x46\x64\x50\x33\x6c\x63\x54\x71','\x57\x51\x56\x63\x48\x72\x2f\x64\x51\x71','\x78\x38\x6f\x44\x57\x35\x64\x64\x47\x43\x6b\x78','\x41\x33\x39\x74\x65\x4d\x68\x63\x4d\x49\x78\x64\x4d\x57','\x45\x43\x6f\x4c\x66\x43\x6f\x57','\x61\x63\x4c\x31\x42\x74\x79\x44\x57\x50\x35\x2b','\x68\x4d\x4e\x63\x56\x64\x78\x63\x54\x67\x53','\x73\x53\x6f\x4b\x75\x38\x6f\x59\x57\x52\x30\x75\x65\x43\x6f\x70','\x61\x65\x30\x46\x75\x6d\x6b\x37\x6b\x58\x6d','\x57\x52\x33\x64\x51\x43\x6b\x30\x6c\x78\x30','\x57\x35\x52\x63\x56\x74\x2f\x63\x53\x38\x6b\x69\x76\x4d\x52\x63\x4f\x47','\x57\x34\x43\x7a\x57\x4f\x37\x63\x4b\x43\x6f\x31\x57\x35\x4e\x63\x56\x43\x6b\x69','\x57\x50\x33\x64\x49\x53\x6f\x70\x57\x35\x6c\x64\x4d\x4a\x46\x64\x4d\x6d\x6f\x6b','\x57\x52\x69\x68\x64\x49\x56\x63\x4d\x59\x7a\x31\x6e\x61','\x57\x50\x6d\x4b\x79\x4d\x5a\x64\x4e\x4e\x6d','\x44\x43\x6b\x48\x66\x43\x6f\x58\x57\x51\x6e\x79\x57\x34\x33\x64\x54\x57','\x77\x6d\x6f\x51\x57\x35\x64\x64\x47\x53\x6b\x76\x67\x57\x7a\x49','\x69\x6d\x6b\x78\x6b\x38\x6b\x44\x46\x6d\x6f\x74\x66\x43\x6f\x39\x57\x34\x48\x63\x57\x36\x47\x42\x46\x71','\x57\x50\x6c\x64\x4d\x76\x31\x53','\x64\x74\x78\x63\x4f\x61\x71\x4e\x57\x35\x6c\x64\x49\x4e\x71','\x6d\x58\x37\x63\x55\x58\x48\x4b\x66\x38\x6b\x35\x57\x52\x38','\x7a\x4d\x62\x7a\x67\x67\x4a\x63\x56\x61','\x57\x36\x56\x63\x49\x43\x6b\x7a\x57\x52\x42\x64\x55\x30\x57\x6a\x6e\x57','\x57\x52\x4e\x64\x54\x6d\x6f\x52\x57\x37\x70\x64\x53\x61','\x57\x4f\x47\x33\x57\x34\x4b\x61\x57\x50\x70\x63\x47\x43\x6b\x56\x6a\x57','\x69\x43\x6b\x47\x44\x64\x4f\x64\x57\x4f\x54\x66\x57\x35\x69','\x57\x51\x46\x64\x48\x4d\x35\x33\x61\x43\x6f\x6f\x57\x37\x52\x64\x52\x57','\x7a\x43\x6f\x54\x62\x57','\x43\x53\x6b\x6a\x71\x4a\x4b','\x74\x53\x6b\x41\x57\x36\x53\x50\x57\x51\x4e\x64\x4b\x31\x4e\x64\x56\x57','\x6f\x38\x6b\x48\x75\x71\x42\x63\x50\x38\x6f\x56\x57\x50\x4f','\x77\x38\x6f\x69\x57\x4f\x46\x64\x49\x53\x6b\x4a\x57\x37\x74\x64\x4c\x53\x6b\x7a','\x57\x52\x33\x64\x47\x4e\x4b','\x57\x4f\x74\x64\x4c\x33\x58\x62\x61\x71','\x6b\x4b\x33\x63\x4d\x59\x68\x63\x4b\x47','\x64\x53\x6b\x4e\x57\x34\x4a\x64\x4a\x73\x34','\x57\x36\x4e\x63\x51\x38\x6b\x75\x57\x51\x37\x64\x51\x71','\x57\x51\x68\x63\x51\x63\x68\x63\x52\x66\x4f\x39\x57\x36\x74\x63\x50\x61','\x57\x50\x69\x6e\x77\x76\x4e\x64\x50\x61','\x57\x34\x7a\x34\x41\x67\x37\x63\x54\x6d\x6b\x6c','\x72\x38\x6b\x4c\x42\x48\x4a\x64\x4a\x71','\x77\x38\x6f\x7a\x57\x50\x74\x64\x4b\x43\x6b\x55\x57\x37\x53','\x73\x6d\x6f\x50\x71\x43\x6f\x52','\x75\x49\x6c\x64\x4d\x65\x4e\x63\x4c\x61','\x44\x6d\x6b\x61\x57\x4f\x34\x31\x57\x50\x52\x64\x55\x6d\x6f\x76\x71\x71','\x6e\x53\x6b\x6d\x71\x58\x56\x63\x4c\x61','\x62\x77\x4b\x43\x79\x53\x6b\x57','\x79\x38\x6b\x69\x77\x64\x37\x64\x50\x38\x6b\x35\x78\x77\x43','\x6f\x38\x6b\x55\x46\x32\x65','\x71\x4a\x56\x64\x54\x57\x71','\x41\x53\x6f\x76\x44\x53\x6b\x69\x57\x51\x65\x76\x67\x6d\x6f\x78','\x57\x36\x64\x63\x4a\x43\x6b\x73\x6f\x43\x6f\x47\x64\x63\x65','\x57\x4f\x2f\x64\x53\x6d\x6f\x68\x77\x47\x39\x4b\x66\x53\x6b\x4c\x57\x36\x52\x64\x4b\x74\x76\x33\x70\x61','\x57\x35\x7a\x4d\x73\x53\x6b\x4b\x74\x53\x6f\x71\x57\x52\x65','\x63\x53\x6f\x6e\x6b\x47','\x65\x59\x64\x63\x4f\x47','\x65\x73\x48\x44\x43\x72\x79\x72\x57\x50\x48\x76','\x57\x34\x68\x64\x50\x4d\x4e\x64\x56\x4d\x33\x63\x51\x4d\x64\x64\x4b\x61','\x68\x61\x78\x63\x50\x61','\x57\x36\x58\x6d\x41\x43\x6b\x43\x79\x43\x6f\x59\x57\x50\x4e\x64\x49\x47','\x57\x36\x44\x67\x41\x6d\x6b\x43','\x64\x53\x6f\x63\x70\x53\x6f\x37\x62\x38\x6f\x73\x74\x47','\x69\x6d\x6f\x43\x57\x35\x4c\x31\x57\x4f\x46\x64\x4c\x38\x6f\x65\x71\x53\x6f\x45\x57\x34\x6d','\x72\x38\x6f\x37\x57\x35\x2f\x64\x4c\x38\x6b\x76\x61\x61','\x57\x35\x4b\x44\x57\x4f\x33\x63\x49\x43\x6f\x44\x57\x35\x74\x63\x56\x61','\x71\x43\x6f\x64\x57\x4f\x78\x64\x4c\x6d\x6b\x31\x57\x37\x4a\x64\x4f\x38\x6b\x6c','\x57\x34\x6c\x63\x56\x6d\x6b\x36\x57\x50\x74\x64\x4d\x4d\x6d','\x57\x4f\x68\x64\x49\x53\x6f\x69\x57\x34\x37\x64\x56\x74\x4a\x64\x4b\x43\x6f\x6b','\x57\x34\x62\x35\x43\x63\x70\x63\x4b\x43\x6b\x2b\x75\x43\x6f\x32','\x57\x34\x64\x64\x48\x67\x43','\x7a\x57\x74\x64\x52\x67\x33\x63\x51\x4b\x69\x6e\x57\x35\x71','\x61\x65\x38\x75\x75\x6d\x6b\x32\x6a\x47','\x44\x53\x6b\x74\x46\x74\x37\x64\x56\x53\x6b\x64\x72\x65\x65','\x77\x43\x6f\x4f\x70\x4b\x76\x7a\x70\x76\x75\x50','\x57\x34\x69\x77\x57\x4f\x4e\x63\x47\x6d\x6f\x42\x57\x34\x78\x63\x53\x6d\x6b\x7a','\x41\x6d\x6f\x4f\x65\x43\x6f\x59\x57\x51\x30\x43\x57\x34\x2f\x64\x51\x71','\x6c\x57\x4e\x63\x55\x47\x44\x50\x69\x61','\x57\x35\x53\x6e\x57\x4f\x37\x63\x4a\x71','\x57\x36\x33\x63\x49\x43\x6b\x62\x57\x52\x46\x64\x53\x75\x57\x71\x6f\x57','\x57\x37\x52\x64\x49\x64\x5a\x64\x54\x38\x6b\x78\x45\x59\x6d','\x57\x50\x71\x4c\x6e\x74\x37\x63\x4e\x38\x6b\x35\x79\x6d\x6f\x43\x57\x36\x75\x4f','\x63\x58\x48\x59\x42\x61\x71\x71\x57\x4f\x39\x34','\x57\x35\x4e\x64\x4b\x67\x7a\x61\x70\x6d\x6b\x63\x6c\x53\x6b\x47','\x57\x34\x35\x79\x57\x36\x6c\x63\x55\x38\x6f\x44\x77\x71\x65','\x57\x34\x2f\x63\x53\x4a\x52\x64\x52\x53\x6b\x57\x41\x76\x33\x63\x49\x61','\x57\x4f\x56\x64\x47\x53\x6f\x64','\x75\x43\x6b\x56\x45\x71\x37\x64\x49\x6d\x6b\x48\x43\x30\x57','\x72\x38\x6f\x70\x57\x4f\x5a\x64\x4e\x43\x6b\x4a\x57\x36\x47','\x64\x4a\x70\x63\x56\x71\x34\x53\x57\x34\x42\x64\x4b\x64\x57','\x57\x4f\x46\x63\x49\x73\x74\x63\x47\x78\x57\x74\x57\x35\x79','\x57\x36\x46\x63\x4e\x73\x4a\x64\x54\x43\x6b\x67\x46\x64\x37\x63\x4c\x71','\x57\x37\x37\x63\x4f\x43\x6b\x32\x57\x4f\x43\x6d\x57\x34\x30\x31\x65\x71','\x6e\x57\x4e\x63\x50\x58\x71','\x57\x4f\x4b\x74\x57\x4f\x5a\x63\x56\x43\x6f\x46','\x57\x50\x6c\x64\x4b\x30\x76\x39\x57\x35\x47','\x66\x4a\x6a\x32\x45\x71\x71\x68\x57\x50\x35\x2f','\x46\x38\x6f\x50\x62\x6d\x6f\x57\x57\x52\x47\x77\x57\x34\x53','\x62\x32\x74\x64\x53\x78\x54\x70\x57\x4f\x43\x39\x70\x71','\x78\x6d\x6f\x69\x57\x50\x78\x64\x4a\x61','\x57\x4f\x38\x34\x57\x34\x58\x68\x57\x52\x46\x63\x4c\x38\x6b\x41\x67\x47','\x7a\x38\x6b\x73\x72\x33\x2f\x64\x4d\x53\x6b\x51\x44\x30\x65','\x57\x50\x6d\x47\x46\x33\x2f\x64\x4f\x33\x75\x51\x57\x37\x4f','\x57\x52\x52\x64\x55\x6d\x6b\x4d\x6b\x57','\x57\x35\x2f\x64\x49\x43\x6b\x53\x65\x6d\x6f\x43\x6a\x38\x6b\x5a\x61\x61','\x57\x51\x4a\x63\x48\x62\x37\x64\x51\x62\x65\x6b','\x57\x4f\x70\x64\x4b\x4c\x47','\x61\x30\x78\x64\x4d\x30\x50\x38\x57\x51\x43\x6d\x6a\x57','\x57\x36\x4a\x64\x4a\x4a\x34','\x57\x37\x46\x64\x47\x66\x70\x63\x48\x4e\x69','\x57\x36\x4c\x4f\x57\x34\x74\x63\x50\x71','\x45\x38\x6f\x76\x77\x43\x6f\x41\x70\x6d\x6b\x62\x78\x71','\x62\x38\x6b\x61\x73\x57\x61\x57\x57\x51\x34','\x46\x53\x6f\x38\x67\x6d\x6f\x31\x57\x51\x30','\x57\x50\x56\x64\x49\x53\x6f\x78\x57\x34\x2f\x64\x4b\x71','\x57\x51\x6c\x63\x51\x49\x70\x63\x4d\x31\x4f','\x57\x35\x75\x67\x78\x68\x34\x56\x75\x43\x6b\x79','\x57\x35\x42\x63\x56\x73\x33\x64\x55\x6d\x6b\x50\x43\x47','\x57\x4f\x56\x64\x4f\x68\x4a\x63\x52\x43\x6f\x58\x6e\x4b\x33\x63\x50\x62\x37\x64\x49\x4c\x79\x58','\x57\x35\x48\x76\x57\x37\x70\x63\x49\x57','\x70\x32\x65\x32\x7a\x53\x6b\x42\x61\x5a\x76\x71','\x67\x53\x6b\x56\x79\x58\x65\x6e\x44\x58\x62\x52\x6e\x33\x37\x63\x4c\x78\x2f\x63\x4a\x71','\x57\x35\x31\x79\x79\x61','\x77\x38\x6f\x62\x57\x4f\x2f\x64\x4d\x38\x6b\x4c','\x57\x35\x74\x63\x50\x53\x6b\x4d\x57\x4f\x56\x64\x4a\x78\x47\x57\x67\x57','\x69\x38\x6b\x4b\x41\x59\x43','\x41\x53\x6f\x64\x7a\x43\x6f\x66\x57\x4f\x43\x59\x6f\x43\x6f\x4e','\x65\x61\x78\x64\x49\x77\x33\x63\x49\x66\x34\x46','\x46\x38\x6f\x50\x66\x43\x6f\x56\x57\x52\x79\x42','\x57\x34\x39\x69\x57\x37\x46\x63\x4d\x38\x6f\x67\x57\x34\x6d','\x57\x36\x38\x42\x72\x33\x4b\x30\x76\x38\x6b\x6f\x65\x61','\x57\x4f\x4f\x54\x57\x52\x46\x63\x4f\x71','\x6a\x43\x6b\x4b\x41\x64\x38\x67\x57\x4f\x4c\x75','\x73\x49\x5a\x64\x47\x66\x4a\x63\x53\x32\x75\x32\x57\x37\x4f','\x6d\x71\x4e\x63\x50\x61\x58\x38\x6b\x38\x6b\x4f','\x41\x53\x6f\x76\x44\x53\x6b\x69\x57\x52\x4f\x6a\x68\x43\x6f\x6e','\x57\x36\x5a\x63\x52\x71\x69\x35','\x6f\x38\x6b\x47\x41\x59\x43\x55\x57\x4f\x72\x76\x57\x35\x34','\x72\x53\x6f\x50\x75\x38\x6f\x54\x61\x61','\x79\x6d\x6f\x61\x69\x43\x6f\x6f\x57\x50\x43','\x61\x64\x39\x5a\x43\x49\x71','\x57\x50\x71\x4b\x79\x47','\x6e\x6d\x6b\x77\x71\x4a\x2f\x64\x51\x53\x6b\x38\x45\x47','\x57\x50\x6c\x64\x4b\x32\x6a\x33\x57\x34\x65\x4c\x57\x36\x31\x62','\x57\x4f\x30\x52\x57\x51\x5a\x63\x50\x43\x6f\x74\x57\x51\x71','\x57\x4f\x71\x4d\x57\x35\x43\x32\x57\x4f\x74\x63\x53\x43\x6b\x4c\x6e\x57','\x6c\x47\x33\x63\x50\x61','\x57\x34\x69\x6e\x74\x68\x4b\x4c\x75\x71','\x72\x4b\x72\x31\x6c\x65\x42\x63\x47\x61\x5a\x64\x50\x71','\x57\x50\x47\x32\x57\x51\x79','\x57\x4f\x34\x2b\x57\x51\x33\x63\x56\x38\x6f\x6b\x57\x51\x58\x6f\x57\x4f\x57','\x57\x37\x43\x6a\x71\x68\x75\x6f','\x57\x36\x42\x63\x4a\x43\x6b\x63\x6b\x61','\x57\x4f\x56\x63\x47\x47\x64\x63\x4b\x68\x53\x67\x57\x34\x42\x63\x4a\x47','\x57\x36\x56\x63\x49\x43\x6b\x7a\x57\x52\x42\x64\x55\x30\x57\x6a\x6d\x71','\x64\x47\x54\x32\x42\x4a\x53','\x43\x6d\x6b\x44\x57\x50\x4b\x4a\x57\x52\x4e\x64\x4a\x53\x6f\x69\x74\x71','\x57\x34\x33\x64\x49\x43\x6b\x34\x65\x6d\x6f\x72','\x57\x36\x6c\x63\x4e\x43\x6b\x63\x6e\x61','\x71\x53\x6b\x41\x6e\x43\x6b\x33\x6f\x68\x68\x64\x50\x47','\x57\x36\x42\x64\x53\x4b\x39\x32\x65\x6d\x6b\x53\x63\x43\x6b\x44','\x65\x73\x52\x63\x54\x57\x6d','\x57\x35\x6a\x43\x57\x37\x4a\x63\x51\x6d\x6f\x6d\x71\x57','\x57\x50\x46\x64\x50\x4b\x54\x61\x6b\x53\x6f\x4f','\x57\x34\x50\x77\x57\x34\x70\x63\x56\x38\x6f\x69\x74\x48\x33\x63\x55\x47','\x57\x34\x4e\x63\x52\x53\x6b\x46\x63\x4c\x6d','\x57\x51\x4e\x64\x55\x6d\x6b\x48','\x57\x37\x46\x63\x48\x53\x6b\x68\x43\x53\x6f\x6f\x6e\x71\x65\x4b','\x6c\x38\x6f\x32\x57\x35\x54\x75\x57\x51\x65\x51\x57\x51\x53','\x66\x74\x76\x2b\x46\x71\x71\x68\x57\x50\x4b\x34','\x78\x38\x6f\x37\x57\x34\x6c\x64\x48\x6d\x6f\x6d\x61\x5a\x72\x59','\x57\x34\x76\x4e\x78\x47','\x74\x6d\x6f\x33\x57\x34\x78\x64\x4d\x6d\x6b\x75\x63\x47\x35\x2f','\x57\x37\x4e\x63\x4b\x53\x6b\x36','\x42\x53\x6b\x44\x71\x49\x78\x64\x47\x6d\x6b\x69\x75\x4d\x43','\x57\x52\x6c\x64\x4a\x77\x54\x4d\x67\x53\x6f\x69\x57\x37\x79','\x57\x34\x7a\x4d\x77\x38\x6b\x36\x73\x53\x6f\x62\x57\x4f\x56\x64\x55\x57','\x57\x35\x62\x4d\x57\x36\x6c\x63\x56\x43\x6f\x7a\x73\x61\x4f','\x57\x37\x33\x63\x47\x38\x6b\x75\x6d\x47','\x57\x51\x38\x6d\x63\x74\x4f','\x57\x35\x30\x7a\x57\x50\x68\x63\x4b\x6d\x6f\x7a','\x57\x50\x75\x36\x57\x51\x46\x63\x56\x57','\x44\x6d\x6b\x61\x57\x50\x58\x4f\x57\x4f\x70\x64\x47\x43\x6f\x53\x44\x47','\x6f\x53\x6b\x6a\x67\x61','\x74\x6d\x6f\x30\x6a\x57\x48\x34\x62\x33\x76\x65','\x45\x43\x6f\x31\x62\x6d\x6f\x35','\x6c\x65\x74\x64\x4d\x31\x58\x52\x57\x52\x43\x41\x76\x47','\x61\x43\x6b\x30\x57\x35\x78\x64\x55\x74\x79\x4c\x57\x52\x30','\x6c\x43\x6b\x43\x57\x37\x75','\x57\x4f\x78\x63\x4e\x58\x57','\x57\x52\x37\x64\x55\x67\x4c\x68\x57\x36\x71\x76\x57\x35\x66\x77','\x57\x37\x4a\x64\x50\x53\x6b\x6a\x45\x38\x6f\x71\x6e\x38\x6b\x49\x68\x47','\x57\x34\x2f\x63\x50\x6d\x6b\x65\x61\x31\x57\x30\x71\x47','\x70\x71\x37\x63\x4e\x49\x69\x42\x57\x36\x68\x64\x50\x4b\x61','\x57\x50\x4f\x4b\x57\x35\x75\x6b\x57\x50\x78\x63\x52\x43\x6b\x39\x46\x61','\x73\x43\x6b\x51\x57\x51\x30\x7a\x57\x50\x37\x64\x4c\x6d\x6f\x59\x45\x47','\x42\x4d\x6e\x58\x61\x78\x2f\x63\x50\x63\x57','\x69\x43\x6b\x51\x75\x72\x78\x63\x56\x47','\x57\x34\x70\x63\x4e\x53\x6b\x77\x57\x51\x6d\x48','\x57\x50\x52\x63\x4c\x74\x64\x63\x47\x33\x34\x78\x57\x35\x33\x63\x4f\x47','\x57\x36\x64\x63\x4a\x43\x6b\x62\x6d\x6d\x6f\x4f\x68\x5a\x61','\x57\x34\x35\x69\x57\x37\x78\x63\x4d\x53\x6f\x6d\x57\x35\x4b','\x71\x5a\x78\x64\x4c\x4b\x38','\x7a\x43\x6b\x6c\x57\x50\x4b\x59','\x42\x6d\x6f\x2f\x65\x71','\x57\x35\x76\x4c\x41\x77\x37\x63\x53\x6d\x6b\x6d\x44\x53\x6b\x7a','\x78\x6d\x6b\x41\x6a\x6d\x6b\x57\x6b\x47','\x57\x35\x65\x42\x74\x71','\x57\x37\x33\x64\x4d\x63\x4a\x64\x50\x61','\x57\x4f\x38\x37\x57\x35\x47\x6d\x57\x50\x74\x63\x55\x53\x6b\x52\x6e\x47','\x69\x53\x6b\x4a\x71\x62\x65','\x57\x50\x6c\x64\x47\x67\x78\x63\x4b\x75\x5a\x63\x55\x4e\x38','\x78\x4d\x64\x64\x4c\x65\x70\x63\x4c\x77\x58\x2f\x57\x37\x57','\x57\x37\x74\x64\x53\x78\x58\x51\x62\x53\x6b\x48','\x78\x4a\x2f\x64\x54\x57','\x69\x38\x6b\x6e\x67\x38\x6b\x42','\x67\x5a\x4e\x63\x54\x57\x34','\x6e\x53\x6b\x6a\x57\x36\x46\x64\x4d\x57\x34\x78\x57\x52\x6d\x69','\x70\x63\x66\x65\x75\x4a\x79','\x65\x33\x5a\x63\x55\x57\x33\x63\x51\x32\x7a\x7a','\x57\x4f\x42\x64\x4a\x53\x6f\x63\x57\x34\x4b','\x79\x43\x6b\x75\x75\x64\x2f\x64\x52\x53\x6b\x64\x75\x47','\x65\x43\x6b\x34\x57\x35\x37\x64\x48\x62\x30','\x57\x36\x33\x63\x4d\x53\x6b\x41\x57\x52\x5a\x64\x55\x4c\x34\x6f\x43\x61','\x79\x38\x6f\x41\x43\x38\x6f\x73\x57\x52\x53\x4f\x6e\x6d\x6f\x54','\x74\x53\x6b\x6a\x57\x37\x61\x2b\x57\x51\x4e\x64\x4b\x4b\x71','\x6f\x76\x4a\x64\x47\x48\x66\x62\x57\x50\x71\x53\x6e\x47','\x45\x38\x6f\x46\x57\x36\x78\x64\x55\x61','\x7a\x53\x6f\x34\x68\x38\x6f\x4f\x57\x50\x53','\x57\x37\x68\x64\x50\x31\x7a\x54\x65\x71','\x78\x6d\x6f\x59\x74\x38\x6f\x4f\x57\x51\x30\x65\x62\x43\x6f\x42','\x7a\x38\x6b\x73\x76\x71','\x66\x4b\x65\x45\x73\x38\x6b\x54\x6a\x58\x6a\x51','\x71\x59\x70\x64\x4c\x57','\x66\x38\x6b\x6d\x79\x4e\x46\x63\x53\x38\x6f\x4f\x57\x4f\x6c\x63\x48\x57','\x72\x38\x6f\x66\x69\x30\x6e\x46\x6b\x30\x39\x33','\x57\x35\x65\x79\x71\x76\x6d\x54\x75\x43\x6b\x73','\x42\x43\x6f\x78\x42\x38\x6f\x66\x57\x50\x4b\x76\x6a\x43\x6f\x55','\x66\x49\x48\x38\x45\x57','\x57\x34\x66\x54\x74\x53\x6b\x36\x72\x53\x6f\x77\x57\x51\x43','\x57\x35\x68\x63\x50\x38\x6b\x2b\x66\x38\x6f\x61\x6f\x71','\x57\x34\x43\x6a\x77\x4d\x69','\x57\x52\x30\x41\x57\x4f\x5a\x63\x4d\x6d\x6f\x30\x57\x4f\x76\x31\x57\x51\x53','\x57\x52\x57\x74\x73\x75\x2f\x64\x52\x31\x75\x41\x57\x35\x79','\x57\x35\x64\x63\x54\x73\x38','\x44\x43\x6b\x54\x57\x35\x30','\x57\x51\x68\x64\x48\x4e\x4c\x4d','\x76\x63\x4a\x64\x47\x30\x64\x63\x4d\x32\x47\x33','\x42\x6d\x6f\x6a\x7a\x43\x6f\x63\x57\x50\x43\x4f\x6a\x6d\x6f\x48','\x57\x37\x68\x63\x48\x57\x4a\x64\x49\x43\x6b\x6f\x73\x77\x68\x63\x50\x57','\x6a\x6d\x6b\x54\x43\x74\x61\x63','\x6d\x53\x6b\x66\x64\x43\x6b\x44\x57\x51\x47\x30\x57\x4f\x75\x77','\x57\x36\x2f\x64\x52\x43\x6b\x73\x6f\x53\x6f\x31\x66\x38\x6f\x62\x6c\x57','\x7a\x6d\x6f\x68\x44\x6d\x6f\x44\x6b\x57','\x66\x6d\x6f\x79\x6b\x6d\x6f\x33\x65\x43\x6f\x36','\x57\x35\x38\x45\x57\x50\x56\x63\x4b\x53\x6f\x30','\x72\x38\x6f\x4b\x72\x38\x6f\x38\x61\x43\x6b\x52\x79\x43\x6f\x63','\x65\x47\x70\x63\x4b\x62\x4b\x6c'];_0x4da6=function(){return _0x405f39;};return _0x4da6();}function isOpaqueCredential(_0x2da027){const _0x4c5dfa=_0x43665d,_0x43a2ec=_0x2da027[_0x4c5dfa(0x2ca,'\x7a\x40\x48\x41')](/[._~+/=-]/g,''),_0x28f42a=Number(/[a-z]/[_0x4c5dfa(0x2da,'\x33\x6b\x21\x63')](_0x43a2ec))+Number(/[A-Z]/[_0x4c5dfa(0x1f9,'\x33\x51\x39\x75')](_0x43a2ec))+Number(/[0-9]/[_0x4c5dfa(0x2a2,'\x4e\x28\x4d\x31')](_0x43a2ec));if(_0x43a2ec[_0x4c5dfa(0x38d,'\x58\x7a\x4e\x4f')]<-0x571+0x185a+-0x12d1||_0x28f42a<0xd20+-0x21ca+0x14ad||/^[0-9a-f]+$/i[_0x4c5dfa(0x371,'\x47\x68\x74\x69')](_0x43a2ec))return![];const _0x17f20c=new Map();for(const _0x387bb4 of _0x43a2ec)_0x17f20c[_0x4c5dfa(0x37a,'\x75\x35\x67\x54')](_0x387bb4,(_0x17f20c[_0x4c5dfa(0x2b0,'\x45\x58\x67\x43')](_0x387bb4)??-0x13*-0x1b9+0xa7*-0x11+-0x15a4)+(0x1b58+-0x2507+0x9b0));const _0x5cb5c7=[..._0x17f20c[_0x4c5dfa(0x328,'\x51\x34\x40\x49')]()][_0x4c5dfa(0x29d,'\x33\x51\x39\x75')]((_0x1798e8,_0x17b70a)=>{const _0x510228=_0x4c5dfa;if(_0x510228(0x22e,'\x58\x53\x56\x4b')===_0x510228(0x2e8,'\x58\x53\x56\x4b'))return _0xda653[_0x510228(0x2d0,'\x59\x38\x56\x4f')](0x1*-0x42b+-0x18fc+0x1d28,-(0x44b+-0x2*0x9bc+0xf2e*0x1))['\x74\x72\x69\x6d']();else{const _0x4ef6c2=_0x17b70a/_0x43a2ec[_0x510228(0x34a,'\x61\x63\x65\x52')];return _0x1798e8-_0x4ef6c2*Math[_0x510228(0x23b,'\x55\x61\x53\x51')](_0x4ef6c2);}},-0x12a9+-0xcbe+0x1*0x1f67);return _0x5cb5c7>=-0x5*-0x6e7+0x3*-0x232+-0x1bea+0.5;}const REDACT_ALLOWLIST=[/^\/home\/runner(?:[/]|$)/,/^\/Users\/runner(?:[/]|$)/,/^\/home\/circleci(?:[/]|$)/,/^\/Users\/distiller(?:[/]|$)/,/^\/home\/vsts(?:[/]|$)/,/^\/home\/travis(?:[/]|$)/,/^\/home\/jenkins(?:[/]|$)/,/^(?:noreply|no-reply|donotreply|do-not-reply)@(?:github\.com|users\.noreply\.github\.com|gitlab\.com|bitbucket\.org|npmjs\.com|claude\.ai|anthropic\.com)$/i,/^[0-9]+\+[a-zA-Z0-9._-]+@users\.noreply\.github\.com$/i,/^[a-zA-Z0-9_.-]+@users\.noreply\.github\.com$/i,/^git@github\.com$/i,/^git@gitlab\.com$/i,/^git@bitbucket\.org$/i];function isAllowlisted(_0x165c7a){const _0xbdbea6=_0x43665d;for(const _0x443887 of REDACT_ALLOWLIST)if(_0x443887[_0xbdbea6(0x2bd,'\x61\x66\x51\x46')](_0x165c7a))return!![];return![];}const ANONYMIZE_PATTERNS=[[/\/(?:home|Users)\/[^/\s"',;)}\]]+/g,'\x7e'],[/[A-Za-z]:\\Users\\[^\\/\s"',;)}\]]+/g,'\x7e']];export function redactString(_0x45763a){const _0x9100bf=_0x43665d;if(typeof _0x45763a!=='\x73\x74\x72\x69\x6e\x67'||!_0x45763a)return _0x45763a;let _0x4019eb=_0x45763a;for(const _0x127ff8 of REDACT_PATTERNS){_0x127ff8[_0x9100bf(0x270,'\x42\x48\x76\x56')+'\x78']=0xa9b*0x1+0x29*0xb2+-0x271d,_0x4019eb=_0x4019eb[_0x9100bf(0x240,'\x61\x63\x65\x52')](_0x127ff8,_0x5dcbb1=>isAllowlisted(_0x5dcbb1)?_0x5dcbb1:REDACTED);}_0x4019eb=redactStructuredCredentials(_0x4019eb),OPAQUE_CREDENTIAL_PATTERN[_0x9100bf(0x34c,'\x55\x51\x50\x70')+'\x78']=0x14f5+-0xbab*0x1+0x1d*-0x52,_0x4019eb=_0x4019eb[_0x9100bf(0x28e,'\x55\x61\x53\x51')](OPAQUE_CREDENTIAL_PATTERN,_0x332a7a=>isOpaqueCredential(_0x332a7a)?REDACTED:_0x332a7a);for(const [_0x2b65aa,_0x502d46]of ANONYMIZE_PATTERNS){_0x2b65aa[_0x9100bf(0x24e,'\x24\x4b\x4b\x5a')+'\x78']=0xe11+-0x3d*-0x9d+-0x337a*0x1,_0x4019eb=_0x4019eb[_0x9100bf(0x2a9,'\x34\x61\x4e\x5b')](_0x2b65aa,_0x50406f=>isAllowlisted(_0x50406f)?_0x50406f:_0x502d46);}return _0x4019eb;}export function redactDeep(_0x1350ab){return redactDeepWith(_0x1350ab,redactString);}function redactDeepWith(_0x9100b2,_0x5900a0){const _0x3deaa1=_0x43665d;if(typeof _0x9100b2===_0x3deaa1(0x1f1,'\x71\x33\x6a\x26'))return _0x5900a0(_0x9100b2);if(Array[_0x3deaa1(0x2ce,'\x71\x4b\x68\x32')](_0x9100b2))return _0x9100b2['\x6d\x61\x70'](_0x1ccc97=>redactDeepWith(_0x1ccc97,_0x5900a0));if(_0x9100b2&&typeof _0x9100b2==='\x6f\x62\x6a\x65\x63\x74'){if(_0x3deaa1(0x2a1,'\x33\x51\x39\x75')===_0x3deaa1(0x2e4,'\x37\x35\x43\x48')){for(const _0x2dbe7e of _0x4398ff)if(_0x2dbe7e[_0x3deaa1(0x287,'\x55\x61\x53\x51')](_0x2b524d))return!![];return![];}else{const _0x2c7a5b={};for(const [_0x21095f,_0x553e08]of Object[_0x3deaa1(0x3c3,'\x35\x6e\x7a\x70')](_0x9100b2))_0x2c7a5b[_0x21095f]=redactDeepWith(_0x553e08,_0x5900a0);return _0x2c7a5b;}}return _0x9100b2;}const EXECUTION_PAYLOAD_KEYS=new Set([_0x43665d(0x39b,'\x55\x61\x53\x51')+'\x6e',_0x43665d(0x288,'\x51\x34\x40\x49')+_0x43665d(0x2bb,'\x34\x55\x44\x56'),_0x43665d(0x2a3,'\x31\x4e\x6e\x36')+_0x43665d(0x2f5,'\x43\x4a\x5a\x66')+'\x74',_0x43665d(0x23e,'\x4e\x28\x4d\x31'),_0x43665d(0x2a4,'\x71\x47\x63\x47')+'\x72']);function sanitizeAssetContent(_0x2d6c78,_0x418292){const _0x3812e0=_0x43665d,_0x5635fc=detectEnvValueLeaks(_0x3812e0(0x2b4,'\x47\x68\x74\x69'),_0x418292)[_0x3812e0(0x341,'\x5a\x37\x29\x21')]>-0x2*0x2fb+-0x299+0x88f*0x1,_0x404727=_0x73c014=>{const _0x1b18da=_0x3812e0,_0x3183a8=redactString(_0x73c014);return _0x5635fc?_0x3183a8[_0x1b18da(0x34f,'\x4f\x62\x70\x6f')+'\x6c\x6c']('\x74\x65\x73\x74\x2d\x6b\x65\x79',REDACTED):_0x3183a8;},_0xa3a6a3=_0x98369a=>redactDeepWith(_0x98369a,_0x404727),_0x887927={};for(const [_0x5e3a5b,_0x577ea9]of Object[_0x3812e0(0x27e,'\x33\x51\x39\x75')](_0x2d6c78)){if(_0x5e3a5b===_0x3812e0(0x1ef,'\x71\x4b\x68\x32')){_0x887927[_0x5e3a5b]=sanitizeEmbeddedSourceContent(_0x577ea9,_0xa3a6a3,REDACTED,_0xed868c=>detectEnvValueLeaks(_0xed868c,_0x418292)[_0x3812e0(0x339,'\x58\x53\x56\x4b')]>0x496*-0x4+0x1*-0x210e+0x3366?REDACTED:_0x404727(_0xed868c));continue;}if(_0x5e3a5b===_0x3812e0(0x36c,'\x30\x6f\x5d\x5b')+'\x6f\x6e'&&Array[_0x3812e0(0x33e,'\x5b\x2a\x64\x38')](_0x577ea9)){_0x887927[_0x5e3a5b]=_0x577ea9[_0x3812e0(0x39d,'\x71\x47\x63\x47')](_0x414a7a=>typeof _0x414a7a===_0x3812e0(0x234,'\x6f\x4a\x29\x4d')?sanitizeExecutionCommand(_0x414a7a)[_0x3812e0(0x2be,'\x5b\x36\x39\x41')]:_0xa3a6a3(_0x414a7a));continue;}if(EXECUTION_PAYLOAD_KEYS[_0x3812e0(0x383,'\x4b\x64\x5e\x34')](_0x5e3a5b)){_0x887927[_0x5e3a5b]=sanitizeExecutionPayload(_0x577ea9)['\x76\x61\x6c\x75\x65'];continue;}if(_0x5e3a5b===_0x3812e0(0x3a0,'\x33\x6b\x21\x63')+'\x63\x65'&&_0x577ea9&&typeof _0x577ea9===_0x3812e0(0x262,'\x6f\x4a\x29\x4d')){const _0x367eab=_0x577ea9,_0x48ca2c=_0xa3a6a3(_0x367eab);Array[_0x3812e0(0x3ba,'\x33\x51\x39\x75')](_0x367eab[_0x3812e0(0x224,'\x55\x61\x53\x51')+'\x6f\x6e'])&&(_0x48ca2c['\x76\x61\x6c\x69\x64\x61\x74\x69'+'\x6f\x6e']=_0x367eab[_0x3812e0(0x282,'\x4b\x64\x5e\x34')+'\x6f\x6e'][_0x3812e0(0x241,'\x63\x65\x76\x25')](_0x301865=>typeof _0x301865===_0x3812e0(0x273,'\x58\x7a\x4e\x4f')?sanitizeExecutionCommand(_0x301865)[_0x3812e0(0x27c,'\x24\x4b\x4b\x5a')]:_0xa3a6a3(_0x301865)));for(const _0xa85bd of EXECUTION_PAYLOAD_KEYS){if(_0x3812e0(0x35f,'\x45\x58\x67\x43')!==_0x3812e0(0x268,'\x75\x5a\x64\x74'))return _0x4da699[_0x3812e0(0x3a4,'\x63\x65\x76\x25')](_0x26a2ce);else{if(_0x367eab[_0xa85bd]!==undefined){if('\x46\x71\x4d\x59\x74'!==_0x3812e0(0x209,'\x75\x35\x67\x54')){if(!_0x5db07c(_0x465662))return![];let _0x589922;try{_0x589922=new _0x1f80ea(_0x313aee);}catch{return![];}if(_0x589922[_0x3812e0(0x393,'\x38\x65\x44\x68')]||_0x589922[_0x3812e0(0x25f,'\x55\x51\x50\x70')])return!![];const _0x2e14d2=_0x589922['\x68\x6f\x73\x74\x6e\x61\x6d\x65']['\x74\x6f\x4c\x6f\x77\x65\x72\x43'+'\x61\x73\x65'](),_0x5c43f0=_0x589922[_0x3812e0(0x259,'\x71\x47\x63\x47')]['\x74\x6f\x4c\x6f\x77\x65\x72\x43'+'\x61\x73\x65']();if(/(^|\.)hooks?\./[_0x3812e0(0x1fd,'\x75\x5a\x64\x74')](_0x2e14d2)||/(^|\.)webhooks?\./[_0x3812e0(0x3a6,'\x34\x61\x4e\x5b')](_0x2e14d2))return!![];if(/\/(?:api\/)?webhooks?\//[_0x3812e0(0x1fd,'\x75\x5a\x64\x74')](_0x5c43f0)||/\/hooks?\//['\x74\x65\x73\x74'](_0x5c43f0))return!![];if(/\/(?:tokens?|secrets?|signed|signatures?|credentials?)\//['\x74\x65\x73\x74'](_0x5c43f0))return!![];for(const _0x51d0da of _0x589922['\x73\x65\x61\x72\x63\x68\x50\x61'+'\x72\x61\x6d\x73'][_0x3812e0(0x2bf,'\x75\x5a\x64\x74')]()){if(_0x5b7c2f[_0x3812e0(0x22b,'\x46\x49\x4b\x73')](_0x51d0da[_0x3812e0(0x299,'\x4f\x62\x70\x6f')+_0x3812e0(0x276,'\x33\x6b\x21\x63')]()))return!![];}return![];}else _0x48ca2c[_0xa85bd]=sanitizeExecutionPayload(_0x367eab[_0xa85bd])[_0x3812e0(0x307,'\x41\x66\x58\x4b')];}}}_0x887927[_0x5e3a5b]=_0x48ca2c;continue;}_0x887927[_0x5e3a5b]=_0xa3a6a3(_0x577ea9);}return _0x887927;}export function sanitizeAsset(_0x240910,_0x7993d7={}){const _0x535a90=_0x43665d,_0x3760df=sanitizeAssetContent(_0x240910,_0x7993d7['\x65\x6e\x76']??{}),_0x50b753=computeAssetId(_0x3760df);return{..._0x3760df,'\x61\x73\x73\x65\x74\x5f\x69\x64':_0x50b753??_0x240910[_0x535a90(0x2a6,'\x35\x44\x51\x33')]};}const LEAK_SCANNERS=[{'\x74\x79\x70\x65':_0x43665d(0x380,'\x58\x7a\x4e\x4f'),'\x70\x61\x74\x74\x65\x72\x6e':/sk-[A-Za-z0-9]{20,}/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x1ea,'\x42\x48\x76\x56')+_0x43665d(0x2ec,'\x6c\x68\x58\x23')+_0x43665d(0x251,'\x75\x35\x67\x54')+'\x45\x59'},{'\x74\x79\x70\x65':_0x43665d(0x2e5,'\x71\x33\x6a\x26'),'\x70\x61\x74\x74\x65\x72\x6e':/sk-proj-[A-Za-z0-9-_]{20,}/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2b3,'\x37\x35\x43\x48')+_0x43665d(0x215,'\x55\x51\x50\x70')+'\x41\x49\x5f\x41\x50\x49\x5f\x4b'+'\x45\x59'},{'\x74\x79\x70\x65':_0x43665d(0x360,'\x33\x57\x67\x50'),'\x70\x61\x74\x74\x65\x72\x6e':/sk-ant-[A-Za-z0-9-_]{20,}/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x30e,'\x6f\x4a\x29\x4d')+_0x43665d(0x38f,'\x36\x32\x5e\x37')+_0x43665d(0x35d,'\x31\x4e\x6e\x36')+_0x43665d(0x367,'\x72\x69\x63\x56')},{'\x74\x79\x70\x65':_0x43665d(0x2b2,'\x72\x69\x63\x56'),'\x70\x61\x74\x74\x65\x72\x6e':/AKIA[0-9A-Z]{16}/g,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x43665d(0x368,'\x41\x66\x58\x4b')+_0x43665d(0x370,'\x24\x4b\x4b\x5a')+_0x43665d(0x233,'\x5a\x37\x29\x21')},{'\x74\x79\x70\x65':_0x43665d(0x32d,'\x34\x55\x44\x56')+_0x43665d(0x377,'\x55\x51\x50\x70'),'\x70\x61\x74\x74\x65\x72\x6e':/gh(?:p|o|u|s|r)_[A-Za-z0-9]{36,}/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x254,'\x43\x4a\x5a\x66')+_0x43665d(0x26e,'\x33\x57\x67\x50')+'\x55\x42\x5f\x54\x4f\x4b\x45\x4e'},{'\x74\x79\x70\x65':_0x43665d(0x2b6,'\x47\x68\x74\x69')+_0x43665d(0x39e,'\x64\x48\x79\x40'),'\x70\x61\x74\x74\x65\x72\x6e':/github_pat_[A-Za-z0-9_]{22,}/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x332,'\x5a\x37\x29\x21')+_0x43665d(0x2b1,'\x4e\x28\x4d\x31')+_0x43665d(0x30a,'\x41\x66\x58\x4b')},{'\x74\x79\x70\x65':_0x43665d(0x29b,'\x33\x57\x67\x50')+'\x6e','\x70\x61\x74\x74\x65\x72\x6e':/npm_[A-Za-z0-9]{36,}/g,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x43665d(0x2c0,'\x35\x44\x51\x33')+_0x43665d(0x294,'\x41\x66\x58\x4b')},{'\x74\x79\x70\x65':_0x43665d(0x3b5,'\x58\x53\x56\x4b')+_0x43665d(0x329,'\x72\x69\x63\x56'),'\x70\x61\x74\x74\x65\x72\x6e':/xox[baprsv]-[A-Za-z0-9-]{10,}/g,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x43665d(0x26f,'\x5a\x37\x29\x21')+'\x4b\x5f\x54\x4f\x4b\x45\x4e'},{'\x74\x79\x70\x65':_0x43665d(0x3b2,'\x75\x35\x67\x54'),'\x70\x61\x74\x74\x65\x72\x6e':/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2e9,'\x71\x47\x63\x47')+_0x43665d(0x205,'\x34\x55\x44\x56')},{'\x74\x79\x70\x65':_0x43665d(0x344,'\x42\x23\x4a\x6b')+'\x79','\x70\x61\x74\x74\x65\x72\x6e':/AccountKey=[^;\s]+/gi,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2d7,'\x47\x56\x26\x6a')+_0x43665d(0x358,'\x34\x55\x44\x56')+_0x43665d(0x212,'\x51\x34\x40\x49')+_0x43665d(0x3a9,'\x35\x44\x51\x33')},{'\x74\x79\x70\x65':_0x43665d(0x372,'\x61\x66\x51\x46')+'\x69\x65\x6e\x74\x5f\x73\x65\x63'+_0x43665d(0x389,'\x42\x23\x4a\x6b'),'\x70\x61\x74\x74\x65\x72\x6e':/client_secret=[A-Za-z0-9~._-]{8,}/gi,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x43665d(0x31d,'\x75\x35\x67\x54')+_0x43665d(0x35b,'\x59\x38\x56\x4f')+_0x43665d(0x351,'\x5b\x2a\x64\x38')},{'\x74\x79\x70\x65':_0x43665d(0x326,'\x5b\x36\x39\x41')+_0x43665d(0x3b7,'\x33\x57\x67\x50')+_0x43665d(0x23a,'\x5a\x37\x29\x21')+'\x79','\x70\x61\x74\x74\x65\x72\x6e':/instrumentationkey=[0-9a-fA-F-]{20,}/gi,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x1ec,'\x34\x61\x4e\x5b')+_0x43665d(0x382,'\x38\x65\x44\x68')+_0x43665d(0x266,'\x59\x38\x56\x4f')+_0x43665d(0x286,'\x71\x47\x63\x47')+_0x43665d(0x303,'\x55\x51\x50\x70')+'\x45\x59'},{'\x74\x79\x70\x65':_0x43665d(0x316,'\x35\x6e\x7a\x70')+_0x43665d(0x2af,'\x7a\x40\x48\x41'),'\x70\x61\x74\x74\x65\x72\x6e':/\b[MNO][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x3ad,'\x61\x63\x65\x52')+_0x43665d(0x2c2,'\x43\x4a\x5a\x66')+_0x43665d(0x230,'\x31\x4e\x6e\x36')+'\x4e'},{'\x74\x79\x70\x65':_0x43665d(0x2ba,'\x61\x63\x65\x52')+_0x43665d(0x3af,'\x5b\x36\x39\x41'),'\x70\x61\x74\x74\x65\x72\x6e':/Bearer\s+[A-Za-z0-9-._~+/]{20,}=*/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2b3,'\x37\x35\x43\x48')+_0x43665d(0x2f4,'\x5b\x2a\x64\x38')+_0x43665d(0x24d,'\x71\x47\x63\x47')},{'\x74\x79\x70\x65':_0x43665d(0x21f,'\x30\x6f\x5d\x5b')+_0x43665d(0x297,'\x42\x48\x76\x56'),'\x70\x61\x74\x74\x65\x72\x6e':/"?token"?[=:]\s*["']?[A-Za-z0-9-._~+/]{16,}["']?/gi,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x78\x79\x20\x74\x6f'+_0x43665d(0x385,'\x33\x51\x39\x75')+_0x43665d(0x305,'\x42\x23\x4a\x6b')+_0x43665d(0x207,'\x4e\x28\x4d\x31')+_0x43665d(0x265,'\x33\x6b\x21\x63')+_0x43665d(0x333,'\x33\x57\x67\x50')},{'\x74\x79\x70\x65':_0x43665d(0x200,'\x4f\x62\x70\x6f')+_0x43665d(0x1fb,'\x4b\x64\x5e\x34'),'\x70\x61\x74\x74\x65\x72\x6e':/-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2cc,'\x33\x57\x67\x50')+_0x43665d(0x3c5,'\x4b\x64\x5e\x34')+_0x43665d(0x29e,'\x71\x4b\x68\x32')+_0x43665d(0x2ed,'\x47\x68\x74\x69')},{'\x74\x79\x70\x65':_0x43665d(0x2df,'\x35\x6e\x7a\x70'),'\x70\x61\x74\x74\x65\x72\x6e':/(?:mongodb|postgres|postgresql|mysql|redis|amqp):\/\/[^\s"',;)}\]]{10,}/gi,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x3b9,'\x41\x66\x58\x4b')+_0x43665d(0x24f,'\x47\x56\x26\x6a')+_0x43665d(0x272,'\x73\x33\x45\x63')},{'\x74\x79\x70\x65':_0x43665d(0x338,'\x36\x32\x5e\x37')+'\x74\x68','\x70\x61\x74\x74\x65\x72\x6e':/\/home\/[a-zA-Z0-9_.-]+\//g,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x43665d(0x291,'\x51\x34\x40\x49')},{'\x74\x79\x70\x65':_0x43665d(0x20e,'\x71\x4b\x68\x32')+'\x74\x68','\x70\x61\x74\x74\x65\x72\x6e':/\/Users\/[a-zA-Z0-9_.-]+\//g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x263,'\x38\x65\x44\x68')+_0x43665d(0x342,'\x71\x4b\x68\x32')},{'\x74\x79\x70\x65':'\x6c\x6f\x63\x61\x6c\x5f\x70\x61'+'\x74\x68','\x70\x61\x74\x74\x65\x72\x6e':/[A-Z]:\\Users\\[a-zA-Z0-9_.-]+\\/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2c4,'\x6c\x68\x58\x23')+_0x43665d(0x388,'\x33\x57\x67\x50')+_0x43665d(0x361,'\x64\x48\x79\x40')},{'\x74\x79\x70\x65':_0x43665d(0x392,'\x4e\x28\x4d\x31')+_0x43665d(0x245,'\x30\x6f\x5d\x5b'),'\x70\x61\x74\x74\x65\x72\x6e':/\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d{2,5})?\b/g,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x43665d(0x244,'\x43\x50\x4f\x52')+_0x43665d(0x25d,'\x35\x6e\x7a\x70')},{'\x74\x79\x70\x65':_0x43665d(0x312,'\x61\x63\x65\x52')+'\x65\x74','\x70\x61\x74\x74\x65\x72\x6e':/[a-zA-Z0-9_.-]{1,64}@(?:(?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]{1,255}\.[a-zA-Z]{2,24})/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x362,'\x46\x49\x4b\x73')+_0x43665d(0x23d,'\x51\x34\x40\x49')+'\x48\x4f\x53\x54'},{'\x74\x79\x70\x65':_0x43665d(0x1fe,'\x43\x4a\x5a\x66'),'\x70\x61\x74\x74\x65\x72\x6e':/password[=:]\s*["']?[^\s"',;)}\]]{6,}["']?/gi,'\x73\x75\x67\x67\x65\x73\x74':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+'\x65\x6e\x76\x2e\x50\x41\x53\x53'+'\x57\x4f\x52\x44'},{'\x74\x79\x70\x65':_0x43665d(0x2d3,'\x36\x32\x5e\x37'),'\x70\x61\x74\x74\x65\x72\x6e':/secret[=:]\s*["']?[A-Za-z0-9-._~+/]{16,}["']?/gi,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x228,'\x78\x6f\x24\x54')+_0x43665d(0x2c9,'\x73\x33\x45\x63')+'\x45\x54'},{'\x74\x79\x70\x65':_0x43665d(0x223,'\x33\x57\x67\x50')+'\x74\x68','\x70\x61\x74\x74\x65\x72\x6e':/:\/\/[^@\s:]+:[^@\s]+@/g,'\x73\x75\x67\x67\x65\x73\x74':_0x43665d(0x2c4,'\x6c\x68\x58\x23')+_0x43665d(0x321,'\x4b\x64\x5e\x34')+_0x43665d(0x229,'\x5b\x2a\x64\x38')}],ENV_SCAN_SKIP_KEYS=new Set([_0x43665d(0x2dc,'\x5b\x2a\x64\x38'),_0x43665d(0x366,'\x38\x65\x44\x68'),_0x43665d(0x2cf,'\x5b\x2a\x64\x38'),_0x43665d(0x278,'\x36\x32\x5e\x37'),_0x43665d(0x31b,'\x36\x32\x5e\x37'),_0x43665d(0x1fc,'\x4e\x28\x4d\x31'),_0x43665d(0x30f,'\x45\x58\x67\x43'),_0x43665d(0x250,'\x35\x6e\x7a\x70'),_0x43665d(0x353,'\x36\x32\x5e\x37'),_0x43665d(0x277,'\x43\x50\x4f\x52'),_0x43665d(0x246,'\x61\x63\x65\x52'),_0x43665d(0x2c5,'\x58\x53\x56\x4b'),_0x43665d(0x20a,'\x6f\x4a\x29\x4d'),_0x43665d(0x2a7,'\x73\x33\x45\x63'),_0x43665d(0x39f,'\x6c\x68\x58\x23'),_0x43665d(0x311,'\x75\x35\x67\x54')+'\x53',_0x43665d(0x2cb,'\x38\x65\x44\x68')+'\x4d',_0x43665d(0x206,'\x42\x23\x4a\x6b')+_0x43665d(0x235,'\x51\x34\x40\x49'),_0x43665d(0x2cd,'\x35\x44\x51\x33')+_0x43665d(0x252,'\x4b\x64\x5e\x34'),_0x43665d(0x2c8,'\x4f\x62\x70\x6f')+_0x43665d(0x213,'\x4b\x64\x5e\x34'),'\x44\x42\x55\x53\x5f\x53\x45\x53'+_0x43665d(0x2f0,'\x51\x34\x40\x49')+_0x43665d(0x2f2,'\x4b\x64\x5e\x34'),_0x43665d(0x336,'\x34\x61\x4e\x5b')+_0x43665d(0x39c,'\x59\x38\x56\x4f'),_0x43665d(0x261,'\x5a\x37\x29\x21')+_0x43665d(0x222,'\x24\x4b\x4b\x5a'),'\x5f']),ENV_VALUE_FILESYSTEM_PATH_RE=/^(\/|[A-Za-z]:\\)/,ENV_VALUE_URL_RE=/^[a-z][a-z0-9+.-]*:\/\//i,SENSITIVE_ENV_KEY_PARTS=new Set([_0x43665d(0x3c6,'\x34\x55\x44\x56'),_0x43665d(0x1e8,'\x4e\x28\x4d\x31'),_0x43665d(0x3aa,'\x36\x32\x5e\x37'),_0x43665d(0x397,'\x51\x34\x40\x49'),_0x43665d(0x364,'\x43\x50\x4f\x52'),_0x43665d(0x27a,'\x55\x61\x53\x51'),_0x43665d(0x386,'\x34\x61\x4e\x5b')+'\x53\x45',_0x43665d(0x2ff,'\x78\x6f\x24\x54'),_0x43665d(0x2fd,'\x42\x48\x76\x56')+'\x41\x4c','\x43\x52\x45\x44\x45\x4e\x54\x49'+'\x41\x4c\x53','\x53\x49\x47\x4e\x41\x54\x55\x52'+'\x45',_0x43665d(0x3bb,'\x51\x34\x40\x49'),_0x43665d(0x2b7,'\x7a\x40\x48\x41'),_0x43665d(0x2ad,'\x46\x49\x4b\x73'),_0x43665d(0x2fa,'\x4e\x28\x4d\x31'),_0x43665d(0x37f,'\x71\x4b\x68\x32'),_0x43665d(0x247,'\x61\x63\x65\x52'),_0x43665d(0x2fc,'\x75\x5a\x64\x74')+_0x43665d(0x1e9,'\x55\x51\x50\x70')]),SENSITIVE_ENV_KEY_RE=/WEBHOOK|TOKEN|SECRET|PASSWORD|CREDENTIAL|SIGNATURE|SIGNED|DSN|BEARER|COOKIE|SESSION|APIKEY|ACCESSKEY|PRIVATEKEY|CERTIFICATE/,HIGH_RISK_URL_QUERY_KEYS=new Set([_0x43665d(0x269,'\x4f\x62\x70\x6f'),_0x43665d(0x310,'\x47\x68\x74\x69')+_0x43665d(0x2bc,'\x4e\x28\x4d\x31'),'\x61\x75\x74\x68',_0x43665d(0x374,'\x64\x48\x79\x40')+_0x43665d(0x3bc,'\x43\x4a\x5a\x66'),_0x43665d(0x2f6,'\x33\x51\x39\x75'),'\x61\x70\x69\x6b\x65\x79',_0x43665d(0x2c7,'\x31\x4e\x6e\x36'),_0x43665d(0x394,'\x31\x4e\x6e\x36'),_0x43665d(0x399,'\x47\x68\x74\x69')+'\x65','\x73\x69\x67',_0x43665d(0x3c8,'\x51\x34\x40\x49'),_0x43665d(0x33c,'\x4b\x64\x5e\x34')+_0x43665d(0x2b9,'\x46\x49\x4b\x73'),_0x43665d(0x21a,'\x6a\x33\x35\x24')+_0x43665d(0x256,'\x6a\x33\x35\x24'),_0x43665d(0x363,'\x41\x66\x58\x4b')+_0x43665d(0x36a,'\x31\x4e\x6e\x36')+_0x43665d(0x2ab,'\x38\x65\x44\x68'),_0x43665d(0x327,'\x24\x4b\x4b\x5a')+'\x69\x67\x6e\x61\x74\x75\x72\x65',_0x43665d(0x2de,'\x75\x35\x67\x54')+_0x43665d(0x3c4,'\x4e\x28\x4d\x31')+'\x6c','\x73\x68\x61\x72\x65\x64\x61\x63'+_0x43665d(0x1e6,'\x58\x53\x56\x4b')+_0x43665d(0x2ef,'\x35\x6e\x7a\x70')]);function normalizeEnvKey(_0x3acecb){const _0x5bcd98=_0x43665d,_0x570c39=_0x3acecb[_0x5bcd98(0x2ae,'\x34\x55\x44\x56')+_0x5bcd98(0x2d9,'\x33\x51\x39\x75')]()[_0x5bcd98(0x26b,'\x6a\x33\x35\x24')](/[^A-Z0-9]+/g,'\x5f')[_0x5bcd98(0x301,'\x75\x35\x67\x54')](/^_+|_+$/g,'');return _0x570c39||_0x3acecb[_0x5bcd98(0x2d1,'\x31\x4e\x6e\x36')+'\x61\x73\x65']();}function isFilesystemPathEnvValue(_0x552d75){const _0x431956=_0x43665d;return ENV_VALUE_FILESYSTEM_PATH_RE[_0x431956(0x3c7,'\x36\x32\x5e\x37')](_0x552d75);}function isUrlEnvValue(_0x2527df){const _0x40ae15=_0x43665d;return ENV_VALUE_URL_RE[_0x40ae15(0x1f9,'\x33\x51\x39\x75')](_0x2527df);}function isSensitiveEnvKey(_0x11b3e0){const _0x270a76=_0x43665d,_0x4dd785=normalizeEnvKey(_0x11b3e0),_0x41d7eb=_0x4dd785[_0x270a76(0x27b,'\x6a\x33\x35\x24')](/[^A-Z0-9]+/)[_0x270a76(0x349,'\x61\x66\x51\x46')](Boolean);if(_0x41d7eb[_0x270a76(0x3b4,'\x38\x65\x44\x68')](_0x4a00c4=>SENSITIVE_ENV_KEY_PARTS['\x68\x61\x73'](_0x4a00c4)))return!![];return SENSITIVE_ENV_KEY_RE[_0x270a76(0x300,'\x46\x49\x4b\x73')](_0x4dd785);}function isHighRiskUrlEnvValue(_0xb9d23a){const _0x629d42=_0x43665d;if(!isUrlEnvValue(_0xb9d23a))return![];let _0x2cff44;try{_0x2cff44=new URL(_0xb9d23a);}catch{return![];}if(_0x2cff44[_0x629d42(0x3ae,'\x58\x53\x56\x4b')]||_0x2cff44[_0x629d42(0x2a0,'\x75\x5a\x64\x74')])return!![];const _0x3e59f5=_0x2cff44[_0x629d42(0x37e,'\x6f\x4a\x29\x4d')][_0x629d42(0x1f8,'\x41\x66\x58\x4b')+_0x629d42(0x314,'\x24\x4b\x4b\x5a')](),_0x21ea9b=_0x2cff44[_0x629d42(0x217,'\x24\x4b\x4b\x5a')][_0x629d42(0x3a5,'\x42\x23\x4a\x6b')+_0x629d42(0x31c,'\x75\x5a\x64\x74')]();if(/(^|\.)hooks?\./[_0x629d42(0x26d,'\x6f\x4a\x29\x4d')](_0x3e59f5)||/(^|\.)webhooks?\./[_0x629d42(0x1f2,'\x6a\x33\x35\x24')](_0x3e59f5))return!![];if(/\/(?:api\/)?webhooks?\//[_0x629d42(0x3a4,'\x63\x65\x76\x25')](_0x21ea9b)||/\/hooks?\//['\x74\x65\x73\x74'](_0x21ea9b))return!![];if(/\/(?:tokens?|secrets?|signed|signatures?|credentials?)\//[_0x629d42(0x1fd,'\x75\x5a\x64\x74')](_0x21ea9b))return!![];for(const _0x407968 of _0x2cff44[_0x629d42(0x22a,'\x6f\x4a\x29\x4d')+'\x72\x61\x6d\x73'][_0x629d42(0x2e6,'\x24\x4b\x4b\x5a')]()){if(_0x629d42(0x324,'\x43\x4a\x5a\x66')!==_0x629d42(0x396,'\x4b\x64\x5e\x34'))_0x45915c[_0x629d42(0x227,'\x5a\x37\x29\x21')]({'\x76\x61\x6c\x69\x64\x61\x74\x69\x6f\x6e':_0x2ffe31[_0x629d42(0x319,'\x64\x48\x79\x40')+'\x6f\x6e']});else{if(HIGH_RISK_URL_QUERY_KEYS[_0x629d42(0x2e0,'\x64\x48\x79\x40')](_0x407968[_0x629d42(0x38c,'\x30\x6f\x5d\x5b')+_0x629d42(0x320,'\x51\x34\x40\x49')]()))return!![];}}return![];}function shouldSkipEnvValueReverseScan(_0x1a2d01,_0x5329a9){if(isSensitiveEnvKey(_0x1a2d01))return![];if(isFilesystemPathEnvValue(_0x5329a9))return!![];if(isUrlEnvValue(_0x5329a9)&&!isHighRiskUrlEnvValue(_0x5329a9))return!![];return![];}const clip=_0x4f94ef=>_0x4f94ef[_0x43665d(0x390,'\x38\x65\x44\x68')]>0x237e+0x9c*-0x21+-0xf26*0x1?_0x4f94ef[_0x43665d(0x33f,'\x63\x65\x76\x25')](-0x226+0x1812+-0x15ec*0x1,-0x1*0x9d9+0x20d9*-0x1+-0x2aeb*-0x1)+'\x2e\x2e\x2e':_0x4f94ef;export function scanForLeaks(_0x464302){const _0x2c336b=_0x43665d;if(typeof _0x464302!==_0x2c336b(0x29a,'\x75\x5a\x64\x74')||!_0x464302)return{'\x66\x6f\x75\x6e\x64':![],'\x6c\x65\x61\x6b\x73':[]};const _0x53daa3=[],_0x2629ac=new Set();for(const _0x2d518f of LEAK_SCANNERS){if(_0x2c336b(0x2a5,'\x37\x35\x43\x48')===_0x2c336b(0x22c,'\x46\x49\x4b\x73')){if(_0x5a7be8[_0x3fe425]!==_0x259065)_0x28cbf0[_0x2c336b(0x34e,'\x78\x6f\x24\x54')]({[_0x4d5964]:_0x1ea91f[_0x1e7aa2]});}else{_0x2d518f[_0x2c336b(0x25e,'\x34\x55\x44\x56')][_0x2c336b(0x1ee,'\x64\x48\x79\x40')+'\x78']=0x24e*0x9+-0xdd3*0x1+-0xb*0xa1;let _0x22c059;while((_0x22c059=_0x2d518f[_0x2c336b(0x2eb,'\x78\x6f\x24\x54')][_0x2c336b(0x281,'\x36\x32\x5e\x37')](_0x464302))!==null){if(_0x2c336b(0x27d,'\x31\x4e\x6e\x36')===_0x2c336b(0x33b,'\x37\x35\x43\x48')){const _0x5e1230=_0x22c059[-0x3*0xa01+-0x42e*0x7+0x1*0x3b45];if(isAllowlisted(_0x5e1230))continue;const _0x255a08=_0x2d518f[_0x2c336b(0x2c3,'\x6a\x33\x35\x24')]+'\x3a'+_0x5e1230;if(_0x2629ac[_0x2c336b(0x2c6,'\x58\x53\x56\x4b')](_0x255a08))continue;_0x2629ac[_0x2c336b(0x2b5,'\x61\x63\x65\x52')](_0x255a08),_0x53daa3[_0x2c336b(0x337,'\x43\x50\x4f\x52')]({'\x74\x79\x70\x65':_0x2d518f['\x74\x79\x70\x65'],'\x76\x61\x6c\x75\x65':clip(_0x5e1230),'\x73\x75\x67\x67\x65\x73\x74\x69\x6f\x6e':_0x2d518f[_0x2c336b(0x25a,'\x33\x6b\x21\x63')]});}else{const _0x1295dc=_0x2c4933/_0x339134[_0x2c336b(0x219,'\x42\x48\x76\x56')];return _0xd3124a-_0x1295dc*_0x13a30c[_0x2c336b(0x335,'\x61\x66\x51\x46')](_0x1295dc);}}}}return{'\x66\x6f\x75\x6e\x64':_0x53daa3[_0x2c336b(0x378,'\x6a\x33\x35\x24')]>0x994+0x108b*0x1+-0x1a1f,'\x6c\x65\x61\x6b\x73':_0x53daa3};}function _0x2e12(_0x3ab0ec,_0x2b513c){_0x3ab0ec=_0x3ab0ec-(-0x1*-0x14ab+0x1c4d+0x67*-0x75);const _0x3da656=_0x4da6();let _0x2b76b6=_0x3da656[_0x3ab0ec];if(_0x2e12['\x4f\x45\x49\x45\x6f\x52']===undefined){var _0xa133b2=function(_0x1f81c4){const _0x470e95='\x61\x62\x63\x64\x65\x66\x67\x68\x69\x6a\x6b\x6c\x6d\x6e\x6f\x70\x71\x72\x73\x74\x75\x76\x77\x78\x79\x7a\x41\x42\x43\x44\x45\x46\x47\x48\x49\x4a\x4b\x4c\x4d\x4e\x4f\x50\x51\x52\x53\x54\x55\x56\x57\x58\x59\x5a\x30\x31\x32\x33\x34\x35\x36\x37\x38\x39\x2b\x2f\x3d';let _0x1bbde6='',_0x10107a='';for(let _0x3ff105=-0x2d5*0x4+0x1*-0xe0f+0x1963,_0x1d21da,_0x1325c1,_0x599bed=0x2660*-0x1+-0x31d+-0xf7*-0x2b;_0x1325c1=_0x1f81c4['\x63\x68\x61\x72\x41\x74'](_0x599bed++);~_0x1325c1&&(_0x1d21da=_0x3ff105%(-0x20+0x3e1*-0x3+-0x5*-0x25b)?_0x1d21da*(0x1116+-0x2*0x1173+-0x11*-0x110)+_0x1325c1:_0x1325c1,_0x3ff105++%(0x26f7+-0x545+-0x21ae))?_0x1bbde6+=String['\x66\x72\x6f\x6d\x43\x68\x61\x72\x43\x6f\x64\x65'](0xb2*0x17+0x1b39+-0x2a38&_0x1d21da>>(-(0x1*-0x23db+-0x2418+0x47f5)*_0x3ff105&-0x2123+-0x1*-0xca4+-0x135*-0x11)):0xf9+0x270+-0x369){_0x1325c1=_0x470e95['\x69\x6e\x64\x65\x78\x4f\x66'](_0x1325c1);}for(let _0x4a909c=0x1ed8+0x20ce+0x1*-0x3fa6,_0x446dfa=_0x1bbde6['\x6c\x65\x6e\x67\x74\x68'];_0x4a909c<_0x446dfa;_0x4a909c++){_0x10107a+='\x25'+('\x30\x30'+_0x1bbde6['\x63\x68\x61\x72\x43\x6f\x64\x65\x41\x74'](_0x4a909c)['\x74\x6f\x53\x74\x72\x69\x6e\x67'](-0x891+0x1ffb*0x1+-0x175a))['\x73\x6c\x69\x63\x65'](-(0xd15+-0x1cad+-0x7cd*-0x2));}return decodeURIComponent(_0x10107a);};const _0x582db6=function(_0x4cb430,_0x4ee949){let _0x1cfeb8=[],_0x37c59b=0x2528+0x6*0x2db+-0x1b25*0x2,_0x3784c2,_0x276aaa='';_0x4cb430=_0xa133b2(_0x4cb430);let _0x1f9c1f;for(_0x1f9c1f=-0x28e*0xa+-0x17b5*-0x1+0x1d7;_0x1f9c1f<0x179*0x5+-0x143f+0x2*0x6f1;_0x1f9c1f++){_0x1cfeb8[_0x1f9c1f]=_0x1f9c1f;}for(_0x1f9c1f=-0x19c4+-0xa93*-0x1+0xf31*0x1;_0x1f9c1f<0x1da*-0xf+-0x2d7*0x5+-0x13*-0x243;_0x1f9c1f++){_0x37c59b=(_0x37c59b+_0x1cfeb8[_0x1f9c1f]+_0x4ee949['\x63\x68\x61\x72\x43\x6f\x64\x65\x41\x74'](_0x1f9c1f%_0x4ee949['\x6c\x65\x6e\x67\x74\x68']))%(0x1*0xf3+0x810+-0x125*0x7),_0x3784c2=_0x1cfeb8[_0x1f9c1f],_0x1cfeb8[_0x1f9c1f]=_0x1cfeb8[_0x37c59b],_0x1cfeb8[_0x37c59b]=_0x3784c2;}_0x1f9c1f=-0x1708+0x1925+-0x21d*0x1,_0x37c59b=0x26b*-0xd+-0x185a+-0x1*-0x37c9;for(let _0x2e61dd=-0x50f+-0x2f2+0x801;_0x2e61dd<_0x4cb430['\x6c\x65\x6e\x67\x74\x68'];_0x2e61dd++){_0x1f9c1f=(_0x1f9c1f+(0x33*-0x41+-0xe8f+0x1b83*0x1))%(0x1b1+-0x13ce+0x131d),_0x37c59b=(_0x37c59b+_0x1cfeb8[_0x1f9c1f])%(-0x15c2+-0x14f*-0x7+0xd99),_0x3784c2=_0x1cfeb8[_0x1f9c1f],_0x1cfeb8[_0x1f9c1f]=_0x1cfeb8[_0x37c59b],_0x1cfeb8[_0x37c59b]=_0x3784c2,_0x276aaa+=String['\x66\x72\x6f\x6d\x43\x68\x61\x72\x43\x6f\x64\x65'](_0x4cb430['\x63\x68\x61\x72\x43\x6f\x64\x65\x41\x74'](_0x2e61dd)^_0x1cfeb8[(_0x1cfeb8[_0x1f9c1f]+_0x1cfeb8[_0x37c59b])%(-0x5*0xbe+-0x83*-0x9+0x1b)]);}return _0x276aaa;};_0x2e12['\x4e\x6f\x47\x73\x44\x46']=_0x582db6,_0x2e12['\x69\x7a\x4d\x45\x49\x63']={},_0x2e12['\x4f\x45\x49\x45\x6f\x52']=!![];}const _0x5815a0=_0x3da656[-0x2662*0x1+0x105b+0x1607],_0x1f20f1=_0x3ab0ec+_0x5815a0,_0x332bc9=_0x2e12['\x69\x7a\x4d\x45\x49\x63'][_0x1f20f1];return!_0x332bc9?(_0x2e12['\x59\x6f\x50\x73\x59\x67']===undefined&&(_0x2e12['\x59\x6f\x50\x73\x59\x67']=!![]),_0x2b76b6=_0x2e12['\x4e\x6f\x47\x73\x44\x46'](_0x2b76b6,_0x2b513c),_0x2e12['\x69\x7a\x4d\x45\x49\x63'][_0x1f20f1]=_0x2b76b6):_0x2b76b6=_0x332bc9,_0x2b76b6;}export function detectEnvValueLeaks(_0x7c9228,_0x444773){const _0x3702c8=_0x43665d;if(typeof _0x7c9228!==_0x3702c8(0x308,'\x63\x65\x76\x25')||!_0x7c9228)return[];const _0x211c25=[];for(const [_0x5da0fd,_0x5bb2]of Object[_0x3702c8(0x2f9,'\x61\x63\x65\x52')](_0x444773)){if(_0x3702c8(0x3ab,'\x42\x23\x4a\x6b')===_0x3702c8(0x296,'\x37\x35\x43\x48'))_0x1662be++,_0x555516();else{if(!_0x5bb2||_0x5bb2[_0x3702c8(0x211,'\x71\x33\x6a\x26')]<-0x16b4+-0x1c5*-0x5+0xde3)continue;if(ENV_SCAN_SKIP_KEYS[_0x3702c8(0x33d,'\x30\x6f\x5d\x5b')](normalizeEnvKey(_0x5da0fd)))continue;if(shouldSkipEnvValueReverseScan(_0x5da0fd,_0x5bb2))continue;if(_0x7c9228[_0x3702c8(0x3a3,'\x41\x66\x58\x4b')](_0x5bb2))_0x211c25[_0x3702c8(0x32f,'\x5b\x2a\x64\x38')]({'\x74\x79\x70\x65':_0x3702c8(0x3c1,'\x37\x35\x43\x48')+_0x3702c8(0x3be,'\x5b\x36\x39\x41'),'\x76\x61\x6c\x75\x65':REDACTED,'\x73\x75\x67\x67\x65\x73\x74\x69\x6f\x6e':'\x70\x72\x6f\x63\x65\x73\x73\x2e'+_0x3702c8(0x357,'\x47\x68\x74\x69')+_0x5da0fd});}}return _0x211c25;}export function fullLeakCheck(_0x160368,_0x4f8d85){const _0x5b65c0=_0x43665d,_0x406c02=scanForLeaks(_0x160368),_0x2f5c56=detectEnvValueLeaks(_0x160368,_0x4f8d85),_0x19f896=_0x406c02[_0x5b65c0(0x2d8,'\x34\x61\x4e\x5b')][_0x5b65c0(0x232,'\x47\x56\x26\x6a')](_0x2f5c56);return{'\x66\x6f\x75\x6e\x64':_0x19f896[_0x5b65c0(0x257,'\x30\x6f\x5d\x5b')]>-0x1601+-0xf9+0x16fa,'\x6c\x65\x61\x6b\x73':_0x19f896};}const PII_ONLY_LEAK_TYPES=new Set(['\x6c\x6f\x63\x61\x6c\x5f\x70\x61'+'\x74\x68']);export function leakCheckModeFromEnv(_0x17bbcb){const _0x50b64d=_0x43665d,_0x34123a=(_0x17bbcb[_0x50b64d(0x1e7,'\x45\x58\x67\x43')+_0x50b64d(0x1ff,'\x47\x56\x26\x6a')+'\x43\x4b']??'')[_0x50b64d(0x243,'\x37\x35\x43\x48')+_0x50b64d(0x2d6,'\x6a\x33\x35\x24')]();return _0x34123a===_0x50b64d(0x2fb,'\x33\x51\x39\x75')||_0x34123a===_0x50b64d(0x2fe,'\x55\x51\x50\x70')?_0x34123a:'\x73\x74\x72\x69\x63\x74';}export function sanitizeBundle(_0x12de07,_0x3df64f){const _0xe326ed=_0x43665d,_0x51c396=_0x3df64f[_0xe326ed(0x3bd,'\x73\x33\x45\x63')]??leakCheckModeFromEnv(_0x3df64f[_0xe326ed(0x1f6,'\x61\x66\x51\x46')]);let _0x2f28f4=[];if(_0x51c396!==_0xe326ed(0x318,'\x35\x6e\x7a\x70')){const _0x2a2f7d=_0x12de07[_0xe326ed(0x242,'\x38\x65\x44\x68')](_0xf70266=>JSON[_0xe326ed(0x21e,'\x38\x65\x44\x68')+'\x79'](_0xf70266))['\x6a\x6f\x69\x6e']('');_0x2f28f4=fullLeakCheck(_0x2a2f7d,_0x3df64f[_0xe326ed(0x274,'\x4f\x62\x70\x6f')])[_0xe326ed(0x3bf,'\x42\x48\x76\x56')];for(const _0x22c0bf of _0x12de07){for(const _0x1ed155 of embeddedSourceTexts(_0x22c0bf))_0x2f28f4[_0xe326ed(0x337,'\x43\x50\x4f\x52')](...fullLeakCheck(_0x1ed155,_0x3df64f[_0xe326ed(0x1f5,'\x7a\x40\x48\x41')])['\x6c\x65\x61\x6b\x73']);const _0x49efc6=[];if(Array[_0xe326ed(0x264,'\x31\x4e\x6e\x36')](_0x22c0bf[_0xe326ed(0x3c2,'\x35\x44\x51\x33')+'\x6f\x6e']))_0x49efc6[_0xe326ed(0x258,'\x5b\x36\x39\x41')]({'\x76\x61\x6c\x69\x64\x61\x74\x69\x6f\x6e':_0x22c0bf['\x76\x61\x6c\x69\x64\x61\x74\x69'+'\x6f\x6e']});for(const _0x18a487 of EXECUTION_PAYLOAD_KEYS){if(_0x22c0bf[_0x18a487]!==undefined)_0x49efc6[_0xe326ed(0x20c,'\x58\x7a\x4e\x4f')]({[_0x18a487]:_0x22c0bf[_0x18a487]});}const _0x37f588=_0x22c0bf['\x70\x72\x6f\x76\x65\x6e\x61\x6e'+'\x63\x65'];if(_0x37f588&&typeof _0x37f588===_0xe326ed(0x202,'\x78\x6f\x24\x54')&&!Array[_0xe326ed(0x279,'\x41\x66\x58\x4b')](_0x37f588)){if(_0xe326ed(0x2ee,'\x6a\x33\x35\x24')!==_0xe326ed(0x239,'\x4b\x64\x5e\x34')){const _0x5897f8=_0x37f588;Array[_0xe326ed(0x32a,'\x33\x6b\x21\x63')](_0x5897f8[_0xe326ed(0x221,'\x71\x47\x63\x47')+'\x6f\x6e'])&&_0x49efc6[_0xe326ed(0x3a2,'\x6f\x4a\x29\x4d')]({'\x76\x61\x6c\x69\x64\x61\x74\x69\x6f\x6e':_0x5897f8[_0xe326ed(0x2aa,'\x35\x6e\x7a\x70')+'\x6f\x6e']});for(const _0x3d4cc9 of EXECUTION_PAYLOAD_KEYS){if(_0x5897f8[_0x3d4cc9]!==undefined)_0x49efc6[_0xe326ed(0x2a8,'\x4e\x28\x4d\x31')]({[_0x3d4cc9]:_0x5897f8[_0x3d4cc9]});}}else{const _0x3eedea=_0x1c4b3e[-0x40e*0x7+-0x25f0+0x4255],_0x5433ff=_0x1ff1a0-_0x3eedea['\x6c\x65\x6e\x67\x74\x68']+_0x3eedea['\x74\x72\x69\x6d\x45\x6e\x64']()[_0xe326ed(0x331,'\x61\x66\x51\x46')]-(0xb3*-0x17+0x3bc*-0x3+0x1b4a),_0x57d602=_0x293852['\x6c\x61\x73\x74\x49\x6e\x64\x65'+_0xe326ed(0x3b0,'\x35\x6e\x7a\x70')]('\x0a',_0x5433ff)+(-0x9*-0x40e+0xe11+-0x328e),_0x4f8312=_0x57d602===_0x5a486b?_0xe0de6a[_0xe326ed(0x27f,'\x55\x51\x50\x70')]:_0x5433ff-_0x57d602;_0x20094a=_0x4b780d(_0x524eb4,_0x4f8312,_0x28f0f2);}}if(_0x49efc6[_0xe326ed(0x20b,'\x43\x50\x4f\x52')](_0x3080a1=>sanitizeExecutionPayload(_0x3080a1)[_0xe326ed(0x2e7,'\x5a\x37\x29\x21')])){if(_0xe326ed(0x22d,'\x71\x33\x6a\x26')!==_0xe326ed(0x32c,'\x58\x7a\x4e\x4f'))_0x2f28f4[_0xe326ed(0x3ac,'\x75\x35\x67\x54')]({'\x74\x79\x70\x65':'\x65\x78\x65\x63\x75\x74\x69\x6f'+_0xe326ed(0x25c,'\x37\x35\x43\x48')+_0xe326ed(0x20f,'\x6a\x33\x35\x24'),'\x76\x61\x6c\x75\x65':REDACTED,'\x73\x75\x67\x67\x65\x73\x74\x69\x6f\x6e':_0xe326ed(0x306,'\x73\x33\x45\x63')+_0xe326ed(0x225,'\x46\x49\x4b\x73')+_0xe326ed(0x204,'\x42\x48\x76\x56')+_0xe326ed(0x3c0,'\x41\x66\x58\x4b')+_0xe326ed(0x355,'\x71\x47\x63\x47')+_0xe326ed(0x35c,'\x47\x68\x74\x69')+'\x76\x69\x64\x65\x6e\x63\x65'});else{if(typeof _0x6ad3a9!==_0xe326ed(0x1f1,'\x71\x33\x6a\x26')||!_0x43c020)return _0x37e695;let _0x2c58bf=_0x588387;for(const _0xe24144 of _0x543b80){_0xe24144[_0xe326ed(0x293,'\x55\x61\x53\x51')+'\x78']=0x6f*0x29+-0x1*0x3ff+-0xdc8,_0x2c58bf=_0x2c58bf[_0xe326ed(0x359,'\x55\x51\x50\x70')](_0xe24144,_0x44a909=>_0x286165(_0x44a909)?_0x44a909:_0x19f87b);}_0x2c58bf=_0x2a7a95(_0x2c58bf),_0x1e3327[_0xe326ed(0x216,'\x5b\x36\x39\x41')+'\x78']=0x3f8+-0x15d*-0x17+0x2353*-0x1,_0x2c58bf=_0x2c58bf[_0xe326ed(0x2d2,'\x4e\x28\x4d\x31')](_0x1f5121,_0x54de95=>_0x5841fc(_0x54de95)?_0x5eea2c:_0x54de95);for(const [_0x1f5d6,_0x38c41f]of _0x57ffbf){_0x1f5d6[_0xe326ed(0x2ea,'\x51\x34\x40\x49')+'\x78']=-0x2387+0x3b5*-0x1+0x36*0xba,_0x2c58bf=_0x2c58bf[_0xe326ed(0x290,'\x30\x6f\x5d\x5b')](_0x1f5d6,_0x1eba04=>_0x4a42a8(_0x1eba04)?_0x1eba04:_0x38c41f);}return _0x2c58bf;}}}}const _0x37881f=_0x51c396===_0xe326ed(0x347,'\x58\x7a\x4e\x4f')&&_0x2f28f4[_0xe326ed(0x340,'\x41\x66\x58\x4b')](_0x4295a2=>!PII_ONLY_LEAK_TYPES['\x68\x61\x73'](_0x4295a2[_0xe326ed(0x3a8,'\x51\x34\x40\x49')])),_0x22ffdf=_0x12de07[_0xe326ed(0x2c1,'\x42\x23\x4a\x6b')](_0x3210d2=>sanitizeAsset(_0x3210d2,{'\x65\x6e\x76':_0x3df64f[_0xe326ed(0x313,'\x64\x48\x79\x40')]}));let _0x5cf6a7=![];for(const _0x45e6dd of[..._0x12de07,..._0x22ffdf]){if(_0xe326ed(0x309,'\x5b\x36\x39\x41')!==_0xe326ed(0x37d,'\x5b\x36\x39\x41')){const _0xae32a6=checkEmbeddedSourceIntegrity(_0x45e6dd);!_0xae32a6['\x6f\x6b']&&(_0x5cf6a7=!![],!_0x2f28f4[_0xe326ed(0x340,'\x41\x66\x58\x4b')](_0x3bd8f4=>_0x3bd8f4[_0xe326ed(0x3a8,'\x51\x34\x40\x49')]===_0xe326ed(0x36e,'\x6f\x4a\x29\x4d')+'\x5f\x73\x6f\x75\x72\x63\x65\x5f'+_0xe326ed(0x255,'\x5b\x36\x39\x41')+'\x79'&&_0x3bd8f4[_0xe326ed(0x32b,'\x4e\x28\x4d\x31')+'\x6f\x6e']===_0xae32a6[_0xe326ed(0x28a,'\x6a\x33\x35\x24')])&&_0x2f28f4[_0xe326ed(0x227,'\x5a\x37\x29\x21')]({'\x74\x79\x70\x65':_0xe326ed(0x31e,'\x64\x48\x79\x40')+_0xe326ed(0x275,'\x6c\x68\x58\x23')+_0xe326ed(0x218,'\x61\x66\x51\x46')+'\x79','\x76\x61\x6c\x75\x65':REDACTED,'\x73\x75\x67\x67\x65\x73\x74\x69\x6f\x6e':_0xae32a6[_0xe326ed(0x39a,'\x55\x61\x53\x51')]}));}else _0xc9a662[_0x591f2e]=_0x2b548d(_0x3a9542[_0x2be899])['\x76\x61\x6c\x75\x65'];}return{'\x62\x75\x6e\x64\x6c\x65':_0x22ffdf,'\x62\x6c\x6f\x63\x6b\x65\x64':_0x37881f||_0x5cf6a7,'\x6c\x65\x61\x6b\x73':_0x2f28f4,'\x6d\x6f\x64\x65':_0x51c396};}export function summarizeLeaks(_0x42220b){const _0x2afb72=_0x43665d;return _0x42220b[_0x2afb72(0x35a,'\x37\x35\x43\x48')](_0x2baa50=>_0x2baa50[_0x2afb72(0x348,'\x71\x4b\x68\x32')]+'\u2192'+_0x2baa50['\x73\x75\x67\x67\x65\x73\x74\x69'+'\x6f\x6e'])[_0x2afb72(0x3b1,'\x42\x48\x76\x56')]('\x3b\x20');}
+// Pre-publish sanitize (ported from v1 src/gep/sanitize.js): before any asset leaves for the hub, deep-redact
+// strings (30+ secret/path/email patterns) and scan for leaks (25 scanners + reverse env-value detection).
+// Pure functions, never throw — the block decision is returned to the chokepoint (bindings), which raises a
+// terminal PublishRejectedError. Command point: when redaction changes content the asset_id MUST be recomputed
+// (computeAssetId excludes asset_id by default), else the published body hash won't match its id and the hub
+// rejects it. See feedback_public_repo_no_internal_leak.
+import { computeAssetId } from '../wire/index.js';
+import { sanitizeExecutionCommand, sanitizeExecutionPayload } from '../verify/executionRedaction.js';
+import { checkEmbeddedSourceIntegrity, embeddedSourceTexts, sanitizeEmbeddedSourceContent } from './embeddedSource.js';
+export { checkEmbeddedSourceIntegrity } from './embeddedSource.js';
+export const REDACTED = '[REDACTED]';
+/** Redaction patterns (ported verbatim from v1, 30 entries). A match is replaced with [REDACTED]. */
+const REDACT_PATTERNS = [
+    // API keys & tokens (generic)
+    /Bearer\s+[A-Za-z0-9-._~+/]+=*/g,
+    /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}(?=$|[\s,;)}\]])/gi,
+    /\b(?:AIza[0-9A-Za-z_-]{20,}|ya29\.[0-9A-Za-z_-]{20,}|(?:xai|hf|glpat|dop_v1|pk_live|pk_test|sk_live|sk_test|rk_live|rk_test)[-_][A-Za-z0-9_-]{16,}|sq0(?:atp|csp)-[A-Za-z0-9_-]{16,})\b/g,
+    /sk-[A-Za-z0-9]{20,}/g,
+    // GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_)
+    /ghp_[A-Za-z0-9]{36,}/g,
+    /gho_[A-Za-z0-9]{36,}/g,
+    /ghu_[A-Za-z0-9]{36,}/g,
+    /ghs_[A-Za-z0-9]{36,}/g,
+    /ghr_[A-Za-z0-9]{36,}/g,
+    /github_pat_[A-Za-z0-9_]{22,}/g,
+    // AWS access keys
+    /AKIA[0-9A-Z]{16}/g,
+    // OpenAI / Anthropic tokens
+    /sk-proj-[A-Za-z0-9-_]{20,}/g,
+    /sk-ant-[A-Za-z0-9-_]{20,}/g,
+    // npm tokens
+    /npm_[A-Za-z0-9]{36,}/g,
+    // Slack tokens (bot/user/app/refresh/verification)
+    /xox[baprsv]-[A-Za-z0-9-]{10,}/g,
+    // JSON Web Tokens (header.payload.signature)
+    /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}/g,
+    // Azure storage connection strings (redact the key field only)
+    /AccountKey=[^;\s]+/gi,
+    // Azure AD client secret + App Insights instrumentation key (value only)
+    /client_secret=[A-Za-z0-9~._-]{8,}/gi,
+    /instrumentationkey=[0-9a-fA-F-]{20,}/gi,
+    // Discord bot tokens: three base64url segments (uppercase leading char avoids matching dotted lowercase identifiers).
+    /\b[MNO][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/g,
+    // Private keys
+    /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g,
+    // Basic auth in URLs (redact only credentials, keep :// and @)
+    /(?<=:\/\/)[^@\s]+:[^@\s]+(?=@)/g,
+    // Email addresses
+    /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+    // .env file references — only when the dot-env token looks like a real path (preceded by a path separator) or
+    // carries a suffix like `.env.production`. Bare prose mentions such as "Read from `.env` file" are intentionally
+    // NOT matched: the filename itself is a convention, not a secret, and over-redacting it strips useful debugging
+    // context from capsules without protecting anything the patterns above don't already cover (keys/tokens inside
+    // the env file). Ported from v1 src/gep/sanitize.js (PR #151).
+    /\.env\.[a-zA-Z]+\b/g,
+    /(?<=[\\/])\.env\b/g,
+];
+// 结构化执行诊断可能来自 JSON、YAML 或键值输出，字段名与分隔符之间也可能有空格。
+// 这里只识别字段前缀，值由下面两个小解析器分别读取：带引号的值读取到匹配的闭合引号，
+// 不带引号的值在空白或结构分隔符处停止，避免把凭据后的普通说明文字一起吞掉。
+const STRUCTURED_CREDENTIAL_PREFIX = /(?<![A-Za-z0-9_-])(["']?)(node[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|token|secret|password|passwd|passphrase|credential|credentials|authorization|auth|bearer|cookie|dsn|webhook|signature)\1(\s*(?:#[^\r\n]*\r?\n\s*)*[:=]\s*)/gi;
+const OPAQUE_CREDENTIAL_PATTERN = /(?<![A-Za-z0-9_-])[A-Za-z0-9][A-Za-z0-9._~+=-]{31,}(?![A-Za-z0-9_-])/g;
+const AMBIGUOUS_STRUCTURED_KEYS = new Set([
+    'token', 'secret', 'credential', 'credentials', 'authorization', 'auth', 'cookie', 'signature',
+]);
+const DIAGNOSTIC_STATUS_VALUE = /^(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|refresh needed|not configured|not found|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i;
+const DIAGNOSTIC_ASSIGNMENT_VALUE = /^(?:policy|mode|state|status|configured|enabled)=(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i;
+function unquoteStructuredValue(value) {
+    const trimmed = value.trim();
+    if (trimmed.length >= 2 && ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
+        return trimmed.slice(1, -1).trim();
+    }
+    return trimmed;
+}
+function shouldRedactStructuredField(key, rawValue) {
+    const normalizedKey = key.toLowerCase().replace(/[_-]/g, '');
+    // Exact Python null and this public API-key fixture are not credentials. Do not
+    // allow arbitrary identifiers, quoted nulls, or values merely prefixed with "test".
+    if (normalizedKey === 'apikey' && /^(?:None|"test-key"|'test-key')$/.test(rawValue))
+        return false;
+    if (!AMBIGUOUS_STRUCTURED_KEYS.has(normalizedKey))
+        return true;
+    const value = unquoteStructuredValue(rawValue);
+    const normalizedStatus = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!value
+        || /^\[redacted\]$/i.test(value)
+        || DIAGNOSTIC_STATUS_VALUE.test(normalizedStatus)
+        || DIAGNOSTIC_ASSIGNMENT_VALUE.test(value))
+        return false;
+    if (/^(?:Bearer|Digest|NTLM|Negotiate|AWS)\s+\S+/i.test(value))
+        return true;
+    if (/^Basic\s+[A-Za-z0-9+/]{8,}={0,2}$/i.test(value))
+        return true;
+    // 歧义字段只有在值呈现紧凑凭据形态时才脱敏，保留“auth: denied by policy”等诊断上下文。
+    return !/\s/.test(value) && value.length >= 8;
+}
+/** Consume a credential's YAML block once, stopping before the next sibling.
+ * Unknown/malformed indentation inside the block is withheld conservatively.
+ * This is a bounded text redactor, not a YAML document parser. */
+function readBlockStructuredValue(input, parentIndent, start) {
+    if (!'|>!&'.includes(input[start] ?? '\0'))
+        return undefined;
+    // Consume properties and their whitespace/comments once. A bare '!' is a valid tag.
+    let scalarStart = start;
+    while (input[scalarStart] === '!' || input[scalarStart] === '&') {
+        const propertyStart = scalarStart++;
+        while (scalarStart < input.length && !/\s/.test(input[scalarStart]))
+            scalarStart++;
+        if (input[propertyStart] === '&' && scalarStart === propertyStart + 1)
+            return undefined;
+        for (;;) {
+            while (scalarStart < input.length && /\s/.test(input[scalarStart]))
+                scalarStart++;
+            if (input[scalarStart] !== '#')
+                break;
+            const newline = input.indexOf('\n', scalarStart);
+            if (newline < 0)
+                return undefined;
+            scalarStart = newline + 1;
+        }
+    }
+    const header = /^[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)/.exec(input.slice(scalarStart));
+    if (!header)
+        return undefined;
+    let end = scalarStart + header[0].length;
+    while (end < input.length) {
+        const nextNewline = input.indexOf('\n', end);
+        const lineEnd = nextNewline < 0 ? input.length : nextNewline;
+        let contentStart = end;
+        while (contentStart < lineEnd && (input[contentStart] === ' ' || input[contentStart] === '\t'))
+            contentStart++;
+        const blank = contentStart === lineEnd || (contentStart === lineEnd - 1 && input[contentStart] === '\r');
+        if (!blank && contentStart - end <= parentIndent)
+            break;
+        end = nextNewline < 0 ? lineEnd : nextNewline + 1;
+    }
+    const raw = input.slice(start, end);
+    const blockSuffix = raw.endsWith('\r\n') ? '\r\n' : raw.endsWith('\n') ? '\n' : '';
+    return { end, raw, quote: '', blockSuffix };
+}
+function readQuotedStructuredValue(input, start) {
+    const quote = input[start];
+    if (quote !== '"' && quote !== "'")
+        return undefined;
+    let escaped = false;
+    for (let index = start + 1; index < input.length; index += 1) {
+        const char = input[index];
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (char === '\\') {
+            escaped = true;
+            continue;
+        }
+        if (char === quote) {
+            const end = index + 1;
+            return { end, raw: input.slice(start, end), quote };
+        }
+        if (char === '\r' || char === '\n')
+            break;
+    }
+    return undefined;
+}
+function readUnquotedStructuredValue(input, start) {
+    if (input.startsWith(REDACTED, start)) {
+        return { end: start + REDACTED.length, raw: REDACTED, quote: '' };
+    }
+    let end = start;
+    while (end < input.length) {
+        const char = input[end] ?? '';
+        if (/[\s,;)}\]]/.test(char) || (char === ':' && /\s/.test(input[end + 1] ?? '')))
+            break;
+        end += 1;
+    }
+    if (end === start)
+        return undefined;
+    return { end, raw: input.slice(start, end), quote: '' };
+}
+function redactStructuredCredentials(input) {
+    let cursor = 0;
+    let output = '';
+    let lineStart = 0;
+    let lineEnd = input.indexOf('\n');
+    // 每行只扫描一次prefix。key的tag/anchor不属于mapping缩进，不能把其长度当作块内容边界。
+    const keyPrefix = () => {
+        const end = lineEnd < 0 ? input.length : lineEnd;
+        let position = lineStart;
+        const horizontal = (index) => input[index] === ' ' || input[index] === '\t';
+        const skipHorizontal = () => { while (position < end && horizontal(position))
+            position++; };
+        skipHorizontal();
+        while (input[position] === '-' && horizontal(position + 1)) {
+            position++;
+            skipHorizontal();
+        }
+        if (input[position] === '?' && horizontal(position + 1)) {
+            position++;
+            skipHorizontal();
+        }
+        const indent = position - lineStart;
+        while (position < end && (input[position] === '!' || input[position] === '&')) {
+            const property = position++;
+            if (input[property] === '!' && input[position] === '<') {
+                position++;
+                while (position < end && input[position] !== '>' && !/\s/.test(input[position]))
+                    position++;
+                if (input[position] !== '>')
+                    return { start: -1, indent };
+                position++;
+            }
+            else {
+                while (position < end && !/\s/.test(input[position]))
+                    position++;
+                if (input[property] === '&' && position === property + 1)
+                    return { start: -1, indent };
+            }
+            if (position < end && !horizontal(position))
+                return { start: -1, indent };
+            skipHorizontal();
+        }
+        return { start: position, indent };
+    };
+    let blockKey = keyPrefix();
+    STRUCTURED_CREDENTIAL_PREFIX.lastIndex = 0;
+    let match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
+    while (match) {
+        if (match.index < cursor) {
+            match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
+            continue;
+        }
+        // Advance monotonically: repeated inline candidates must not rescan the line backwards.
+        while (lineEnd >= 0 && lineEnd < match.index) {
+            lineStart = lineEnd + 1;
+            lineEnd = input.indexOf('\n', lineStart);
+            blockKey = keyPrefix();
+        }
+        const valueStart = STRUCTURED_CREDENTIAL_PREFIX.lastIndex;
+        let block;
+        if (match.index === blockKey.start) {
+            // An explicit key's ':' can be on a later line, at a different indentation.
+            const separator = match[3];
+            const delimiter = valueStart - separator.length + separator.trimEnd().length - 1;
+            const valueLineStart = input.lastIndexOf('\n', delimiter) + 1;
+            const parentIndent = valueLineStart === lineStart ? blockKey.indent : delimiter - valueLineStart;
+            block = readBlockStructuredValue(input, parentIndent, valueStart);
+        }
+        const span = block
+            ?? readQuotedStructuredValue(input, valueStart) ?? readUnquotedStructuredValue(input, valueStart);
+        if (!span) {
+            match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
+            continue;
+        }
+        output += input.slice(cursor, valueStart);
+        // 裸[REDACTED]会成为YAML sequence；块标量替换仍保持string。
+        output += span.blockSuffix !== undefined ? `"${REDACTED}"${span.blockSuffix}`
+            : shouldRedactStructuredField(match[2] ?? '', span.raw) ? `${span.quote}${REDACTED}${span.quote}` : span.raw;
+        cursor = span.end;
+        STRUCTURED_CREDENTIAL_PREFIX.lastIndex = span.end;
+        match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
+    }
+    return cursor === 0 ? input : output + input.slice(cursor);
+}
+function isOpaqueCredential(candidate) {
+    const compact = candidate.replace(/[._~+/=-]/g, '');
+    const classes = Number(/[a-z]/.test(compact)) + Number(/[A-Z]/.test(compact)) + Number(/[0-9]/.test(compact));
+    if (compact.length < 24 || classes < 3 || /^[0-9a-f]+$/i.test(compact))
+        return false;
+    const frequencies = new Map();
+    for (const char of compact)
+        frequencies.set(char, (frequencies.get(char) ?? 0) + 1);
+    const entropy = [...frequencies.values()].reduce((sum, count) => {
+        const probability = count / compact.length;
+        return sum - probability * Math.log2(probability);
+    }, 0);
+    return entropy >= 3.5;
+}
+// Post-filter allowlist (ported from v1 src/gep/sanitize.js, PR #151): strings the patterns above — and the path
+// anonymizer below — WILL catch but that are not actually sensitive. If any entry matches a captured string it is
+// kept verbatim instead of being redacted / anonymized / flagged as a leak. Keeping this as a post-filter rather
+// than bolting more lookaheads into every pattern keeps the patterns readable and the carve-outs easy to audit.
+const REDACT_ALLOWLIST = [
+    // --- CI runner paths --- (well-known build infrastructure, no user PII)
+    /^\/home\/runner(?:[/]|$)/, // GitHub Actions Linux
+    /^\/Users\/runner(?:[/]|$)/, // GitHub Actions macOS
+    /^\/home\/circleci(?:[/]|$)/, // CircleCI Linux
+    /^\/Users\/distiller(?:[/]|$)/, // CircleCI macOS
+    /^\/home\/vsts(?:[/]|$)/, // Azure Pipelines
+    /^\/home\/travis(?:[/]|$)/, // Travis CI
+    /^\/home\/jenkins(?:[/]|$)/, // Jenkins default
+    // --- Bot / no-reply / SSH-alias addresses --- (not personal mailboxes)
+    // The domain MUST be anchored to a well-known public code host. An open noreply@<anything> allowlist would leak
+    // internal corp infra domains like noreply@internal-codename.corp (Bugbot PR #151 Low).
+    /^(?:noreply|no-reply|donotreply|do-not-reply)@(?:github\.com|users\.noreply\.github\.com|gitlab\.com|bitbucket\.org|npmjs\.com|claude\.ai|anthropic\.com)$/i,
+    /^[0-9]+\+[a-zA-Z0-9._-]+@users\.noreply\.github\.com$/i, // GitHub commit-author noreply (full digits+user form)
+    // The ssh_target scanner's local part is [a-zA-Z0-9_.-]{1,64} (no `+`), so `8275028+user@users.noreply.github.com`
+    // is captured as just `user@users.noreply.github.com` — the full-form anchor above can't match the truncated
+    // value. Allow any local part on this domain since the domain itself is by design non-personal (Bugbot PR #151
+    // round 2 Medium).
+    /^[a-zA-Z0-9_.-]+@users\.noreply\.github\.com$/i,
+    /^git@github\.com$/i, // SSH alias, not a real mailbox
+    /^git@gitlab\.com$/i,
+    /^git@bitbucket\.org$/i,
+];
+function isAllowlisted(match) {
+    for (const re of REDACT_ALLOWLIST)
+        if (re.test(match))
+            return true;
+    return false;
+}
+// Anonymize (not redact) local filesystem paths (#12): a file path is usually the gene's CONTENT ("fix
+// ~/proj/src/auth.ts"), not a secret — only the user/home prefix is PII. Strip the prefix to `~`, keeping the
+// rest of the path so the shared experience stays useful, instead of [REDACTED]-ing the whole thing.
+const ANONYMIZE_PATTERNS = [
+    [/\/(?:home|Users)\/[^/\s"',;)}\]]+/g, '~'], // /home/alice/proj → ~/proj
+    [/[A-Za-z]:\\Users\\[^\\/\s"',;)}\]]+/g, '~'], // C:\Users\alice\proj → ~\proj
+];
+/** Apply every redaction pattern (secrets → [REDACTED]) then anonymize local paths (~/...) to a single string. */
+export function redactString(s) {
+    if (typeof s !== 'string' || !s)
+        return s;
+    let out = s;
+    for (const p of REDACT_PATTERNS) {
+        p.lastIndex = 0;
+        out = out.replace(p, (m) => (isAllowlisted(m) ? m : REDACTED));
+    }
+    out = redactStructuredCredentials(out);
+    OPAQUE_CREDENTIAL_PATTERN.lastIndex = 0;
+    out = out.replace(OPAQUE_CREDENTIAL_PATTERN, (candidate) => (isOpaqueCredential(candidate) ? REDACTED : candidate));
+    for (const [p, rep] of ANONYMIZE_PATTERNS) {
+        p.lastIndex = 0;
+        out = out.replace(p, (m) => (isAllowlisted(m) ? m : rep));
+    }
+    return out;
+}
+/** Deep redaction: recursively redact string values in objects/arrays (keys untouched). Returns a copy; does not mutate the input. */
+export function redactDeep(v) {
+    return redactDeepWith(v, redactString);
+}
+function redactDeepWith(v, redact) {
+    if (typeof v === 'string')
+        return redact(v);
+    if (Array.isArray(v))
+        return v.map((x) => redactDeepWith(x, redact));
+    if (v && typeof v === 'object') {
+        const out = {};
+        for (const [k, val] of Object.entries(v))
+            out[k] = redactDeepWith(val, redact);
+        return out;
+    }
+    return v;
+}
+const EXECUTION_PAYLOAD_KEYS = new Set(['execution', 'execution_trace', 'execution_receipt', 'receipt', 'validator']);
+function sanitizeAssetContent(asset, env) {
+    const fixtureIsCredential = detectEnvValueLeaks('test-key', env).length > 0;
+    const redactText = (text) => {
+        const safe = redactString(text);
+        return fixtureIsCredential ? safe.replaceAll('test-key', REDACTED) : safe;
+    };
+    const redact = (value) => redactDeepWith(value, redactText);
+    const output = {};
+    for (const [key, value] of Object.entries(asset)) {
+        if (key === 'content') {
+            output[key] = sanitizeEmbeddedSourceContent(value, redact, REDACTED, (text) => (detectEnvValueLeaks(text, env).length > 0 ? REDACTED : redactText(text)));
+            continue;
+        }
+        if (key === 'validation' && Array.isArray(value)) {
+            output[key] = value.map((command) => typeof command === 'string' ? sanitizeExecutionCommand(command).value : redact(command));
+            continue;
+        }
+        if (EXECUTION_PAYLOAD_KEYS.has(key)) {
+            output[key] = sanitizeExecutionPayload(value).value;
+            continue;
+        }
+        if (key === 'provenance' && value && typeof value === 'object') {
+            const provenance = value;
+            const sanitizedProvenance = redact(provenance);
+            if (Array.isArray(provenance['validation'])) {
+                sanitizedProvenance['validation'] = provenance['validation'].map((command) => (typeof command === 'string' ? sanitizeExecutionCommand(command).value : redact(command)));
+            }
+            for (const executionKey of EXECUTION_PAYLOAD_KEYS) {
+                if (provenance[executionKey] !== undefined) {
+                    sanitizedProvenance[executionKey] = sanitizeExecutionPayload(provenance[executionKey]).value;
+                }
+            }
+            output[key] = sanitizedProvenance;
+            continue;
+        }
+        output[key] = redact(value);
+    }
+    return output;
+}
+/**
+ * Redact a single asset and RECOMPUTE its asset_id (command point). When redaction changes content, the id must
+ * change with it, otherwise the published body and id disagree. computeAssetId excludes the asset_id field by
+ * default; on the rare null return we fall back to the original id.
+ */
+export function sanitizeAsset(asset, opts = {}) {
+    const redacted = sanitizeAssetContent(asset, opts.env ?? {});
+    const id = computeAssetId(redacted);
+    return { ...redacted, asset_id: id ?? asset.asset_id };
+}
+/** Leak scanners (ported verbatim from v1, 25 entries): each match yields an env-var replacement suggestion. */
+const LEAK_SCANNERS = [
+    { type: 'api_key', pattern: /sk-[A-Za-z0-9]{20,}/g, suggest: 'process.env.OPENAI_API_KEY' },
+    { type: 'api_key', pattern: /sk-proj-[A-Za-z0-9-_]{20,}/g, suggest: 'process.env.OPENAI_API_KEY' },
+    { type: 'api_key', pattern: /sk-ant-[A-Za-z0-9-_]{20,}/g, suggest: 'process.env.ANTHROPIC_API_KEY' },
+    { type: 'api_key', pattern: /AKIA[0-9A-Z]{16}/g, suggest: 'process.env.AWS_ACCESS_KEY_ID' },
+    { type: 'github_token', pattern: /gh(?:p|o|u|s|r)_[A-Za-z0-9]{36,}/g, suggest: 'process.env.GITHUB_TOKEN' },
+    { type: 'github_token', pattern: /github_pat_[A-Za-z0-9_]{22,}/g, suggest: 'process.env.GITHUB_TOKEN' },
+    { type: 'npm_token', pattern: /npm_[A-Za-z0-9]{36,}/g, suggest: 'process.env.NPM_TOKEN' },
+    { type: 'slack_token', pattern: /xox[baprsv]-[A-Za-z0-9-]{10,}/g, suggest: 'process.env.SLACK_TOKEN' },
+    { type: 'jwt', pattern: /eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}/g, suggest: 'process.env.JWT' },
+    { type: 'azure_key', pattern: /AccountKey=[^;\s]+/gi, suggest: 'process.env.AZURE_STORAGE_KEY' },
+    { type: 'azure_client_secret', pattern: /client_secret=[A-Za-z0-9~._-]{8,}/gi, suggest: 'process.env.AZURE_CLIENT_SECRET' },
+    { type: 'azure_instrumentation_key', pattern: /instrumentationkey=[0-9a-fA-F-]{20,}/gi, suggest: 'process.env.APPINSIGHTS_INSTRUMENTATIONKEY' },
+    { type: 'discord_token', pattern: /\b[MNO][A-Za-z0-9_-]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b/g, suggest: 'process.env.DISCORD_TOKEN' },
+    { type: 'bearer_token', pattern: /Bearer\s+[A-Za-z0-9-._~+/]{20,}=*/g, suggest: 'process.env.AUTH_TOKEN' },
+    { type: 'proxy_token', pattern: /"?token"?[=:]\s*["']?[A-Za-z0-9-._~+/]{16,}["']?/gi, suggest: 'proxy token (ephemeral, stored in settings.json)' },
+    { type: 'private_key', pattern: /-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g, suggest: 'process.env.PRIVATE_KEY_PATH' },
+    { type: 'db_url', pattern: /(?:mongodb|postgres|postgresql|mysql|redis|amqp):\/\/[^\s"',;)}\]]{10,}/gi, suggest: 'process.env.DATABASE_URL' },
+    { type: 'local_path', pattern: /\/home\/[a-zA-Z0-9_.-]+\//g, suggest: 'process.env.HOME' },
+    { type: 'local_path', pattern: /\/Users\/[a-zA-Z0-9_.-]+\//g, suggest: 'process.env.HOME' },
+    { type: 'local_path', pattern: /[A-Z]:\\Users\\[a-zA-Z0-9_.-]+\\/g, suggest: 'process.env.USERPROFILE' },
+    { type: 'internal_ip', pattern: /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(?::\d{2,5})?\b/g, suggest: 'process.env.SERVICE_HOST' },
+    // Bounded quantifiers ({1,64}/{1,255}/{2,24}) instead of unbounded `+`: the unbounded user/host classes against
+    // a required `@`/`.` anchor backtrack O(n^2) on long untrusted hub content (100k took ~6s — a real ReDoS, #198).
+    // The bounds cover every realistic ssh target (usernames <=64, hosts <=255, TLDs <=24) and make the scan linear.
+    { type: 'ssh_target', pattern: /[a-zA-Z0-9_.-]{1,64}@(?:(?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9.-]{1,255}\.[a-zA-Z]{2,24})/g, suggest: 'process.env.SSH_HOST' },
+    { type: 'password', pattern: /password[=:]\s*["']?[^\s"',;)}\]]{6,}["']?/gi, suggest: 'process.env.PASSWORD' },
+    { type: 'secret', pattern: /secret[=:]\s*["']?[A-Za-z0-9-._~+/]{16,}["']?/gi, suggest: 'process.env.SECRET' },
+    { type: 'basic_auth', pattern: /:\/\/[^@\s:]+:[^@\s]+@/g, suggest: 'process.env.SERVICE_URL' },
+];
+/** Env keys skipped by the reverse-value scan (non-sensitive; ported verbatim from v1). */
+const ENV_SCAN_SKIP_KEYS = new Set([
+    'PATH', 'HOME', 'SHELL', 'TERM', 'LANG', 'USER', 'LOGNAME',
+    'PWD', 'OLDPWD', 'SHLVL', 'HOSTNAME', 'DISPLAY', 'EDITOR',
+    'PAGER', 'LESS', 'LS_COLORS', 'COLORTERM', 'TERM_PROGRAM',
+    'XDG_SESSION_ID', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS',
+    'SSH_AUTH_SOCK', 'SSH_AGENT_PID', '_',
+]);
+const ENV_VALUE_FILESYSTEM_PATH_RE = /^(\/|[A-Za-z]:\\)/;
+const ENV_VALUE_URL_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const SENSITIVE_ENV_KEY_PARTS = new Set([
+    'WEBHOOK', 'TOKEN', 'SECRET', 'PASSWORD', 'PASS', 'PASSWD', 'PASSPHRASE',
+    'KEY', 'CREDENTIAL', 'CREDENTIALS', 'SIGNATURE', 'SIGNED', 'DSN', 'BEARER',
+    'COOKIE', 'SESSION', 'CERT', 'CERTIFICATE',
+]);
+const SENSITIVE_ENV_KEY_RE = /WEBHOOK|TOKEN|SECRET|PASSWORD|CREDENTIAL|SIGNATURE|SIGNED|DSN|BEARER|COOKIE|SESSION|APIKEY|ACCESSKEY|PRIVATEKEY|CERTIFICATE/;
+const HIGH_RISK_URL_QUERY_KEYS = new Set([
+    'token', 'access_token', 'auth', 'authorization', 'api_key', 'apikey', 'key',
+    'secret', 'signature', 'sig', 'signed', 'x-amz-signature', 'x-amz-credential',
+    'x-amz-security-token', 'x-goog-signature', 'x-goog-credential',
+    'sharedaccesssignature',
+]);
+function normalizeEnvKey(key) {
+    const normalized = key.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return normalized || key.toUpperCase();
+}
+function isFilesystemPathEnvValue(value) {
+    return ENV_VALUE_FILESYSTEM_PATH_RE.test(value);
+}
+function isUrlEnvValue(value) {
+    return ENV_VALUE_URL_RE.test(value);
+}
+function isSensitiveEnvKey(key) {
+    const normalized = normalizeEnvKey(key);
+    const parts = normalized.split(/[^A-Z0-9]+/).filter(Boolean);
+    if (parts.some((part) => SENSITIVE_ENV_KEY_PARTS.has(part)))
+        return true;
+    return SENSITIVE_ENV_KEY_RE.test(normalized);
+}
+function isHighRiskUrlEnvValue(value) {
+    if (!isUrlEnvValue(value))
+        return false;
+    let parsed;
+    try {
+        parsed = new URL(value);
+    }
+    catch {
+        return false;
+    }
+    if (parsed.username || parsed.password)
+        return true;
+    const hostname = parsed.hostname.toLowerCase();
+    const pathname = parsed.pathname.toLowerCase();
+    if (/(^|\.)hooks?\./.test(hostname) || /(^|\.)webhooks?\./.test(hostname))
+        return true;
+    if (/\/(?:api\/)?webhooks?\//.test(pathname) || /\/hooks?\//.test(pathname))
+        return true;
+    if (/\/(?:tokens?|secrets?|signed|signatures?|credentials?)\//.test(pathname))
+        return true;
+    for (const queryKey of parsed.searchParams.keys()) {
+        if (HIGH_RISK_URL_QUERY_KEYS.has(queryKey.toLowerCase()))
+            return true;
+    }
+    return false;
+}
+function shouldSkipEnvValueReverseScan(key, value) {
+    if (isSensitiveEnvKey(key))
+        return false;
+    if (isFilesystemPathEnvValue(value))
+        return true;
+    if (isUrlEnvValue(value) && !isHighRiskUrlEnvValue(value))
+        return true;
+    return false;
+}
+const clip = (s) => (s.length > 60 ? s.slice(0, 57) + '...' : s);
+/** Pattern-scan content for sensitive info. Does not mutate content; returns a structured result. */
+export function scanForLeaks(content) {
+    if (typeof content !== 'string' || !content)
+        return { found: false, leaks: [] };
+    const leaks = [];
+    const seen = new Set();
+    for (const scanner of LEAK_SCANNERS) {
+        scanner.pattern.lastIndex = 0;
+        let m;
+        while ((m = scanner.pattern.exec(content)) !== null) {
+            const val = m[0];
+            // Apply the same allowlist redactString uses: CI runner roots and bot/no-reply/SSH-alias addresses are not
+            // leaks. Without this, strict-mode sanitizeBundle would block a publish over a `/home/runner/` path or
+            // `noreply@github.com` (an ssh_target) — exactly the false positives the allowlist exists to fix, and a
+            // contradiction with redactString, which keeps them verbatim (Bugbot PR #151 Medium).
+            if (isAllowlisted(val))
+                continue;
+            const key = scanner.type + ':' + val;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            leaks.push({ type: scanner.type, value: clip(val), suggestion: scanner.suggest });
+        }
+    }
+    return { found: leaks.length > 0, leaks };
+}
+/** Reverse detection: if any process.env value (>=8 chars) appears verbatim in content, an env value was hardcoded and should be replaced with the env reference. */
+export function detectEnvValueLeaks(content, env) {
+    if (typeof content !== 'string' || !content)
+        return [];
+    const leaks = [];
+    for (const [key, val] of Object.entries(env)) {
+        if (!val || val.length < 8)
+            continue;
+        if (ENV_SCAN_SKIP_KEYS.has(normalizeEnvKey(key)))
+            continue;
+        // Env paths and ordinary URLs are often reproducible runtime metadata; sensitive keys and high-risk URLs still scan.
+        if (shouldSkipEnvValueReverseScan(key, val))
+            continue;
+        if (content.includes(val))
+            leaks.push({ type: 'env_value_leak', value: REDACTED, suggestion: 'process.env.' + key });
+    }
+    return leaks;
+}
+/** Full leak check: pattern scan + reverse env-value detection. */
+export function fullLeakCheck(content, env) {
+    const scan = scanForLeaks(content);
+    const envLeaks = detectEnvValueLeaks(content, env);
+    const all = scan.leaks.concat(envLeaks);
+    return { found: all.length > 0, leaks: all };
+}
+/** Leak types that are PII (anonymized, not credentials) and so must NOT hard-block a strict publish (#12). */
+const PII_ONLY_LEAK_TYPES = new Set(['local_path']);
+/** Read the leak-check mode from env (EVOLVER_LEAK_CHECK, default strict, matching v1). */
+export function leakCheckModeFromEnv(env) {
+    const v = (env['EVOLVER_LEAK_CHECK'] ?? '').toLowerCase();
+    return v === 'warn' || v === 'off' ? v : 'strict';
+}
+/** Keep each Event's content references attached after redaction changes IDs. */
+export function rebindSanitizedEvolutionEventBundle(original, sanitized) {
+    const output = [...sanitized];
+    if (original.length !== output.length || !original.some((asset) => asset.type === 'EvolutionEvent'))
+        return output;
+    const geneRefs = new Map();
+    const capsuleIds = new Map();
+    const remember = (map, source, target, same) => {
+        if (!source)
+            return;
+        if (!map.has(source))
+            map.set(source, target);
+        else {
+            const previous = map.get(source);
+            if (previous !== null && previous !== undefined && !same(previous, target))
+                map.set(source, null);
+        }
+    };
+    const sameGene = (a, b) => a.reference === b.reference && a.assetId === b.assetId;
+    for (let index = 0; index < original.length; index++) {
+        const before = original[index];
+        const after = output[index];
+        if (before.type !== 'Gene' || after.type !== 'Gene')
+            continue;
+        remember(geneRefs, before.asset_id, { reference: after.asset_id, assetId: after.asset_id }, sameGene);
+        if (typeof before['id'] === 'string' && typeof after['id'] === 'string') {
+            remember(geneRefs, before['id'], { reference: after['id'], assetId: after.asset_id }, sameGene);
+        }
+    }
+    for (let index = 0; index < original.length; index++) {
+        const before = original[index];
+        let after = output[index];
+        if (before.type !== 'Capsule' || after.type !== 'Capsule')
+            continue;
+        const gene = typeof before['gene'] === 'string' ? geneRefs.get(before['gene']) : undefined;
+        // A CLI path may already have changed a logical reference to the final content ID.
+        if (gene && after['gene'] !== gene.reference && after['gene'] !== gene.assetId) {
+            after = { ...after, gene: gene.reference };
+            after = { ...after, asset_id: computeAssetId(after) ?? after.asset_id };
+            output[index] = after;
+        }
+        remember(capsuleIds, before.asset_id, after.asset_id, (a, b) => a === b);
+    }
+    for (let index = 0; index < original.length; index++) {
+        const before = original[index];
+        const after = output[index];
+        if (before.type !== 'EvolutionEvent' || after.type !== 'EvolutionEvent')
+            continue;
+        const rebound = { ...after };
+        let changed = false;
+        const capsuleId = typeof before['capsule_id'] === 'string' ? capsuleIds.get(before['capsule_id']) : undefined;
+        if (capsuleId && rebound['capsule_id'] !== capsuleId) {
+            rebound['capsule_id'] = capsuleId;
+            changed = true;
+        }
+        const beforeUsed = before['genes_used'];
+        const afterUsed = after['genes_used'];
+        if (Array.isArray(beforeUsed) && Array.isArray(afterUsed)
+            && beforeUsed.length === afterUsed.length) {
+            const used = afterUsed.map((id, offset) => {
+                const source = beforeUsed[offset];
+                const target = typeof source === 'string' ? geneRefs.get(source) : undefined;
+                return target ? target.reference : id;
+            });
+            if (used.some((id, offset) => id !== afterUsed[offset])) {
+                rebound['genes_used'] = used;
+                changed = true;
+            }
+        }
+        const reused = typeof before['reused_asset_id'] === 'string' ? geneRefs.get(before['reused_asset_id']) : undefined;
+        if (reused && rebound['reused_asset_id'] !== reused.reference) {
+            rebound['reused_asset_id'] = reused.reference;
+            changed = true;
+        }
+        const beforeMeta = before['meta'];
+        const afterMeta = after['meta'];
+        if (beforeMeta && typeof beforeMeta === 'object' && !Array.isArray(beforeMeta)
+            && afterMeta && typeof afterMeta === 'object' && !Array.isArray(afterMeta)) {
+            const selected = beforeMeta['selected_asset_id'];
+            const target = typeof selected === 'string' ? geneRefs.get(selected) : undefined;
+            if (target && afterMeta['selected_asset_id'] !== target.assetId) {
+                rebound['meta'] = { ...afterMeta, selected_asset_id: target.assetId };
+                changed = true;
+            }
+        }
+        if (changed)
+            output[index] = { ...rebound, asset_id: computeAssetId(rebound) ?? rebound.asset_id };
+    }
+    return output;
+}
+/**
+ * Pre-publish sanitize of a bundle (pure, never throws):
+ * 1) mode != off: scan the ORIGINAL (pre-redaction) content for leaks; strict + found → blocked=true (chokepoint refuses); warn → flag only.
+ * 2) REGARDLESS of mode, always deep-redact every asset + recompute asset_id (the leak-proof floor; off only skips the scan, not the redaction).
+ * 3) Embedded-file manifests must match their original UTF-8 hashes before AND after sanitization in every mode.
+ */
+export function sanitizeBundle(bundle, opts) {
+    const mode = opts.mode ?? leakCheckModeFromEnv(opts.env);
+    let leaks = [];
+    if (mode !== 'off') {
+        const combined = bundle.map((a) => JSON.stringify(a)).join('');
+        leaks = fullLeakCheck(combined, opts.env).leaks;
+        for (const asset of bundle) {
+            for (const text of embeddedSourceTexts(asset))
+                leaks.push(...fullLeakCheck(text, opts.env).leaks);
+            const executionSurfaces = [];
+            if (Array.isArray(asset['validation']))
+                executionSurfaces.push({ validation: asset['validation'] });
+            for (const key of EXECUTION_PAYLOAD_KEYS) {
+                if (asset[key] !== undefined)
+                    executionSurfaces.push({ [key]: asset[key] });
+            }
+            const provenance = asset['provenance'];
+            if (provenance && typeof provenance === 'object' && !Array.isArray(provenance)) {
+                const provenanceRecord = provenance;
+                if (Array.isArray(provenanceRecord['validation'])) {
+                    executionSurfaces.push({ validation: provenanceRecord['validation'] });
+                }
+                for (const key of EXECUTION_PAYLOAD_KEYS) {
+                    if (provenanceRecord[key] !== undefined)
+                        executionSurfaces.push({ [key]: provenanceRecord[key] });
+                }
+            }
+            if (executionSurfaces.some((surface) => sanitizeExecutionPayload(surface).changed)) {
+                leaks.push({
+                    type: 'execution_credential',
+                    value: REDACTED,
+                    suggestion: 'remove credentials from execution commands and evidence',
+                });
+            }
+        }
+    }
+    // #12: a bare local path is PII (anonymized to ~/ by the redaction floor), not a credential — it must not
+    // hard-block a publish in strict mode. Real secrets (everything else) still block. Path leaks stay reported.
+    const leakBlocked = mode === 'strict' && leaks.some((l) => !PII_ONLY_LEAK_TYPES.has(l.type));
+    const sanitized = rebindSanitizedEvolutionEventBundle(bundle, bundle.map((a) => sanitizeAsset(a, { env: opts.env })));
+    let integrityBlocked = false;
+    for (const asset of [...bundle, ...sanitized]) {
+        const integrity = checkEmbeddedSourceIntegrity(asset);
+        if (!integrity.ok) {
+            integrityBlocked = true;
+            if (!leaks.some((leak) => leak.type === 'embedded_source_integrity' && leak.suggestion === integrity.reason)) {
+                leaks.push({ type: 'embedded_source_integrity', value: REDACTED, suggestion: integrity.reason });
+            }
+        }
+    }
+    return { bundle: sanitized, blocked: leakBlocked || integrityBlocked, leaks, mode };
+}
+/** Collapse a leak list into a one-line human-readable summary (for logs / rejection reason). */
+export function summarizeLeaks(leaks) {
+    return leaks.map((l) => `${l.type}→${l.suggestion}`).join('; ');
+}

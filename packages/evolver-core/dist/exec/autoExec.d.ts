@@ -2,10 +2,11 @@ import type { AssetStoreProvider } from '../assetstore/provider.js';
 import { type ProvenanceStore } from '../assetstore/provenance.js';
 import type { ReviewLedger } from '../assetstore/reviewLedger.js';
 import type { GeneCandidateInput, SelectionGuardMode } from '../algo/geneSelection.js';
-import type { CycleEngine, ExecutionFailureKind, ExecutionResult, SolidifyPermitGate } from '../algo/cycleEngine.js';
+import { type CycleEngine, type ExecutionFailureKind, type ExecutionResult, type SolidifyPermitGate } from '../algo/cycleEngine.js';
 import { type AutonomousSafety } from './autonomousCycle.js';
 import { type GitRunner, type GitPatchWriter, type ValidateHook } from './claudeBridge.js';
 import type { AgentRunner } from './runnerRegistry.js';
+import type { ExecContextReceipt } from './contextResolver.js';
 import { type OpenPrLister } from './openPrRegistry.js';
 import type { ReuseOutcomeSummary, ReuseOutcomeEvent } from '../ops/reuseOutcomes.js';
 import type { PersonalityStore } from '../personality/store.js';
@@ -13,7 +14,7 @@ import type { MemoryGraphProvider } from '../algo/memoryGraph.js';
 import type { SelectionPolicy } from '../algo/ucb1.js';
 import { type LearningPacketSink, type TraceSink } from '../trace/learningTrace.js';
 import type { TraceReadOptions } from '../trace/trajectoryExport.js';
-import { ExecutionBindingJournal, type BindingAuthorityChecks, type ExecutionBindingInput } from './executionBinding.js';
+import { ExecutionBindingJournal, type BindingAuthorityChecks, type ExecutionBindingInput, type ExecutionTerminalDisposition } from './executionBinding.js';
 export interface AutoExecTask {
     id: string;
     repo: string;
@@ -38,6 +39,29 @@ export interface AutoExecTask {
     /** Frozen external execution binding; bound tasks never fall back to unbound execution. */
     execution_binding?: ExecutionBindingInput;
 }
+/**
+ * An exact Gene was selected and the cycle's execution seam returned a result. This is an
+ * observed selection/execution binding, not proof that an agent followed the strategy or
+ * that the task passed an independent verifier. The CLI adds durable attempt identity and
+ * records the final local/Hub delivery separately.
+ */
+export interface AppliedUseOutcome {
+    schemaVersion: 'applied-use.v1';
+    assetId: string;
+    geneId: string;
+    cycleId: string;
+    source: 'hub' | 'local' | 'migrated' | 'unknown';
+    /** Exact reporting destination proven to have supplied this Gene; absent when origin is unknown or switched. */
+    hubOriginDestinationId?: string;
+    outcome: 'success' | 'failed' | 'inert' | 'inconclusive';
+    /** null means the cycle did not establish whether the execution produced value. */
+    producedValue: boolean | null;
+    applicationBinding: 'selected_execution';
+    verification: 'unverified';
+    capsuleId?: string;
+    eventId?: string;
+    terminalDisposition?: ExecutionTerminalDisposition;
+}
 export interface AutoExecVerdict {
     taskId: string;
     status: 'refused' | 'skipped' | 'solidified' | 'failed' | 'innovated' | 'unsafe_to_replay';
@@ -53,10 +77,18 @@ export interface AutoExecVerdict {
         status: string;
         score: number;
     };
+    /** The cycle's own production result; false distinguishes an inert solidification from success. */
+    producedValue?: boolean;
+    /** The bridge actually invoked an agent. Absence means pre-invocation or legacy unknown. */
+    agentInvoked?: true;
     proofOfWork?: unknown;
     failureKind?: ExecutionFailureKind;
     exitCode?: number | null;
     usedAssetIds?: readonly string[];
+    /** Conservative exact-asset use observation; absent when execution or content identity cannot be established. */
+    appliedUse?: AppliedUseOutcome;
+    /** Historical prompt input only; never the current task's result or validation evidence. */
+    inputContext?: ExecContextReceipt;
     /** The capsule this cycle produced. A hub task is completed by handing this id back. */
     resultAssetId?: string;
     /**
@@ -76,15 +108,26 @@ export interface AutoExecVerdict {
  * calls). It must never throw — reuse is an optimization, so a hub failure degrades to solving fresh.
  */
 export interface HubReuseContext {
-    /** The cycle this reuse resolution feeds — carried so the composition layer can emit a reuse event whose
+    /** The cycle for this invocation — carried so the composition layer can emit a reuse event whose
      *  refs point at the SAME cycleId the cycle records (value-ledger audit anchor, #112). */
     cycleId: string;
+    /** Queue identity is distinct from the invocation's unique cycle identity. */
+    taskId?: string;
 }
 export type HubReuseSeam = (signals: readonly string[], ctx?: HubReuseContext) => Promise<readonly GeneCandidateInput[]>;
 export interface AutoExecDeps {
     benchmark?: import('../assetstore/sourceQualification.js').BenchmarkContext;
     engine: CycleEngine;
     store: AssetStoreProvider;
+    /**
+     * Host-owned durable cycle identity, e.g. a material consumer's locked operation.
+     * The host must prevent replay before invoking this kernel. Omit for a fresh UUID
+     * on every ordinary task invocation. ASCII filename-safe identity, at most 128
+     * characters; a bound task may only supply its existing canonical cycle identity.
+     */
+    cycleId?: string;
+    /** CLI composition gate; direct library integrators retain the V1 contract. */
+    assertPromptAdapter?: () => void;
     provenance?: ProvenanceStore;
     /** Optional review-state gate: withhold an unreviewed (auto-distilled) gene's strategy from the agent prompt. */
     review?: ReviewLedger;
@@ -102,6 +145,8 @@ export interface AutoExecDeps {
      * that owns the hub capability so core stays hub-agnostic (the signature, not the adapter, lives here).
      */
     hubReuse?: HubReuseSeam;
+    /** Bound Hub feedback destination supplied by the host; never inferred from a node id or source='hub'. */
+    hubFeedbackDestinationId?: string;
     /** Build a validation hook for a task (e.g. run its validationCmds in the worktree). Deployment-specific. */
     validate?: (task: AutoExecTask) => ValidateHook;
     /** Optional adapter/runtime permit gate. Core owns only the seam; adapters own the verification policy. */

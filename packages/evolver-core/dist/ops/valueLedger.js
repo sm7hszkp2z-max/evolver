@@ -14,14 +14,14 @@
 //
 // Determinism: every function here is pure. No Date.now / Math.random — all timestamps come from the event or
 // trace records themselves, so a golden fixture replays byte-for-byte.
-import { isExecutionEligible } from '../reference/guard.js';
 import { ENTROPY_EVENT_TOKENS_EST } from './savingsCore.js';
+import { uniqueReuseFacts } from './reuseEventIdentity.js';
 /** Build a PriceTable from a plain {model: ModelPrice} map (the shape a JSON data file deserializes to). */
 export function priceTableFromMap(map) {
     return { priceOf: (model) => map[model] };
 }
 // ── the reuse root_event the ledger derives source=reuse entries from ─────────────────────────────────────
-/** root_events type appended on a reuse-before-solve HIT — the replayable source for source=reuse entries. */
+/** root_events type appended after an applied reuse succeeds, not when a candidate is fetched. */
 export const VALUE_REUSE_HIT_EVENT = 'value.reuse_hit';
 // ── the injected gene-injection record (inject source — recorded, NEVER given a savings number) ───────────
 /** root_events type appended when SessionStart injects genes — recorded for outcome attribution only. */
@@ -83,8 +83,8 @@ export function deriveRouteEntries(traces, prices) {
  */
 export function deriveReuseEntries(events, prices, scope) {
     const out = [];
-    for (const e of events) {
-        if (e.type !== VALUE_REUSE_HIT_EVENT || !isExecutionEligible(e.payload, scope))
+    for (const e of uniqueReuseFacts(events, scope)) {
+        if (e.type !== VALUE_REUSE_HIT_EVENT)
             continue;
         const p = (e.payload ?? {});
         const assetId = typeof p.assetId === 'string' ? p.assetId : '';

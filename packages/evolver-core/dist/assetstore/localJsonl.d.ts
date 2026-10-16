@@ -1,15 +1,12 @@
+import { type RelatedCapsuleQuery, type RelatedCapsuleResult } from './relatedCapsules.js';
+import { type GeneSnapshotQuery, type GeneReadSnapshot } from './boundedSnapshot.js';
 import { type ReferenceScope } from '../reference/guard.js';
 import { type AssetKind, type AssetRecord, type AssetStoreProvider, type ConditionalPutOptions, type ConditionalPutResult, type PutResult, type SearchQuery } from './provider.js';
 /** Signal names a record advertises, across the four key spellings the pool uses. */
 export declare function signalsOf(a: AssetRecord): string[];
-/**
- * 本地 jsonl 资产库(M3-2, 移植 v1 src/gep/assetStore.js 单写锁).
- * 每 kind 一文件(genes/capsules/events.jsonl); append-only; O_EXCL 文件锁防并发写撕裂;
- * 内存索引(asset_id→record)供 get/search; 文件指纹变化时在共享锁内重建索引，保证多个
- * CLI/daemon 进程之间可见; 写入也在锁内刷新后再按 asset_id 去重(内容寻址天然幂等).
- */
 export declare class LocalJsonlProvider implements AssetStoreProvider {
     readonly baseDir: string;
+    static isBuiltInPromptReader(value: unknown): value is LocalJsonlProvider;
     private readonly index;
     private readonly lockPath;
     private readonly bundleJournalPath;
@@ -26,6 +23,19 @@ export declare class LocalJsonlProvider implements AssetStoreProvider {
     private readPendingBundle;
     private recoverPendingBundleUnderLock;
     private hasPendingBundle;
+    queryGeneSnapshot(query?: GeneSnapshotQuery): Promise<GeneReadSnapshot>;
+    beginPromptGeneSnapshotV1(query: GeneSnapshotQuery): import("./provider.js").ContextReadOperationV1<GeneReadSnapshot>;
+    beginPromptRelatedCapsulesV1(query: RelatedCapsuleQuery): import("./provider.js").ContextReadOperationV1<RelatedCapsuleResult>;
+    beginPromptAssetGetV1(assetId: string, query: {
+        deadlineAt: number;
+        signal: AbortSignal;
+    }): import("./provider.js").ContextReadOperationV1<AssetRecord | null>;
+    beginPromptLogicalGeneLookupV1(id: string, query: {
+        deadlineAt: number;
+        signal: AbortSignal;
+    }): import("./provider.js").ContextReadOperationV1<AssetRecord[]>;
+    beginGeneScanV1(query?: GeneSnapshotQuery): import("./geneScanV1.js").GeneScanSessionV1;
+    queryRelatedCapsules(query: RelatedCapsuleQuery): Promise<RelatedCapsuleResult>;
     put(asset: AssetRecord): Promise<PutResult>;
     putConditional(asset: AssetRecord, options?: ConditionalPutOptions): Promise<ConditionalPutResult>;
     putBundle(assets: readonly AssetRecord[]): Promise<PutResult[]>;

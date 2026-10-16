@@ -7,6 +7,8 @@ export interface ReuseOutcomePayload {
     assetId: string;
     cycleId: string;
     outcome: ReuseNegativeOutcome;
+    /** Stable delivery identity. Duplicate local appends count once; conflicts count zero. */
+    sourceEventId?: string;
 }
 /** A minimal root_event view this module reads (matches the events module's ReportEvent shape; declared locally so
  *  ops stays decoupled from the events module, mirroring valueLedger's LedgerRootEvent). */

@@ -10,6 +10,8 @@ import { type AutoDistillAntiGeneMode, type AutoDistillAntiGeneResult } from './
 import { type AutoDistillTranscriptMode, type TranscriptDistillTickResult } from './autoDistillTranscript.js';
 import { type SessionIngestTickResult } from './sessionIngest.js';
 import { AtpAutoBuyer, type AtpAutoBuyerClient, type AtpAutoBuyerRequest } from './atpAutoBuyer.js';
+import { FeedbackOutbox, type FeedbackOutboxRecord, type FeedbackSender } from './feedbackOutbox.js';
+import { TaskOutcomeOutbox, type PrepareTaskOutcomeInput, type TaskOutcomeSender } from './taskOutcomeOutbox.js';
 import { type ConfiguredSelectionGuard } from './selectionPolicyConfig.js';
 export { readAutoExecConfig, type AutoExecConfig } from './autoexecConfig.js';
 export { semanticIdfEnabled } from './semanticIdfConfig.js';
@@ -32,6 +34,13 @@ export interface AutoExecDirs {
 /** Create the queue layout under <home>/autoexec/{tasks,inflight,done,refused}. */
 export declare function ensureAutoExecDirs(base: string): AutoExecDirs;
 export declare function summarizeSandboxedValidation(result: verify.SandboxedValidationResult): string | null;
+interface AutoExecPassOptions {
+    executePendingTasks?: boolean;
+    captureFeedbackDestination?: (task: exec.AutoExecTask) => string | null | undefined;
+    taskOutcomeEnabled?: boolean;
+    prepareFeedback?: (claimRoot: string, task: exec.AutoExecTask, verdict: exec.AutoExecVerdict, executionDestinationId?: string | null, taskOutcomeEnabled?: boolean) => void;
+    afterCommit?: (task: exec.AutoExecTask, verdict: exec.AutoExecVerdict) => void;
+}
 /**
  * Whether a claim for this queue id is already checked out to the exec pass. The name has
  * to match on both ends — `--hub-1` is a prefix of `--hub-10`, and treating one task as
@@ -44,9 +53,7 @@ export declare function hasInflightClaim(dirs: AutoExecDirs, queueTaskId: string
  * after a crash, started and legacy claims are ambiguous and fail closed instead of repeating side effects.
  * Unreadable or incomplete claimed tasks stay pending because the drop-directory has no atomic publish marker.
  */
-export declare function autoExecPass(dirs: AutoExecDirs, runOne: (task: exec.AutoExecTask) => Promise<exec.AutoExecVerdict>, options?: {
-    executePendingTasks?: boolean;
-}): Promise<exec.AutoExecVerdict[]>;
+export declare function autoExecPass(dirs: AutoExecDirs, runOne: (task: exec.AutoExecTask) => Promise<exec.AutoExecVerdict>, options?: AutoExecPassOptions): Promise<exec.AutoExecVerdict[]>;
 /**
  * Which repo Hub tasks land in. A Hub task does not say which one it belongs to, so a
  * multi-repo allowlist cannot be spread across — one receiver serves one repo. Silently
@@ -57,7 +64,7 @@ export declare function taskReceiverRepo(env: NodeJS.ProcessEnv, allowedRoots: r
 /** Runners cleared to take work off the queue, rather than only keeping the daemon alive. */
 export declare function canExecuteQueue(runner: exec.RunnerName): boolean;
 /** Keep unsupported built-in runners away from the execution queue without stopping the resident daemon. */
-export declare function runnerBoundAutoExecPass(runner: exec.RunnerName, dirs: AutoExecDirs, runOne: (task: exec.AutoExecTask) => Promise<exec.AutoExecVerdict>): () => Promise<exec.AutoExecVerdict[]>;
+export declare function runnerBoundAutoExecPass(runner: exec.RunnerName, dirs: AutoExecDirs, runOne: (task: exec.AutoExecTask) => Promise<exec.AutoExecVerdict>, options?: Omit<AutoExecPassOptions, 'executePendingTasks'>): () => Promise<exec.AutoExecVerdict[]>;
 /**
  * Build the reuse-before-solve seam (#110) — THE real injection point. This is the public-repo composition
  * layer that owns BOTH core's autoexec kernel and the adapter's hub capability, so it is where the adapter's
@@ -102,13 +109,23 @@ export declare function atpCapabilityGapRequest(signals: readonly string[]): Atp
 export declare function scheduleAtpAutoBuyForVerifiedMiss(miss: VerifiedHubSearchMiss, buyer: Pick<AtpAutoBuyer, 'consider'>): void;
 /** Resolve an autonomous buyer only after an explicit env/ack consent check; the buyer checks consent again. */
 export declare function resolveAtpAutoBuyer(env?: NodeJS.ProcessEnv, createClient?: (resolvedEnv: NodeJS.ProcessEnv) => AtpAutoBuyerClient): AtpAutoBuyer | undefined;
-export declare function makeHubReuseSeam(cap: hubNs.HubCapability, cache: ReuseCache, ingestor?: events.Ingestor, onAssetReused?: (assetId: string) => void, onVerifiedSearchMiss?: VerifiedHubSearchMissHandler, audit?: HubReuseAuditOptions): exec.HubReuseSeam;
+export declare function makeHubReuseSeam(cap: hubNs.HubCapability, cache: ReuseCache, _ingestor?: events.Ingestor, onAssetReused?: (assetId: string) => void, onVerifiedSearchMiss?: VerifiedHubSearchMissHandler, audit?: HubReuseAuditOptions): exec.HubReuseSeam;
 /**
  * Free search-only seam used by ATP auto-buy when reuse injection is disabled. It proves a capability miss with
  * the same dual-leg search and score threshold as reuse, but never performs the paid fetch or contributes a Hub
  * candidate.
  */
 export declare function makeHubSearchMissProbe(cap: hubNs.HubCapability, cache: ReuseCache, onVerifiedSearchMiss: VerifiedHubSearchMissHandler, enabled: () => boolean, env?: NodeJS.ProcessEnv, assetLog?: AssetCallLogger): exec.HubReuseSeam;
+/** Project only a committed, exact selected/executed use, never a fetched candidate. */
+export declare function committedFeedbackEvent(row: Readonly<FeedbackOutboxRecord>): events.RawEvent;
+/** Local projection is owed before network delivery; ambiguous sends are never replayed automatically. */
+export declare function flushAutoExecFeedback(outbox: FeedbackOutbox, ingestor: events.Ingestor, sender?: FeedbackSender, destinationId?: string): Promise<{
+    projected: number;
+    delivered: number;
+    ambiguous: number;
+}>;
+/** A slow durable outbox drain must neither block Hub-task completion nor overlap the next beat. */
+export declare function makeDeferredAutoExecFeedbackDrain(drain: () => Promise<void>, onFailure: () => void): () => void;
 /** Build the same event for byte-budget admission and durable emission. */
 export declare function injectEvent(info: hooks.InjectInfo): events.RawEvent;
 export declare function emitInject(ingestor: events.Ingestor, info: hooks.InjectInfo): Promise<void>;
@@ -133,9 +150,16 @@ export type OutcomeReportingHub = hubNs.HubCapability & {
 /** The composed hub wiring: the reuse seam plus the matching outcome reporter that closes the loop. */
 export interface HubLink {
     seam: exec.HubReuseSeam;
+    /** Destination captured when the public reporting capability was bound to an exact credential. */
+    feedbackDestinationId?: string;
     /** Report a finished task's outcome (with the used-asset attribution claim) to the hub. Never throws. */
     reportOutcome: (task: exec.AutoExecTask, verdict: exec.AutoExecVerdict) => Promise<void>;
+    /** Strict receipt-bearing delivery of a committed, exact applied-use fact. */
+    sendAppliedUse?: FeedbackSender;
+    /** Durable task-wide memory attribution; separate from exact per-asset reuse feedback. */
+    sendTaskOutcome?: TaskOutcomeSender;
 }
+export declare function makeAppliedUseFeedbackSender(cap: OutcomeReportingHub, expectedDestinationId: string, reportEnabled?: boolean): FeedbackSender;
 export interface HubQuestionLink {
     /** Submit optional proactive questions for a finished task. Never throws. */
     submitForTask: (task: exec.AutoExecTask) => Promise<HubQuestionSubmitResult>;
@@ -221,12 +245,45 @@ export declare function scheduleAutoExecHubSideEffects(task: exec.AutoExecTask, 
     outcome?: HubLink;
 }): void;
 /**
- * Compose the reuse seam and the outcome reporter. Reuse HITs still emit value-ledger observability, but the
- * Hub outcome `used_asset_ids` claim comes only from the finished verdict's selected/executed asset. A fetched
- * candidate can be withheld by trust/review gates or lose selection, so fetch-time attribution would overclaim.
- * Reporting never throws and never blocks the verdict.
+ * Compose the reuse seam and the outcome reporters. A fetched candidate is neutral.
+ * Exact applied-use delivery is owned by sendAppliedUse and the durable outbox;
+ * the legacy task-wide outcome path cannot send a duplicate reuse-result claim.
  */
-export declare function makeHubLink(cap: OutcomeReportingHub, ingestor?: events.Ingestor, reportEnabled?: boolean, onVerifiedSearchMiss?: VerifiedHubSearchMissHandler, assetLog?: AssetCallLogger, env?: NodeJS.ProcessEnv): HubLink;
+export declare function makeHubLink(cap: OutcomeReportingHub, ingestor?: events.Ingestor, reportEnabled?: boolean, onVerifiedSearchMiss?: VerifiedHubSearchMissHandler, assetLog?: AssetCallLogger, env?: NodeJS.ProcessEnv, appliedUseSender?: FeedbackSender, reportingCap?: OutcomeReportingHub, reportingDestinationId?: string): HubLink;
+/** Opaque nonsecret binding to the effective Hub principal and route, never a credential. */
+export declare function feedbackDestinationIdentity(mode: 'public' | 'private', endpoint: string, principal: string, namespace?: string): string;
+/** The proxy attests the final identity it also checks on the feedback POST. */
+export declare function privateFeedbackDestinationIdFromStatus(value: unknown): string | undefined;
+/** A private proxy must attest its effective Hub destination, not merely its local node. */
+export declare function resolveFeedbackDestinationId(env: NodeJS.ProcessEnv): Promise<string | undefined>;
+export declare function makeAutoExecFeedbackBinding(candidate: HubLink | undefined, mode: 'public' | 'private' | undefined, probe: () => Promise<string | undefined>): {
+    refresh: () => Promise<{
+        link: HubLink;
+        destinationId: string;
+    } | undefined>;
+    bound: () => {
+        link: HubLink;
+        destinationId: string;
+    } | undefined;
+    current: () => {
+        link: HubLink;
+        destinationId: string;
+    } | undefined;
+};
+/** One task may only create Hub debt if its execution and completion saw the same binding. */
+export declare function confirmedTaskFeedbackDestination(started: {
+    link: HubLink;
+    destinationId: string;
+} | undefined, completed: {
+    link: HubLink;
+    destinationId: string;
+} | undefined): string | undefined;
+/** A recovered claim has no verified execution-time Hub binding; never adopt today's endpoint. */
+export declare function committedTaskFeedbackDestination(taskDestination: string | null | undefined, current: {
+    destinationId: string;
+} | undefined): string | undefined;
+/** A committed claim can finish recovering an existing row even while its Hub is unavailable. */
+export declare function prepareCommittedTaskOutcomeFeedback(outbox: TaskOutcomeOutbox, claimRoot: string, task: PrepareTaskOutcomeInput['task'], verdict: PrepareTaskOutcomeInput['verdict'], destinationId?: string): void;
 /**
  * Resolve public/private reuse wiring. Reuse remains default-off. When a public ATP miss handler is supplied,
  * a consent-gated free search-only seam may still be composed so auto-buy can prove a miss independently of
@@ -261,6 +318,8 @@ export interface DistillProducerOptions {
     /** The daemon's bus Ingestor — REQUIRED, so the producer's `material.batch_ready` reaches the same ObserverBus
      *  the distillObserver is registered on. */
     ingestor: events.Ingestor;
+    /** Separate built-in context writer bound to ingestor's exact event target. */
+    contextIngestor?: events.Ingestor;
     store?: assetstore.AssetStoreProvider;
     review?: assetstore.ReviewLedger;
     materialStore?: materialNs.MaterialStore;

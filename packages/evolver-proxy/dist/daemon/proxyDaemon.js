@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { reference, mailbox, hub as hubNs, shadow as shadow_, assetstore, wire, util, verify } from '@evomap/evolver-core';
-import { AuthError, HubClientError, HubUnreachableError } from '@evomap/evolver-adapter-public';
+import { AuthError, HubClientError, HubUnreachableError, terminalHubRejection } from '@evomap/evolver-adapter-public';
 import { SyncEngine, SYNC_INTERVALS } from '../sync/engine.js';
 import { LifecycleManager } from '../lifecycle/manager.js';
 import { executeForceUpdate } from '../selfUpdate/executor.js';
@@ -132,6 +132,7 @@ export class ProxyDaemon {
     started = false;
     lifecycleArmed = false;
     lastTickAt;
+    runtimeProcessIdentity = util.readFileLockProcessStartIdentity(process.pid);
     nextTickDueAt;
     consecutiveTickFailures = 0;
     storeClosed = false;
@@ -579,6 +580,8 @@ export class ProxyDaemon {
     }
     health() {
         return {
+            pid: process.pid,
+            processStartIdentity: this.runtimeProcessIdentity,
             running: this.started,
             ipcListening: !!this.ipc,
             lifecycleArmed: this.lifecycleArmed,
@@ -871,8 +874,9 @@ export class ProxyDaemon {
         return { ...qualified, missing: ids.filter((id) => !qualified.assets.some((asset) => assetMatchesId(asset, id))) };
     }
     async recallAssets(query) {
+        const hub = this.deps.hub;
         try {
-            return await this.deps.hub.fetch(query);
+            return hub.fetchPage ? await hub.fetchPage(query) : { assets: await hub.fetch(query), confirmRequired: false };
         }
         catch (error) {
             if (!isAuthLikeError(error))
@@ -893,6 +897,17 @@ export class ProxyDaemon {
         }
         return this.qualifyFetch(ids, assets, missing);
     }
+    feedbackNodeId() {
+        try {
+            // A configured runtime identity is authoritative, even when unavailable.
+            // Only direct callers without that provider may use the stored hello identity.
+            const node = this.deps.currentNodeId ? this.deps.currentNodeId() : this.lifecycle.nodeId;
+            return typeof node === 'string' && node.trim() ? node : undefined;
+        }
+        catch {
+            return undefined;
+        }
+    }
     async handleProxyRoute(ctx) {
         const expectedHeader = singleHeader(ctx.req.headers['x-evomap-expected-hub-mode']);
         if (hubModeMismatch(expectedHeader, this.deps.hubMode)) {
@@ -904,15 +919,30 @@ export class ProxyDaemon {
             return true;
         if (ctx.route === 'GET /proxy/status') {
             const publishReceiptDiagnostics = safePublishReceiptDiagnostics(this.hub);
+            const nodeId = this.deps.hubMode === 'private' ? this.feedbackNodeId() : this.lifecycle.nodeId;
+            let feedbackDestinationId;
+            try {
+                const boundFeedback = isPrivateBoundReuseFeedback(this.deps.boundReuseFeedback)
+                    ? this.deps.boundReuseFeedback : undefined;
+                const candidate = this.deps.hubMode === 'private' && !this.shadowMode
+                    ? boundFeedback?.feedbackDestinationId() : undefined;
+                feedbackDestinationId = privateFeedbackDestinationId(candidate, nodeId, this.deps.runtimeNamespace ?? 'default');
+            }
+            catch { /* A missing adapter identity disables bound feedback without breaking health checks. */ }
             ctx.json(200, {
                 running: true,
                 status: 'running',
+                health: this.health(),
                 proxy_protocol_version: PROXY_PROTOCOL_VERSION,
                 ...(this.benchmark ? { benchmark_id: this.benchmark.benchmarkId, source_qualification_mode: 'enforce' } : {}),
                 schema_version: PROXY_STATUS_SCHEMA_VERSION,
                 hub_mode: this.deps.hubMode ?? 'public',
                 runtime_namespace: this.deps.runtimeNamespace ?? 'default',
-                node_id: this.lifecycle.nodeId ?? null,
+                node_id: nodeId ?? null,
+                ...(feedbackDestinationId ? {
+                    feedback_destination_id: feedbackDestinationId,
+                    feedback_destination_id_format: 'proxy-bound.v1',
+                } : {}),
                 recipe_execution_scope: recipeIpcScope(this.hub.recipes?.execution),
                 outbound_pending: this.store.countPending('proxy', this.deps.runtimeNamespace),
                 inbound_pending: this.store.countPending('agent', this.deps.runtimeNamespace) + this.store.countPending('core', this.deps.runtimeNamespace),
@@ -1180,7 +1210,15 @@ export class ProxyDaemon {
                     });
                     return true;
                 }
-                ctx.json(200, { ...this.qualifyFetch([], recalled, []), query: body, recalled_by: recallText !== undefined ? 'text' : 'signals' });
+                const recalledBy = recallText !== undefined ? 'text' : 'signals';
+                if (recalled.confirmRequired) {
+                    ctx.json(200, {
+                        assets: [], missing: [], query: body, recalled_by: recalledBy,
+                        confirm_required: true, credit_cost_preview: recalled.creditCostPreview,
+                    });
+                    return true;
+                }
+                ctx.json(200, { ...this.qualifyFetch([], recalled.assets, []), query: body, recalled_by: recalledBy });
                 return true;
             }
             const assets = [];
@@ -1357,9 +1395,34 @@ export class ProxyDaemon {
         }
         if (ctx.route === 'POST /asset/reuse-result') {
             const body = await ctx.readJson();
-            if (hubModeMismatch(asRecord(body)['expected_hub_mode'], this.deps.hubMode)) {
+            const input = asRecord(body);
+            if (hubModeMismatch(input['expected_hub_mode'], this.deps.hubMode)) {
                 ctx.json(409, { recorded: false, error: 'proxy_hub_mode_mismatch' });
                 return true;
+            }
+            const expectedDestination = input['expected_hub_destination_id'];
+            const privateFeedback = this.deps.hubMode === 'private';
+            const boundFeedback = isPrivateBoundReuseFeedback(this.deps.boundReuseFeedback)
+                ? this.deps.boundReuseFeedback : undefined;
+            // Legacy direct/MCP reports remain on their established reporter. Durable
+            // autoexec reports carry an expectation and may never fall through to it.
+            if (expectedDestination !== undefined && (!privateFeedback || this.shadowMode || !boundFeedback)) {
+                ctx.json(409, { recorded: false, error: 'proxy_hub_destination_mismatch' });
+                return true;
+            }
+            let adapterDestination;
+            if (expectedDestination !== undefined) {
+                let currentDestination;
+                try {
+                    adapterDestination = privateFeedback && !this.shadowMode
+                        ? boundFeedback?.feedbackDestinationId() : undefined;
+                    currentDestination = privateFeedbackDestinationId(adapterDestination, this.feedbackNodeId(), this.deps.runtimeNamespace ?? 'default');
+                }
+                catch { /* Missing identity must reject a destination-bound send. */ }
+                if (typeof expectedDestination !== 'string' || expectedDestination !== currentDestination) {
+                    ctx.json(409, { recorded: false, error: 'proxy_hub_destination_mismatch' });
+                    return true;
+                }
             }
             if (!reference.isExecutionEligible(body, this.referenceStore?.scope)) {
                 ctx.json(200, { recorded: false, reason: 'reference_not_execution_evidence' });
@@ -1370,15 +1433,20 @@ export class ProxyDaemon {
                 ctx.json(400, { recorded: false, error: parsed.error });
                 return true;
             }
-            if (!this.reuseResultReporter) {
+            if (expectedDestination === undefined && !this.reuseResultReporter) {
                 ctx.json(200, { recorded: false, reason: 'reuse_result_not_configured' });
                 return true;
             }
             try {
-                ctx.json(200, await this.reuseResultReporter.recordReuseResult(parsed.report));
+                ctx.json(200, expectedDestination !== undefined
+                    ? await boundFeedback.recordReuseResultBound(parsed.report, adapterDestination)
+                    : await this.reuseResultReporter.recordReuseResult(parsed.report));
             }
             catch (e) {
-                ctx.json(200, { recorded: false, reason: safeDaemonErrorMessage(e, MAX_PROXY_TICK_ERROR_LENGTH) });
+                const rejection = terminalHubRejection(e);
+                ctx.json(200, rejection
+                    ? { recorded: false, terminal: true, ...rejection }
+                    : { recorded: false, reason: safeDaemonErrorMessage(e, MAX_PROXY_TICK_ERROR_LENGTH) });
             }
             return true;
         }
@@ -1557,18 +1625,24 @@ export class ProxyDaemon {
                     ctx.json(401, this.hubAuthFailureBody({ publish_status: 'failed', queued: false, stored: false }));
                     return true;
                 }
+                if (!distill.event) {
+                    ctx.json(422, { error: 'publish_event_missing', stored: false, queued: false });
+                    return true;
+                }
                 if (!distill.publish_receipt) {
                     ctx.json(422, { error: 'publish_binding_missing', stored: false, queued: false });
                     return true;
                 }
-                this.publishBindingLedger.register(distill.publish_receipt, [distill.gene, distill.capsule]);
-                this.publishBindingLedger.verify([distill.gene, distill.capsule], distill.publish_receipt);
+                const publicationBundle = [distill.gene, distill.capsule, distill.event];
+                hubNs.assertEvolutionEventPublishBundle(publicationBundle);
+                this.publishBindingLedger.register(distill.publish_receipt, publicationBundle);
+                this.publishBindingLedger.verify(publicationBundle, distill.publish_receipt);
                 const env = mailbox.createEnvelope({
                     type: 'asset_submit',
                     payload: {
                         source: 'conversation_distillation',
                         distill_id: distill.distill_id,
-                        assets: [distill.gene, distill.capsule],
+                        assets: publicationBundle,
                         publish_receipt: distill.publish_receipt,
                         compose_recipe: body['publish_recipe'] !== false,
                         title: typeof body.title === 'string' ? body.title : undefined,
@@ -2213,6 +2287,19 @@ function isAssetByIdFetcher(value) {
 function isReuseResultReporter(value) {
     return Boolean(value && typeof value === 'object' && typeof value.recordReuseResult === 'function');
 }
+function isPrivateBoundReuseFeedback(value) {
+    return Boolean(value && typeof value === 'object'
+        && typeof value.feedbackDestinationId === 'function'
+        && typeof value.recordReuseResultBound === 'function');
+}
+function privateFeedbackDestinationId(adapterDestination, nodeId, namespace) {
+    if (typeof adapterDestination !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(adapterDestination)
+        || typeof nodeId !== 'string' || !nodeId.trim())
+        return undefined;
+    return `sha256:${createHash('sha256').update(JSON.stringify([
+        'private', adapterDestination, nodeId, namespace,
+    ])).digest('hex')}`;
+}
 function isValidator(value) {
     return Boolean(value && typeof value === 'object' && typeof value.validate === 'function');
 }
@@ -2491,10 +2578,15 @@ async function convertLegacyLooseAsset(value, verifyExecution, verifyExecutionTi
                     : 'legacy_distill_quality_gate',
             };
         }
-        const sanitized = hubNs.sanitizeBundle([distilled.gene, distilled.capsule].map(deterministicDistilledAsset), { env: sanitizeEnv });
+        if (!distilled.event)
+            return { ok: false, error: 'legacy_distill_binding_missing' };
+        const originalBundle = [distilled.gene, distilled.capsule, distilled.event];
+        const deterministicBundle = hubNs.rebindSanitizedEvolutionEventBundle(originalBundle, originalBundle.map(deterministicDistilledAsset));
+        const sanitized = hubNs.sanitizeBundle(deterministicBundle, { env: sanitizeEnv });
         if (sanitized.blocked)
             return { ok: false, error: 'legacy_distill_leak_blocked' };
         const bundle = sanitized.bundle;
+        hubNs.assertEvolutionEventPublishBundle(bundle);
         if (!bundle.every((asset) => wire.validateWire(asset).ok)) {
             return { ok: false, error: 'legacy_distill_invalid_wire_output' };
         }
@@ -2919,6 +3011,9 @@ function parseReuseResultReport(value) {
     if ('error' in timeSavedSecondsParsed)
         return { error: timeSavedSecondsParsed.error };
     const reason = stringBody(body, 'reason');
+    const evidence = optionalEvidenceBody(body);
+    if ('error' in evidence)
+        return { error: evidence.error };
     return {
         report: {
             assetId,
@@ -2927,8 +3022,20 @@ function parseReuseResultReport(value) {
             ...(traceId ? { traceId } : {}),
             ...(timeSavedSecondsParsed.value !== undefined ? { timeSavedSeconds: timeSavedSecondsParsed.value } : {}),
             ...(reason ? { reason: reason.slice(0, 1000) } : {}),
+            ...(evidence.value !== undefined ? { evidence: evidence.value } : {}),
         },
     };
+}
+const MAX_EVIDENCE_BYTES = 2048;
+function optionalEvidenceBody(body) {
+    const raw = body['evidence'];
+    if (raw === undefined)
+        return { value: undefined };
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+        return { error: 'invalid_evidence' };
+    if (Buffer.byteLength(JSON.stringify(raw), 'utf8') > MAX_EVIDENCE_BYTES)
+        return { error: 'evidence_too_large' };
+    return { value: raw };
 }
 function isReuseResultOutcome(value) {
     return typeof value === 'string' && REUSE_RESULT_OUTCOMES.has(value);

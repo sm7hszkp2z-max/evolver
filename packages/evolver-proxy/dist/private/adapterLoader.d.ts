@@ -9,6 +9,18 @@ export type PrivateHubWithLifecycle = hubNs.HubCapability & {
     heartbeat(opts?: HeartbeatOptions): Promise<HeartbeatResult>;
 };
 export type PrivateProxyHub = PrivateHubWithLifecycle & PrivateAccountAssetHub;
+/**
+ * Optional private-adapter contract. The ID is a nonsecret sha256 fingerprint
+ * of the active endpoint and authenticated principal, never a credential.
+ * The adapter owns its effective route and principal, so the bound method must
+ * compare that same identity atomically with the actual network send. It must
+ * refuse a changed/unknown destination without claiming a recorded receipt.
+ * A proxy-side status check alone cannot prevent a mid-request switch.
+ */
+export interface PrivateBoundReuseFeedback {
+    feedbackDestinationId(): string | undefined;
+    recordReuseResultBound(report: hubNs.ReuseResultReport, expectedDestinationId: string): Promise<hubNs.ReuseResultReceipt>;
+}
 interface PrivateSsoExchange {
     identity: () => {
         subject: string;
@@ -39,6 +51,7 @@ type DynamicImporter = (specifier: string) => Promise<unknown>;
 export interface PrivateProxyHubRuntime {
     hub: PrivateProxyHub;
     auth: hubNs.AuthProvider;
+    boundReuseFeedback?: PrivateBoundReuseFeedback;
     /** Enrollment-aware lifecycle entrypoint. Ready node_secret credentials must not re-run hello. */
     hello(opts: {
         rotate: boolean;

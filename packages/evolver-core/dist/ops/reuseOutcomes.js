@@ -15,6 +15,7 @@
 // second event on the success path.
 import { VALUE_REUSE_HIT_EVENT } from './valueLedger.js';
 import { VALUE_RECALL_EVENT } from './recall.js';
+import { uniqueReuseFacts } from './reuseEventIdentity.js';
 /** root_events type appended for a NON-success MCP reuse-result — the negative half of the keep/prune signal. */
 export const VALUE_REUSE_OUTCOME_EVENT = 'value.reuse_outcome';
 const NEG = ['failed', 'mismatched', 'stale', 'unsafe'];
@@ -37,7 +38,7 @@ export function summarizeReuseOutcomes(events) {
         return g;
     };
     let total = 0;
-    for (const e of events) {
+    for (const e of uniqueReuseFacts(events)) {
         if (e.type === VALUE_REUSE_HIT_EVENT) {
             const assetId = assetIdOf(e);
             if (!assetId)

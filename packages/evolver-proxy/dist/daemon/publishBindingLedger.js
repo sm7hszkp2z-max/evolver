@@ -11,12 +11,16 @@ export class PublishBindingLedger {
     }
     register(receipt, bundle) {
         // 登记时必须看到实际完整内容；只凭 receipt digest 无法推断任何成员授权。
+        hub.assertEvolutionEventPublishBundle(bundle);
         hub.assertPublishBindingReceipt(bundle, receipt, this.runtimeDigest);
         const key = this.key(receipt.bundleDigest);
         const previous = this.store.getState(key);
         // 一个 bundle 可有多个合法验证根；每个 receipt 单独保存，索引只用于无 sidecar 的同内容重试。
         this.store.setState(`${key}:${receipt.receiptId}`, JSON.stringify(receipt));
         for (const asset of bundle) {
+            // Event 是完整三件包的审计记录，不能独立发送。
+            if (asset.type === 'EvolutionEvent')
+                continue;
             const member = hub.createPublishMemberBindingReceipt(asset, receipt);
             const memberKey = this.memberKey(member.bundleDigest);
             this.store.setState(`${memberKey}:${member.receiptId}`, JSON.stringify(member));
@@ -27,6 +31,7 @@ export class PublishBindingLedger {
             this.store.setState(key, receipt.receiptId);
     }
     verify(bundle, supplied) {
+        hub.assertEvolutionEventPublishBundle(bundle);
         const required = supplied !== undefined || hub.requiresPublishBinding(bundle);
         if (!required)
             return undefined;

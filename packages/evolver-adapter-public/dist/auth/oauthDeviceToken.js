@@ -1,8 +1,34 @@
+import { createHash } from 'node:crypto';
 import { CredentialStore } from './credentialStore.js';
 import { resolveMachineId, machineFingerprint } from './machineId.js';
 export const TOKEN_TTL_MS = 24 * 60 * 60_000; // fallback only; the hub supplies expiresInMs (~1h)
 export const ROTATE_BEFORE_MS = 5 * 60_000; // refresh 5min before expiry (hub access tokens are short-lived ~1h)
 const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
+/** A local refusal before the business request enters HubFetch.fetchFn. No credential data is exposed. */
+export class OAuthCredentialBindingError extends Error {
+    constructor() {
+        super('oauth_credential_binding_changed');
+        this.name = 'OAuthCredentialBindingError';
+    }
+}
+/** Authentication failed before the bound Hub business request began. */
+export class OAuthAuthenticationPreflightError extends Error {
+    constructor(cause) {
+        super(cause instanceof Error ? cause.message : 'oauth_authentication_preflight_failed', { cause });
+        this.name = 'OAuthAuthenticationPreflightError';
+    }
+}
+function tokenBinding(cred) {
+    if (!cred || cred.kind !== 'oauth_device_token' || !('token' in cred)
+        || typeof cred.token !== 'string' || !cred.token || /\s/u.test(cred.token)
+        || [...cred.token].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))
+        return undefined;
+    return `sha256:${createHash('sha256').update('evomap-public-oauth-access-token-v1\0').update(cred.token).digest('hex')}`;
+}
+/** Inspect the trusted credential file without exposing its access token or treating the machine id as an account. */
+export function readPublicOAuthCredentialBinding(credPath) {
+    return tokenBinding(new CredentialStore(credPath).load());
+}
 function abortReason(signal) {
     return signal.reason instanceof Error ? signal.reason : new Error('device_flow_timeout');
 }
@@ -96,11 +122,54 @@ export class PublicOAuthProvider {
         }
     }
     async authenticate(req) {
-        let cred = this.store.load();
-        if (!cred || !('token' in cred))
+        if (this.opts.expectedTokenBinding !== undefined
+            && (typeof this.opts.expectedTokenBinding !== 'string'
+                || !/^sha256:[a-f0-9]{64}$/.test(this.opts.expectedTokenBinding))) {
+            throw new OAuthCredentialBindingError();
+        }
+        let cred;
+        try {
+            cred = this.store.load();
+        }
+        catch (error) {
+            if (this.opts.expectedTokenBinding)
+                throw new OAuthCredentialBindingError();
+            throw error;
+        }
+        if (!cred || !('token' in cred)) {
+            if (this.opts.expectedTokenBinding)
+                throw new OAuthCredentialBindingError();
             throw new Error('oauth 未登录, 先 login()');
-        if ((cred.expiresAt ?? 0) - ROTATE_BEFORE_MS <= this.now())
-            cred = await this.rotate(req?.signal);
+        }
+        if (this.opts.expectedTokenBinding && tokenBinding(cred) !== this.opts.expectedTokenBinding) {
+            throw new OAuthCredentialBindingError();
+        }
+        if ((cred.expiresAt ?? 0) - ROTATE_BEFORE_MS <= this.now()) {
+            try {
+                cred = await this.rotate(req?.signal);
+            }
+            catch (error) {
+                if (this.opts.expectedTokenBinding) {
+                    // A failed refresh does not prove credential replacement. Re-read the
+                    // trusted store so a concurrent replacement still receives the strict
+                    // binding refusal, while transient pre-request failures remain retryable.
+                    let current;
+                    try {
+                        current = this.store.load();
+                    }
+                    catch {
+                        throw new OAuthCredentialBindingError();
+                    }
+                    if (tokenBinding(current) !== this.opts.expectedTokenBinding)
+                        throw new OAuthCredentialBindingError();
+                    throw new OAuthAuthenticationPreflightError(error);
+                }
+                throw error;
+            }
+        }
+        if (this.opts.expectedTokenBinding && tokenBinding(cred) !== this.opts.expectedTokenBinding) {
+            throw new OAuthCredentialBindingError();
+        }
         return { headers: { authorization: `Bearer ${cred.token}`, 'x-evomap-device': cred.device ?? '' } };
     }
     async rotate(parentSignal) {

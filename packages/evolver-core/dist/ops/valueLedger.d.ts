@@ -1,4 +1,4 @@
-import { type ReferenceScope } from '../reference/guard.js';
+import type { ReferenceScope } from '../reference/guard.js';
 /** USD price per single token, split by token class (Anthropic-style usage breakdown). All optional: an
  *  absent class is treated as 0 so a sparse table still prices what it can. */
 export interface ModelPrice {
@@ -44,7 +44,7 @@ export interface TraceRecord {
     tier?: string | null;
     usage?: TokenUsage;
 }
-/** root_events type appended on a reuse-before-solve HIT — the replayable source for source=reuse entries. */
+/** root_events type appended after an applied reuse succeeds, not when a candidate is fetched. */
 export declare const VALUE_REUSE_HIT_EVENT = "value.reuse_hit";
 /**
  * Payload of a `value.reuse_hit` root_event. Carries exactly what the ledger needs to account a reuse saving:
@@ -57,6 +57,8 @@ export declare const VALUE_REUSE_HIT_EVENT = "value.reuse_hit";
 export interface ReuseHitPayload {
     assetId: string;
     cycleId: string;
+    /** Stable delivery identity. Duplicate local appends count once; conflicts count zero. */
+    sourceEventId?: string;
     /** Signal fingerprint of the reused problem (for baseline cohorting / explainability). */
     signalFingerprint?: string;
     /** Tokens the fetch actually consumed (cache/payload pull — typically 0). Defaults to 0. */

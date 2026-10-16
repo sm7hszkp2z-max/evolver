@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, openSync, readSync, readFileSync, renameSync, unlinkSync, writeFileSync, } from 'node:fs';
-import { basename, dirname, join, resolve, win32 } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { readWindowsProcessStartTimeTicks } from './windowsProcessIdentity.js';
 export function syncSleep(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 const MALFORMED_LOCK_GRACE_NS = 1000000000n;
 const OBSERVED_PROCESS_IDENTITY_CACHE_NS = 5000000000n;
 const PROCESS_IDENTITY_TIMEOUT_MS = 15_000;
-const HOST_WINDOWS_SYSTEM_ROOT = process.env['SystemRoot']?.trim() || 'C:\\Windows';
 const ownedLocks = new Map();
 const malformedLockObservations = new Map();
 const observedProcessIdentities = new Map();
@@ -41,11 +41,17 @@ function newOwner() {
     return { pid: process.pid, token: randomUUID(), processStart };
 }
 function serializeOwner(owner) {
+    return serializeFileLockOwnerRecord(publicOwnerRecord(owner));
+}
+/** Canonical v2 bytes shared by publication and strict byte-bound lifecycle receipts. */
+export function serializeFileLockOwnerRecord(owner) {
     return `${JSON.stringify({
         v: 2,
         pid: owner.pid,
         token: owner.token,
-        processStart: owner.processStart,
+        processStart: owner.processStartIdentity,
+        // Keep the four-field v2 wire format: deployed bootstrap readers reject extra keys.
+        // The kernel collector produces the same .NET ticks as the legacy PowerShell reader.
     })}\n`;
 }
 function publicOwnerRecord(owner) {
@@ -108,39 +114,11 @@ function linuxProcessStartIdentity(pid) {
         ? { source: 'linux-proc', bootId, startTicks: first }
         : null;
 }
-function trustedWindowsPowerShell() {
-    if (!win32.isAbsolute(HOST_WINDOWS_SYSTEM_ROOT)
-        || !validIdentityText(HOST_WINDOWS_SYSTEM_ROOT, 1024))
-        return null;
-    const executable = win32.join(HOST_WINDOWS_SYSTEM_ROOT, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-    return existsSync(executable) ? executable : null;
-}
 function windowsProcessStartIdentity(pid) {
-    const powershell = trustedWindowsPowerShell();
-    if (powershell === null)
-        return null;
-    const script = [
-        "$ErrorActionPreference = 'Stop'",
-        `$process = [System.Diagnostics.Process]::GetProcessById(${pid})`,
-        'try {',
-        '  $ticks = $process.StartTime.ToUniversalTime().Ticks',
-        '  [Console]::Out.Write($ticks.ToString([Globalization.CultureInfo]::InvariantCulture))',
-        '} finally { $process.Dispose() }',
-    ].join('\n');
-    try {
-        const startTimeTicks = execFileSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-            timeout: PROCESS_IDENTITY_TIMEOUT_MS,
-            windowsHide: true,
-        }).trim();
-        return validPositiveIntegerText(startTimeTicks)
-            ? { source: 'windows-powershell', startTimeTicks }
-            : null;
-    }
-    catch {
-        return null;
-    }
+    const startTimeTicks = readWindowsProcessStartTimeTicks(pid);
+    return startTimeTicks === null ? null : {
+        source: 'windows-powershell', startTimeTicks,
+    };
 }
 function darwinProcessStartIdentity(pid) {
     try {
@@ -188,12 +166,15 @@ function processStartIdentity(pid, claimedIdentity) {
         return cached.identity;
     }
     const identity = (fileLockTestHooks.processStartIdentity ?? nativeProcessStartIdentity)(pid);
-    if (claimedIdentity !== undefined) {
+    if (claimedIdentity !== undefined && identity !== null) {
         observedProcessIdentities.set(pid, {
             claimedIdentity,
             identity,
             expiresAtNs: now + OBSERVED_PROCESS_IDENTITY_CACHE_NS,
         });
+    }
+    else {
+        observedProcessIdentities.delete(pid);
     }
     return identity;
 }
@@ -282,6 +263,7 @@ export function statRegularFileIdentity(path) {
 }
 function currentOwnerStat(path) {
     try {
+        fileLockTestHooks.beforeOwnerStat?.(path);
         const stat = statRegularFileIdentity(path);
         assertRegularOwnerStat(stat);
         return stat;
@@ -299,6 +281,7 @@ function readOwnerFileBounded(path) {
     const before = currentOwnerStat(path);
     if (before === null)
         return null;
+    fileLockTestHooks.beforeOwnerOpen?.(path);
     let fd;
     try {
         fd = openSync(path, constants.O_RDONLY | noFollowFlag());
@@ -443,18 +426,53 @@ function readLockSnapshot(lockPath) {
         mtimeNs: read.stat.mtimeNs,
     };
 }
-/** Snapshot of the lock inode and its owner payload; null if the path disappeared or changed during inspection. */
-function lockSnapshot(lockPath) {
+/** Observe an owner without acquiring, reclaiming or removing the lock. Legacy owners remain unverifiable. */
+export function readFileLockOwner(lockPath) {
+    let initial;
     try {
-        return readLockSnapshot(lockPath);
+        initial = lstatSync(lockPath, { bigint: true });
     }
     catch (error) {
-        // A valid owner can release and another waiter can acquire between lstat/open/fstat. Treat that snapshot as
-        // transiently unavailable: callers remain conservative (no steal/delete) and the acquire loop retries.
-        if (error instanceof UnsafeLockPathError && error.reason === 'path_changed')
+        if (isErrno(error, 'ENOENT'))
             return null;
+        if (isErrno(error, 'EACCES') || isErrno(error, 'EPERM')) {
+            throw new UnsafeLockPathError('permission_denied');
+        }
         throw error;
     }
+    assertRegularOwnerStat(initial);
+    const read = readOwnerFileBounded(lockPath);
+    if (read === null || initial.dev !== read.stat.dev || initial.ino !== read.stat.ino
+        || initial.size !== read.stat.size || initial.mtimeNs !== read.stat.mtimeNs
+        || initial.ctimeNs !== read.stat.ctimeNs) {
+        throw new UnsafeLockPathError('path_changed');
+    }
+    const owner = parseOwner(read.raw);
+    if (!owner?.token || !owner.processStart)
+        throw new UnsafeLockPathError('invalid_owner');
+    return publicOwnerRecord({ pid: owner.pid, token: owner.token, processStart: owner.processStart });
+}
+/** Snapshot of the lock inode and its owner payload; null if the path disappeared or changed during inspection. */
+function lockSnapshot(lockPath) {
+    // Windows may deny an open briefly while another process has renamed an owner and its old name is
+    // delete-pending. Re-read rather than treating that single observation as a lasting ACL denial.
+    // This is read-only: never reclaim or remove an owner on the strength of a denied read. A path that
+    // stays inaccessible still fails closed with the original permission_denied reason.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        try {
+            return readLockSnapshot(lockPath);
+        }
+        catch (error) {
+            // A valid owner can release and another waiter can acquire between lstat/open/fstat.
+            if (error instanceof UnsafeLockPathError && error.reason === 'path_changed')
+                return null;
+            if (!(error instanceof UnsafeLockPathError) || error.reason !== 'permission_denied'
+                || attempt === 9)
+                throw error;
+            syncSleep(5);
+        }
+    }
+    throw new UnsafeLockPathError('permission_denied');
 }
 function sameInode(left, right) {
     return left !== null && right !== null && left.dev === right.dev && left.ino === right.ino;
@@ -1135,11 +1153,27 @@ export function acquireLock(lockPath, opts = {}) {
     }
     throw new LockTimeoutError();
 }
-export function releaseLock(lockPath) {
+/** Remember an exact owner's cleanup without accessing a path whose trust was lost. */
+export function deferLockRelease(lockPath, expectedOwner) {
+    const owned = ownedLocks.get(lockKey(lockPath));
+    if (owned === undefined)
+        return { deferred: false, reason: 'not_owned' };
+    if (!samePublicOwner(expectedOwner, owned.owner)) {
+        return { deferred: false, reason: 'ownership_changed' };
+    }
+    owned.releasePending = true;
+    return { deferred: true, reason: 'deferred' };
+}
+export function releaseLock(lockPath, expectedOwner) {
     const key = lockKey(lockPath);
     const owned = ownedLocks.get(key);
     if (owned === undefined)
         return { released: true, reason: 'not_owned' };
+    // Cleanup may outlive a failed release that a later acquire has already
+    // recovered. A retained caller must never release that successor's token.
+    if (expectedOwner && !samePublicOwner(expectedOwner, owned.owner)) {
+        return { released: true, reason: 'ownership_changed' };
+    }
     const failed = (reason) => {
         owned.releasePending = true;
         return { released: false, reason };

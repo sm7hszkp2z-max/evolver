@@ -2,23 +2,9 @@ import { createHash } from 'node:crypto';
 import { chmodSync, closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readSync, rmSync, writeSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { createRequire } from 'node:module';
+import { openSqliteDatabase } from '../util/sqlite.js';
 import { ulid as makeUlid } from 'ulid';
 import { createEnvelope, ENVELOPE_SCHEMA_VERSION, normalizePriority, sanitizePayload, specForType, } from './envelope.js';
-const nodeRequire = createRequire(import.meta.url);
-function isBunRuntime() {
-    return typeof process.versions === 'object' && typeof process.versions.bun === 'string';
-}
-function openSqliteDatabase(path, options = {}) {
-    if (isBunRuntime()) {
-        const { Database } = nodeRequire('bun:sqlite');
-        return options.readOnly ? new Database(path, { readonly: true }) : new Database(path);
-    }
-    // node:sqlite is exposed only as `node:sqlite` (no bare `sqlite` alias). Load it through createRequire so
-    // bundlers do not statically strip the prefix and break Vitest/Vite or Bun standalone builds.
-    const { DatabaseSync } = nodeRequire('node:sqlite');
-    return options.readOnly ? new DatabaseSync(path, { readOnly: true }) : new DatabaseSync(path);
-}
 const MAILBOX_PREVIEW_MAX_FILE_BYTES = 256 * 1024 * 1024;
 const MAILBOX_PREVIEW_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const MAILBOX_PREVIEW_COPY_BUFFER_BYTES = 64 * 1024;

@@ -27,7 +27,7 @@ export interface OutcomeReport {
     summary?: string;
     usedAssetIds?: readonly string[];
 }
-/** recordOutcome never throws: failures come back as `recorded:false` + reason. */
+/** Remote failures return recorded:false; a local credential-binding refusal throws before the report POST. */
 export interface OutcomeReceipt {
     recorded: boolean;
     reason?: string;
@@ -167,6 +167,7 @@ export declare class PublicHubCapability implements hub.HubCapability {
     private recordMalformedPublishReceipt;
     readonly references: reference.ReferenceCapability;
     fetch(query: hub.HubQuery): Promise<hub.AssetRecord[]>;
+    fetchPage(query: hub.HubQuery): Promise<hub.FetchPage>;
     /**
      * Fetch one asset AND say why, when the answer is not an asset. `fetchAssetById` collapses every outcome to
      * `null`, so a caller could not tell "the hub does not have this" from "the hub delivered something the
@@ -186,12 +187,19 @@ export declare class PublicHubCapability implements hub.HubCapability {
      * Report a cycle outcome to the hub's memory graph (POST /a2a/memory/record).
      * Unlike the protocol-message endpoints (publish/fetch), memory/record takes a
      * FLAT body — no GEP envelope. Reporting is observability for the network's
-     * attribution loop, never a dependency of the cycle itself, so this method
-     * NEVER throws: auth/4xx/5xx/network failures all degrade to `recorded:false`.
+     * attribution loop, never a dependency of the cycle itself.
+     * Remote auth/4xx/5xx/network failures degrade to `recorded:false`.
+     * Credential-binding and authentication preflight refusals are rethrown so the
+     * durable caller can prove no report POST began.
      * Costs hub credits per the hub's memory pricing (caller gates on enablement).
      */
     recordOutcome(report: OutcomeReport): Promise<OutcomeReceipt>;
     recordMemoryEvent(report: MemoryGraphEventReport): Promise<MemoryGraphEventReceipt>;
+    /**
+     * Remote auth, HTTP and transport failures return recorded:false. Exact
+     * credential-binding and authentication preflight errors are rethrown so a
+     * durable caller can prove that no reuse-result POST began.
+     */
     recordReuseResult(report: hub.ReuseResultReport): Promise<hub.ReuseResultReceipt>;
     listLearningAssets(options?: hub.LearningAssetListOptions): Promise<hub.LearningAssetListResult>;
     recordLearningAssetUsage(report: hub.LearningAssetUsageReport): Promise<hub.LearningAssetUsageReceipt>;

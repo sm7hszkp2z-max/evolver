@@ -1,27 +1,72 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --
 import { settleCliProcess } from './cliLifecycle.js';
-import { bootstrap } from '@evomap/evolver-core';
-const argv = process.argv.slice(2);
-// Emit deprecation warnings for any V1 env vars still present in the environment.
-bootstrap.checkV1EnvCompat(process.env);
-async function main() {
-    if (argv[0] === 'proxy-token') {
-        const { runProxyToken } = await import('./proxyToken.js');
-        return runProxyToken(argv.slice(1));
-    }
-    if (argv[0] === 'inject' && argv[1] === 'prompt-recall') {
-        const recallMode = String(process.env['EVOLVER_RECALL_MODE'] ?? '').trim().toLowerCase();
-        const hasEnvFile = Boolean(process.env['EVOLVER_ENV_FILE']?.trim());
-        if (!hasEnvFile && recallMode !== 'shadow' && recallMode !== 'enforce') {
-            process.stdout.write('{}\n');
-            return 0;
-        }
-        const { runPromptRecallHook } = await import('./promptRecallHook.js');
-        return runPromptRecallHook(argv.slice(2));
-    }
-    const { dispatch } = await import('./dispatch.js');
-    // Single dispatch path (registry in dispatch.ts): async handler if the verb is registered, else the runCli core.
-    // Promise.resolve normalizes the sync (runCli → number) and async (handler → Promise<number>) branches to one exit.
-    return await Promise.resolve(dispatch(argv));
+import { isReadOnlyStatusInvocation, runCliEntry } from './cliEntry.js';
+const workerFlag = '--internal-posix-snapshot-worker';
+if (process.argv[2] === workerFlag && process.argv.length === 3) {
+    void import('@evomap/evolver-core/snapshot-worker').then(({ runPosixSnapshotWorker }) => runPosixSnapshotWorker()).then(() => { process.exitCode = 0; }, () => { process.exitCode = 1; });
 }
-void settleCliProcess(main);
+else if (process.argv[2] === '--internal-protected-audit-service' && process.argv.length === 4) {
+    void import('@evomap/evolver-core/protected-audit-service').then(({ runProtectedAuditService }) => runProtectedAuditService(process.argv[3])).then(() => { process.exitCode = 0; }, () => { process.exitCode = 1; });
+}
+else if (process.argv[2] === '--internal-protected-audit-ready' && process.argv.length === 4) {
+    void import('@evomap/evolver-core/protected-audit-service').then(({ runProtectedAuditReady }) => runProtectedAuditReady(process.argv[3])).then(() => { process.exitCode = 0; }, () => { process.exitCode = 1; });
+}
+else if (process.argv[2] === '--internal-protected-audit-rpc-child' && process.argv.length === 3) {
+    void settleCliProcess(async () => {
+        const { runProtectedAuditRpcChild } = await import('@evomap/evolver-core/protected-audit-rpc-child');
+        await runProtectedAuditRpcChild();
+        return Number(process.exitCode ?? 0);
+    });
+}
+else if (process.argv[2] === '--internal-protected-audit-migrate' && process.argv.length === 4) {
+    void settleCliProcess(async () => {
+        const { runProtectedAuditMigration } = await import('@evomap/evolver-core/protected-audit-migration');
+        runProtectedAuditMigration(process.argv[3]);
+        return 0;
+    });
+}
+else if (process.argv[2] === '--internal-protected-audit-verify' && process.argv.length === 4) {
+    void settleCliProcess(async () => {
+        const { runProtectedAuditMigration } = await import('@evomap/evolver-core/protected-audit-migration');
+        runProtectedAuditMigration(process.argv[3], 'verify');
+        return 0;
+    });
+}
+else if (process.argv[2] === '--internal-protected-audit-upgrade-verify' && process.argv.length === 4) {
+    void settleCliProcess(async () => {
+        const { runProtectedAuditMigration } = await import('@evomap/evolver-core/protected-audit-migration');
+        runProtectedAuditMigration(process.argv[3], 'upgrade-verify');
+        return 0;
+    });
+}
+else if (process.argv[2] === '--internal-protected-audit-fence' && process.argv.length === 4) {
+    void settleCliProcess(async () => {
+        const { runProtectedAuditMigration } = await import('@evomap/evolver-core/protected-audit-migration');
+        runProtectedAuditMigration(process.argv[3], 'fence');
+        return 0;
+    });
+}
+else if (process.argv[2] === '--internal-protected-audit-unfence' && process.argv.length === 4) {
+    void settleCliProcess(async () => {
+        const { runProtectedAuditMigration } = await import('@evomap/evolver-core/protected-audit-migration');
+        runProtectedAuditMigration(process.argv[3], 'unfence');
+        return 0;
+    });
+}
+else {
+    // Version is a pure metadata query used to authenticate an installer binary
+    // even while the required marker is published and activation is incomplete.
+    // Internal workers must not initialize the service/schema graph within their
+    // caller's I/O deadline. Normal commands retain the original admission gate.
+    void settleCliProcess(async () => {
+        const { configureProtectedAuditRpcChildCommand, requireProtectedAuditServiceForProcess } = await import('@evomap/evolver-core/protected-audit-rpc-child');
+        const readOnlyStatus = isReadOnlyStatusInvocation(process.argv.slice(2));
+        if (!(process.argv.length === 3 && process.argv[2] === '--version') && !readOnlyStatus)
+            requireProtectedAuditServiceForProcess();
+        const { configurePosixSnapshotWorkerCommand } = await import('@evomap/evolver-core/snapshot-worker');
+        const entry = process.argv[1] && /\.[cm]?js$/.test(process.argv[1]) ? [process.argv[1]] : [];
+        configurePosixSnapshotWorkerCommand({ command: process.execPath, args: [...entry, workerFlag] });
+        configureProtectedAuditRpcChildCommand({ command: process.execPath, args: [...entry, '--internal-protected-audit-rpc-child'] });
+        return runCliEntry(process.argv.slice(2));
+    });
+}

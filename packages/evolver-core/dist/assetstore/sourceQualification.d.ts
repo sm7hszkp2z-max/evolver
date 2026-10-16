@@ -63,6 +63,10 @@ export declare function compactQualificationReceipts(receipts: readonly SourceEl
 export interface SourceSelectionOptions {
     benchmark?: BenchmarkContext;
     onQualification?: (receipts: readonly SourceEligibilityReceipt[]) => void;
+    /** Optional read boundary. A cancelled legacy provider may settle later; do
+     * not start qualification sidecar reads or emit receipts from that result. */
+    signal?: AbortSignal;
+    deadlineAt?: number;
 }
 /** composition层显式传入env值；core不自行读取进程环境，不改变普通运行。 */
 export declare function benchmarkContext(value: unknown): BenchmarkContext | undefined;

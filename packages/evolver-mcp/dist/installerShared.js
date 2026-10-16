@@ -65,6 +65,13 @@ export function stripEvolverHookEntries(entries, trustManagedStatus = false, man
     }
     return { changed, entries: keptEntries };
 }
+export function resolveInstallComponents(value) {
+    if (value === undefined)
+        return 'both';
+    if (value === 'product-only' || value === 'evolution-only' || value === 'both')
+        return value;
+    throw new Error('[setup-hooks] components must be product-only, evolution-only or both');
+}
 export class SymlinkRefusedError extends Error {
     constructor(label, path) {
         super(`[setup-hooks] refusing to operate: ${label} ${path} is a symbolic link — evolver will not follow symlinks for adapter-owned paths (a hostile workspace could redirect writes/unlinks outside the project). Replace it with a real directory/file and rerun.`);

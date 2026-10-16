@@ -1,4 +1,10 @@
 export * from './provider.js';
+export { assertPromptProviderNotProxy, isBuiltInPromptProvider } from './promptAdapterTrust.js';
+export { beginLocalContextReadV1 } from './contextReadOperationV1.js';
+export { acquireContextRead, withContextRead } from './contextRead.js';
+export { beginLocalGeneScanV1, readLocalGeneSnapshot, withSnapshotDeadline, withSnapshotReadInvocation } from './boundedSnapshot.js';
+export * from './relatedCapsules.js';
+export * from './geneContext.js';
 export * from './localJsonl.js';
 export * from './foreignJsonlSource.js';
 export * from './unionReadStore.js';

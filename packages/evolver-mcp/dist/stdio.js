@@ -28,7 +28,16 @@ const box = new mailbox.MailboxStore({ path: mailboxPath });
 const proxy = proxyClientFromEnv(process.env);
 // Reuse-feedback wiring (#268): a root_events writer + a per-connection correlation id so a SUCCESS reuse_result
 // from THIS MCP agent credits the local experience loop (one stdio process ~ one MCP session).
-const ingestor = new events.Ingestor({ path: events.rootEventsPath() });
+// Initialization and discovery do not write root events. Admit the concrete
+// writer only when a tool needs audit emission; its protected-service checks
+// and the tool's existing failure semantics still apply to every write.
+let eventWriter;
+const ingestor = {
+    ingest(raw) {
+        eventWriter ??= new events.Ingestor({ path: events.rootEventsPath() });
+        return eventWriter.ingest(raw);
+    },
+};
 const connId = `mcp-${randomUUID()}`;
 const server = new EvolverMcpServer(buildEvolverTools({ store, mailbox: box, ingestor, cycleId: connId, ...(proxy ? { proxy } : {}) }), { instructions: buildEvolverPrimer({ proxy: !!proxy }) });
 function send(message) {

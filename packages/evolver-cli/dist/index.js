@@ -5,7 +5,7 @@ import { assetstore, algo, signals, material as materialNs } from '@evomap/evolv
 import { loadPriceTable } from '@evomap/evolver-adapter-public';
 import { loadEnvFileFromEnv } from '@evomap/evolver-mcp';
 import { injectEvent, makeInjectEmitter } from './autoexec.js';
-import { listApprovedGenes, pendingGeneReviewRecords, provenanceStoreForStore, reviewLedgerForStore } from './reviewFilter.js';
+import { listApprovedGenes, pendingGeneReviewRecords, reviewLedgerForStore } from './reviewFilter.js';
 import { ADAPTERS, parseJsonlLines } from '@evomap/evolver-runtime-adapters';
 import { assessGeneDraft } from './distillPrimitives.js';
 import { assessDraftAdmissionFromStore } from './distillAdmission.js';
@@ -22,7 +22,10 @@ import { formatAntiGeneEvidenceAction, formatAntiGeneEvidenceSummary, summarizeA
 import { buildRuntimeSessionMaterialSnapshot } from './materialSnapshot.js';
 import { maybeEmitNonGitWorkspaceNotice } from './nonGitWorkspaceNotice.js';
 import { asGeneCandidate, parseDistillOutput } from './autoDistillLlm.js';
-import { runPromptRecallHook } from './promptRecallHook.js';
+import { runPromptRecallHook, wrapGeneContext } from './promptRecallHook.js';
+import { deliverContextOutput, waitContextDelivery } from './contextDelivery.js';
+import { withContextReadDiagnostics } from '@evomap/evolver-core/prompt-recall';
+import { writeContextReadDiagnostic } from './promptRecallShared.js';
 import { INGEST_CONSUMER_GROUP, recordSessionMaterial, resolveIngestDeps, toMaterialSourceAgent, } from './sessionIngest.js';
 export { runSessionIngestTick, scanSessionDirs, } from './sessionIngest.js';
 /** Minimal `--flag value` parser (last wins); bare positionals are ignored. */
@@ -69,6 +72,7 @@ export function cliUsage() {
         '',
         'Commands:',
         ...renderCommandGroups(),
+        '  status --live       Read-only runtime/IPC/loop diagnostics (default status is historical)',
         '',
         'Run evolver <command> --help for command-specific options.',
         '',
@@ -1461,7 +1465,7 @@ export function formatGeneInjectionLine(g) {
     return `- ${id}${cat ? ` [${cat}]` : ''}${hint ? `: ${hint.slice(0, 160)}` : ''}`;
 }
 function sessionContentMode(argv) {
-    let value = process.env['EVOLVER_SESSION_INJECT_CONTENT'] ?? 'summary';
+    let value = process.env['EVOLVER_SESSION_INJECT_CONTENT'] ?? 'context';
     for (let index = 1; index < argv.length; index++) {
         const arg = argv[index];
         if (arg === '--content')
@@ -1469,7 +1473,7 @@ function sessionContentMode(argv) {
         else if (arg.startsWith('--content='))
             value = arg.slice('--content='.length);
     }
-    return value === 'summary' || value === 'strategy' ? value : undefined;
+    return value === 'summary' || value === 'strategy' || value === 'context' ? value : undefined;
 }
 /** 整条策略作为预算原子单元；不在句中截断，也不把缺失策略当作已经送达。 */
 function renderSessionGene(g, mode, maxChars) {
@@ -1601,6 +1605,71 @@ async function readHookSessionId(read) {
         return undefined;
     }
 }
+/** A prompt-time provider owns its operation until its terminal receipt has
+ * settled. A deadline only stops waiting for a result; it cannot make a custom
+ * callback's external work disappear. A malformed factory keeps admission held
+ * because it may have dispatched before failing to return its owner. */
+async function readSessionStartSnapshotV1(store, deadlineAt) {
+    if (!assetstore.isBuiltInPromptProvider(store))
+        throw new Error('unsupported_unsupervised_prompt_provider_v1');
+    const begin = store.beginPromptGeneSnapshotV1;
+    if (typeof begin !== 'function')
+        throw new Error('unsupported_prompt_gene_snapshot_v1');
+    if (!Number.isFinite(deadlineAt) || Date.now() >= deadlineAt)
+        throw new Error('snapshot_aborted');
+    const release = assetstore.acquireContextRead(store);
+    const controller = new AbortController();
+    let rejectAbort;
+    const deadline = new Promise((_, reject) => { rejectAbort = reject; });
+    const abort = () => { controller.abort(); rejectAbort(new Error('snapshot_aborted')); };
+    const timer = setTimeout(abort, Math.max(0, Math.min(0x7fffffff, deadlineAt - Date.now())));
+    let operation;
+    let terminal = false;
+    let settlement;
+    const settle = () => {
+        // A cleanup failure does not license replaying an external operation or
+        // invoking a second, potentially non-idempotent cleanup callback.
+        settlement ??= Promise.resolve().then(() => operation.cancelAndSettle());
+        return settlement;
+    };
+    try {
+        if (!assetstore.isBuiltInPromptProvider(store))
+            throw new Error('unsupported_unsupervised_prompt_provider_v1');
+        operation = begin.call(store, { deadlineAt, signal: controller.signal });
+        if (!operation || operation.version !== 1 || typeof operation.cancelAndSettle !== 'function'
+            || !operation.result || typeof operation.result.then !== 'function') {
+            throw new Error('invalid_prompt_gene_snapshot_operation_v1');
+        }
+        if (Date.now() >= deadlineAt)
+            abort();
+        const snapshot = await Promise.race([operation.result, deadline]);
+        await settle();
+        terminal = true;
+        if (controller.signal.aborted || Date.now() >= deadlineAt)
+            throw new Error('snapshot_aborted');
+        return snapshot;
+    }
+    catch (error) {
+        if (operation?.version === 1 && typeof operation.cancelAndSettle === 'function' && !terminal) {
+            try {
+                await settle();
+                terminal = true;
+            }
+            catch (cleanup) {
+                if (cleanup === error)
+                    throw cleanup;
+                throw new AggregateError([error, cleanup], 'prompt snapshot cleanup unconfirmed');
+            }
+        }
+        throw error;
+    }
+    finally {
+        clearTimeout(timer);
+        controller.abort();
+        if (terminal)
+            release();
+    }
+}
 /**
  * `evolver inject session-start`: the SessionStart hook entrypoint (the command every installer registers).
  * It selects the eligible local genes, composes the SessionStart injection WITH the value recap (#113) through
@@ -1616,6 +1685,12 @@ async function readHookSessionId(read) {
  * but emitInject swallows every error, so a sink failure can never break or block the attribution path.
  */
 export async function runInject(argv, deps = {}) {
+    const run = () => assetstore.withSnapshotReadInvocation(() => runInjectOwned(argv, deps));
+    if (argv[0] !== 'session-start' || process.env['EVOLVER_CONTEXT_STAGE_DIAGNOSTICS'] !== '1')
+        return run();
+    return withContextReadDiagnostics(true, run, writeContextReadDiagnostic);
+}
+async function runInjectOwned(argv, deps) {
     const sub = argv[0];
     if (sub === 'prompt-recall') {
         return runPromptRecallHook(argv.slice(1), {
@@ -1623,15 +1698,17 @@ export async function runInject(argv, deps = {}) {
             ...(deps.review ? { review: deps.review } : {}),
             ...(deps.provenance ? { provenance: deps.provenance } : {}),
             ...(deps.readHookInput ? { readHookInput: deps.readHookInput } : {}),
+            ...(deps.stdout ? { stdout: deps.stdout } : {}),
+            ...(deps.ingestor ? { ingestor: deps.ingestor } : {}),
         });
     }
     if (sub !== 'session-start') {
-        process.stderr.write('用法: evolver inject session-start [--content=summary|strategy] | evolver inject prompt-recall --hook-stdin\n');
+        process.stderr.write('用法: evolver inject session-start [--content=context|summary|strategy] | evolver inject prompt-recall --hook-stdin\n');
         return sub === undefined ? 0 : 1;
     }
     const contentMode = sessionContentMode(argv);
     if (!contentMode) {
-        process.stderr.write('inject session-start: content必须为summary或strategy；未执行注入。\n');
+        process.stderr.write('inject session-start: content必须为context、summary或strategy；未执行注入。\n');
         return 1;
     }
     const fromHookStdin = argv.includes('--hook-stdin');
@@ -1651,92 +1728,221 @@ export async function runInject(argv, deps = {}) {
         maybeEmitNonGitWorkspaceNotice(deps.nonGitNotice);
     }
     const store = deps.store ?? new assetstore.LocalJsonlProvider(events.assetsDir());
+    try {
+        assetstore.assertPromptProviderNotProxy(store);
+        if (contentMode === 'context' && !assetstore.isBuiltInPromptProvider(store))
+            throw new Error('unsupported_unsupervised_prompt_provider_v1');
+    }
+    catch {
+        process.stderr.write('inject session-start: 不支持未受监管的资产库；未执行注入。\n');
+        return 1;
+    }
     const ingestor = deps.ingestor ?? new events.Ingestor({ path: deps.eventsPath ?? events.rootEventsPath() });
-    const review = deps.review ?? reviewLedgerForStore(store); // co-located with the store, not pinned to live dir
-    const provenance = deps.provenance ?? provenanceStoreForStore(store); // co-located with the store, not pinned to live dir
+    if (contentMode === 'context' && ingestor.recoverContextDeliveries)
+        await waitContextDelivery(Promise.resolve().then(() => ingestor.recoverContextDeliveries({ deadlineAt: Date.now() + 100 })).catch(() => undefined), 120);
+    const localDir = assetstore.LocalJsonlProvider.isBuiltInPromptReader(store)
+        ? Object.getOwnPropertyDescriptor(store, 'baseDir')?.value : undefined;
+    const sidecarDir = typeof localDir === 'string' ? localDir : events.assetsDir();
+    const review = deps.review ?? new assetstore.ReviewLedger(sidecarDir);
+    const provenance = deps.provenance ?? new assetstore.ProvenanceStore(sidecarDir);
     const maxGenes = process.env['EVOLVER_BENCHMARK_ID'] !== undefined ? Math.min(deps.maxGenes ?? 8, 8) : (deps.maxGenes ?? 8);
     const hardCap = deps.tokenBudgetHardCap ?? 8000;
-    // Gene pool → injection candidates: the most recent TRUSTED + REVIEW-APPROVED local genes (bounded), rendered as
-    // compact hint lines. The provenance gate keeps untrusted hub assets out until promotion; the review gate (A2a)
-    // keeps auto-distilled UNPROVEN drafts out until approval.
-    let sourceQualifications;
-    const genes = await listApprovedGenes(store, review, maxGenes, provenance, {
-        onQualification: (receipts) => { sourceQualifications = receipts; },
-    });
-    const rendered = genes.map((g) => renderSessionGene(g, contentMode, hardCap * 4));
-    const geneLines = rendered.map((gene) => gene.text);
-    const geneIds = genes.map((g) => (typeof g['id'] === 'string' ? String(g['id']) : String(g.asset_id)));
-    // Value recap (#113): same load path as `evolver value`, over the default recap window (7d).
+    // Recap and optional hook input have their own preparation costs. Complete them before starting
+    // the single context deadline shared by snapshot selection, qualification, and case assembly.
     const now = deps.now ? deps.now() : Date.now();
     const traces = ops.readTraceRecords(deps.tracesDir ?? events.tracesDir());
     const evts = readEvents(deps.eventsPath ?? events.rootEventsPath());
     const prices = deps.prices ?? loadPriceTable();
     const summary = ops.loadValueSummary({ traces, events: evts, prices, referenceScope: reference.referenceScopeForEventsPath(deps.eventsPath ?? events.rootEventsPath()) }, ops.windowFromSpec('7d', now));
+    // Plain CLI calls never read stdin; installed hooks opt in explicitly (#205).
+    const sessionId = deps.sessionId ?? ((fromHookStdin || deps.readHookInput) ? await readHookSessionId(deps.readHookInput) : undefined);
+    // Gene pool → injection candidates: the most recent TRUSTED + REVIEW-APPROVED local genes (bounded), rendered as
+    // compact hint lines. The provenance gate keeps untrusted hub assets out until promotion; the review gate (A2a)
+    // keeps auto-distilled UNPROVEN drafts out until approval.
+    let sourceQualifications;
+    const contextDeadlineAt = Date.now() + Math.max(0, Math.min(60000, deps.contextTimeoutMs ?? 1000));
+    let contextSnapshot;
+    let genes;
+    try {
+        if (contentMode === 'context') {
+            const benchmark = assetstore.benchmarkContext(process.env['EVOLVER_BENCHMARK_ID']);
+            if (benchmark && (!Number.isSafeInteger(maxGenes) || maxGenes < 1))
+                throw new Error('invalid_benchmark_gene_limit');
+            const received = await readSessionStartSnapshotV1(store, contextDeadlineAt);
+            contextSnapshot = {
+                ...received,
+                ...(deps.review ? { review: review.snapshot() } : {}),
+                ...(deps.provenance ? { provenance: provenance.snapshot() } : {}),
+            };
+            genes = assetstore.approvedGenesFromSnapshot(contextSnapshot, maxGenes, {
+                ...(benchmark ? { benchmark } : {}), deadlineAt: contextDeadlineAt,
+                onQualification: (receipts) => { sourceQualifications = receipts; },
+            });
+        }
+        else {
+            const select = async (signal) => listApprovedGenes(store, review, maxGenes, provenance, {
+                ...(signal ? { signal, deadlineAt: contextDeadlineAt } : {}),
+                onQualification: (receipts) => { if (!signal?.aborted)
+                    sourceQualifications = receipts; },
+            });
+            genes = await select();
+        }
+    }
+    catch {
+        // Invalid benchmark context and unreadable eligibility are failures, not an empty ordinary-mode pool.
+        process.stderr.write('inject session-start: Gene资格读取失败，未注入。\n');
+        return 1;
+    }
+    const rendered = contentMode === 'context' ? [] : genes.map((g) => renderSessionGene(g, contentMode, hardCap * 4));
+    const geneLines = rendered.map((gene) => gene.text);
+    const geneIds = genes.map((g) => (typeof g['id'] === 'string' ? String(g['id']) : String(g.asset_id)));
     // Inject emission seam (#123): wire the ingestor so core's onInject lands a `value.inject` root_event. The
     // composition (Ingestor ↔ core's sink-agnostic seam) lives HERE in the CLI — core never imports the Ingestor.
     const emitter = makeInjectEmitter(ingestor);
     let injectedInfo;
-    // Capture the runtime session id (#205) only when the installed hook opts in via --hook-stdin, or a test wires
-    // readHookInput. Default (no flag, no seam) never touches stdin — so a plain `evolver inject session-start` and
-    // the test suite can never block on a stdin read (the Windows CI hang this guards against).
-    const sessionId = deps.sessionId ?? ((fromHookStdin || deps.readHookInput) ? await readHookSessionId(deps.readHookInput) : undefined);
     if (sourceQualifications && [sessionId, deps.cycleId].some((id) => id !== undefined && Buffer.byteLength(id, 'utf8') > 128)) {
         process.stderr.write('inject session-start: benchmark关联ID超过审计预算，未注入。\n');
         return 1;
     }
-    const compose = (count) => {
-        injectedInfo = undefined;
-        return hooks.composeSessionStartWithRecap({ tokenBudgetHardCap: hardCap, preamble: SESSION_START_PREAMBLE }, { injectGenes: geneLines.slice(0, count), geneIds: geneIds.slice(0, count), successCount: summary.topGenes.length, summary }, {
-            onInject: (info) => { injectedInfo = info; },
-            ...(deps.cycleId ? { cycleId: deps.cycleId } : {}),
-            ...(sessionId ? { sessionId } : {}),
-        });
-    };
-    const recordFor = (count) => {
-        const content = rendered.slice(0, count).map((gene) => gene.content);
-        return { ...injectedInfo, geneIds: geneIds.slice(0, count), contentSchema: 'session-gene-content.v1', content,
-            omittedByBudget: rendered.length - count + content.filter((gene) => gene.omissionReason === 'budget').length,
-            ...(sourceQualifications ? { sourceQualifications: sourceQualifications.slice(0, count) } : {}),
-        };
-    };
-    let inj = compose(rendered.length);
-    const tokenLimitedCount = inj.genes.length;
-    let low = 0;
-    let high = inj.genes.length;
-    // Find the largest whole-gene prefix whose content and qualification receipts fit
-    // the actual writer envelope, before any prompt bytes reach the runtime.
-    while (low < high) {
-        const count = Math.ceil((low + high) / 2);
-        if (events.fitsRootEventLine(injectEvent(recordFor(count))))
-            low = count;
-        else
-            high = count - 1;
-    }
-    if (low < inj.genes.length) {
-        const omitted = inj.genes.length - low;
-        inj = compose(low);
-        process.stderr.write(`inject session-start: 本次注入记录超过大小上限，省略${omitted}条经验。\n`);
-    }
-    // Keep SessionStart quiet when there is no usable memory payload. When genes do land, the model still receives
-    // them, but the preamble explicitly tells it not to narrate routine Evolver work to the user.
-    if (inj.genes.length > 0 && inj.systemPrompt.trim().length > 0) {
+    if (contentMode === 'context') {
+        const prefixFor = (count) => `${SESSION_START_PREAMBLE}\n${ops.buildValueRecap({ injectedCount: count, successCount: summary.topGenes.length, summary })}\n`;
+        const maxChars = Number.isFinite(hardCap) ? Math.max(0, Math.min(128000, Math.floor(hardCap * 4))) : 32000;
+        const deadlineAt = contextDeadlineAt;
+        let eligibility;
+        let methods;
+        const budget = { maxChars: Math.max(0, maxChars - prefixFor(genes.length).length - 1), maxExampleChars: 3000,
+            maxExampleCharsPerGene: 1200, maxExamplesPerGene: process.env['EVOLVER_RECALL_EXAMPLES'] === 'off' ? 0 : 1 };
         try {
-            await writeSessionPrompt(inj.systemPrompt + '\n');
+            eligibility = { provenance: contextSnapshot?.provenance ?? provenance.snapshot(), review: contextSnapshot?.review ?? review.snapshot(),
+                benchmark: assetstore.benchmarkContext(process.env['EVOLVER_BENCHMARK_ID']), referenceScope: contextSnapshot?.referenceScope ?? store.referenceScope };
+            // Establish the fully qualified method BEFORE optional case I/O. A generic enhancement error cannot
+            // trigger an ordinary-mode fallback, reselect Genes, or bypass benchmark/reference eligibility.
+            methods = await assetstore.assembleGeneContext({ selectedGenes: genes.slice(0, 64), eligibility,
+                contentMode: 'context', privacyMode: 'enforce', deadlineAt, budget: { ...budget, maxExamplesPerGene: 0 } });
+            if (methods.omissions.some((item) => item.reason === 'qualification_unavailable'))
+                throw new Error('eligibility_unavailable');
         }
         catch {
-            process.stderr.write('inject session-start: 输出未确认完成，未记录策略交付。\n');
+            process.stderr.write('inject session-start: Gene资格或方法组装失败，未注入。\n');
             return 1;
         }
+        let context = methods;
+        if (methods.text && budget.maxExamplesPerGene > 0 && Date.now() < deadlineAt) {
+            try {
+                context = await assetstore.assembleGeneContext({ selectedGenes: genes.slice(0, 64), store, eligibility,
+                    assertPromptAdapter: () => {
+                        if (!assetstore.isBuiltInPromptProvider(store))
+                            throw new Error('unsupported_unsupervised_prompt_provider_v1');
+                    },
+                    contentMode: 'context', privacyMode: 'enforce', deadlineAt, budget });
+                if (!context.text || context.omissions.some((item) => item.reason === 'qualification_unavailable' && !item.capsuleAssetId))
+                    context = methods;
+            }
+            catch {
+                context = methods;
+                if (sessionStartHookVerboseEnabled(process.env))
+                    process.stderr.write('inject session-start: 可选案例增强失败，仅注入已合格Gene方法。\n');
+            }
+        }
+        const eventFor = (value) => ({
+            type: ops.GENE_CONTEXT_DELIVERY_EVENT, human: { title: 'Session Gene context stdout written' },
+            payload: { receipt: ops.geneContextDeliveryReceipt(value), entrypoint: 'session_start', transport: 'stdout_written', hostReceived: 'unknown',
+                ...(sessionId && sessionId.length <= 256 ? { sessionId } : {}),
+                ...(deps.cycleId && deps.cycleId.length <= 128 ? { cycleId: deps.cycleId } : {}) },
+        });
+        let finalContext = wrapGeneContext(context, prefixFor(context.geneAssetIds.length), '\n');
+        let event = eventFor(finalContext);
+        const fitsDelivery = (value) => events.fitsRootEventLine({ ...value,
+            payload: { ...value.payload, deliveryAttemptId: '00000000-0000-0000-0000-000000000000' } });
+        // Reduce whole content units and rebuild offsets/digest/receipt, never slice an already-receipted string.
+        // Drop optional cases first, then whole Genes. The pure renderer cannot reopen I/O or weaken eligibility.
+        if (!fitsDelivery(event) || finalContext.text.length > maxChars) {
+            // Rendering cannot reconstruct source/qualification/timeout diagnostics from projections alone.
+            // Keep both assembly passes; the bounded receipt explicitly marks any eventual metadata truncation.
+            const assemblyOmissions = [...context.omissions, ...methods.omissions];
+            for (let count = methods.projections.length; count >= 0; count--) {
+                const projections = methods.projections.slice(0, count).map((gene) => ({ ...gene, examples: [] }));
+                const rendered = assetstore.renderGeneContext(projections, { contentMode: 'context', budget: { ...budget, maxExamplesPerGene: 0 } });
+                const visible = new Set(rendered.geneAssetIds);
+                context = { ...methods, ...rendered, projections: projections.filter((gene) => visible.has(gene.assetId)),
+                    omissions: [...new Map([...assemblyOmissions, ...rendered.omissions].map((item) => [JSON.stringify([item.reason, item.geneAssetId, item.capsuleAssetId]), item])).values()],
+                    qualifications: methods.qualifications.filter((item) => visible.has(item.assetId)),
+                    counts: { ...methods.counts, rendered: rendered.geneAssetIds.length, examples: 0 } };
+                finalContext = wrapGeneContext(context, prefixFor(context.geneAssetIds.length), '\n');
+                event = eventFor(finalContext);
+                if (fitsDelivery(event) && finalContext.text.length <= maxChars)
+                    break;
+            }
+        }
+        if (finalContext.text) {
+            if (!fitsDelivery(event) || finalContext.text.length > maxChars) {
+                process.stderr.write('inject session-start: 交付收据超过审计预算，未注入。\n');
+                return 1;
+            }
+            const result = await deliverContextOutput({ text: finalContext.text, ...(deps.stdout ? { stdout: deps.stdout } : {}),
+                ...(ingestor.prepareContextDelivery ? { prepare: (options) => typeof ingestor.prepareContextDeliveryAsync === 'function' ? ingestor.prepareContextDeliveryAsync(event, options)
+                        : ingestor.prepareContextDelivery(event, options) } : {}) });
+            if (result !== 'written') {
+                process.stderr.write('inject session-start: 交付准备或输出未确认完成，未记录策略交付。\n');
+                return 1;
+            }
+        }
     }
-    const record = recordFor(inj.genes.length);
-    const tokenOmitted = rendered.length - tokenLimitedCount + (record.content?.filter((gene) => gene.omissionReason === 'budget').length ?? 0);
-    if (contentMode === 'strategy' && tokenOmitted > 0) {
-        process.stderr.write(`inject session-start: ${tokenOmitted}条Gene的完整策略因token预算未注入。\n`);
-    }
-    // 仅在stdout callback确认成功后记账；事件不复制策略正文，也不声称runtime已经执行。
-    if (injectedInfo && emitter) {
-        emitter.onInject(record);
-        await emitter.flush();
+    else {
+        const compose = (count) => {
+            injectedInfo = undefined;
+            return hooks.composeSessionStartWithRecap({ tokenBudgetHardCap: hardCap, preamble: SESSION_START_PREAMBLE }, { injectGenes: geneLines.slice(0, count), geneIds: geneIds.slice(0, count), successCount: summary.topGenes.length, summary }, {
+                onInject: (info) => { injectedInfo = info; },
+                ...(deps.cycleId ? { cycleId: deps.cycleId } : {}),
+                ...(sessionId ? { sessionId } : {}),
+            });
+        };
+        const recordFor = (count) => {
+            const content = rendered.slice(0, count).map((gene) => gene.content);
+            return { ...injectedInfo, geneIds: geneIds.slice(0, count), contentSchema: 'session-gene-content.v1', content,
+                omittedByBudget: rendered.length - count + content.filter((gene) => gene.omissionReason === 'budget').length,
+                ...(sourceQualifications ? { sourceQualifications: sourceQualifications.slice(0, count) } : {}),
+            };
+        };
+        let inj = compose(rendered.length);
+        const tokenLimitedCount = inj.genes.length;
+        let low = 0;
+        let high = inj.genes.length;
+        // Find the largest whole-gene prefix whose content and qualification receipts fit
+        // the actual writer envelope, before any prompt bytes reach the runtime.
+        while (low < high) {
+            const count = Math.ceil((low + high) / 2);
+            if (events.fitsRootEventLine(injectEvent(recordFor(count))))
+                low = count;
+            else
+                high = count - 1;
+        }
+        if (low < inj.genes.length) {
+            const omitted = inj.genes.length - low;
+            inj = compose(low);
+            process.stderr.write(`inject session-start: 本次注入记录超过大小上限，省略${omitted}条经验。\n`);
+        }
+        // Keep SessionStart quiet when there is no usable memory payload. When genes do land, the model still receives
+        // them, but the preamble explicitly tells it not to narrate routine Evolver work to the user.
+        if (inj.genes.length > 0 && inj.systemPrompt.trim().length > 0) {
+            try {
+                await (deps.stdout ?? writeSessionPrompt)(inj.systemPrompt + '\n');
+            }
+            catch {
+                process.stderr.write('inject session-start: 输出未确认完成，未记录策略交付。\n');
+                return 1;
+            }
+        }
+        const record = recordFor(inj.genes.length);
+        const tokenOmitted = rendered.length - tokenLimitedCount + (record.content?.filter((gene) => gene.omissionReason === 'budget').length ?? 0);
+        if (contentMode === 'strategy' && tokenOmitted > 0) {
+            process.stderr.write(`inject session-start: ${tokenOmitted}条Gene的完整策略因token预算未注入。\n`);
+        }
+        // 仅在stdout callback确认成功后记账；事件不复制策略正文，也不声称runtime已经执行。
+        if (injectedInfo && emitter) {
+            emitter.onInject(record);
+            await emitter.flush();
+        }
     }
     // Legacy v1 Windows scheduled-task sweep (#956): runs AFTER the injection is on stdout so a worst-case
     // sweep (probe 20s + lock wait 3s + 2×(export 20s + mutation 40s) ≈ 143s) can never push the injection
@@ -2001,8 +2207,19 @@ export function runCli(argv) {
         case 'reset-local-secret':
             return runResetLocalSecret(argv.slice(1));
         case 'status': {
+            if (argv.slice(1).some(arg => arg === '--live' || arg.startsWith('--live='))) {
+                process.stderr.write('Live status requires the asynchronous CLI dispatcher.\n');
+                return 2;
+            }
             const s = statusReport(readEvents());
+            const contextDelivery = events.Ingestor.contextDeliveryStatus(events.rootEventsPath());
+            if (argv.includes('--json')) {
+                process.stdout.write(`${JSON.stringify({ ...s, contextDelivery })}\n`);
+                return 0;
+            }
             process.stdout.write(`events=${s.totalEvents} cycles=${s.cycles} last=${s.lastTs ?? '-'}\n`);
+            if (contextDelivery.confirmedPending || contextDelivery.outputUnknown || contextDelivery.projectionUnknown || contextDelivery.busy)
+                process.stdout.write(`contextDelivery: confirmedPending=${contextDelivery.confirmedPending} outputUnknown=${contextDelivery.outputUnknown} projectionUnknown=${contextDelivery.projectionUnknown} busy=${contextDelivery.busy}\n`);
             return 0;
         }
         case 'cycles': {

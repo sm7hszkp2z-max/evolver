@@ -1,8 +1,9 @@
-import { mailbox, hub as hubNs, shadow as shadow_, assetstore } from '@evomap/evolver-core';
+import { mailbox, hub as hubNs, shadow as shadow_, assetstore, util } from '@evomap/evolver-core';
 import { SyncEngine, type OutboundResult, type InboundResult } from '../sync/engine.js';
 import { LifecycleManager, type HelloLifecycleMode, type HelloResult, type HeartbeatOptions, type HeartbeatResult, type HeartbeatTickResult } from '../lifecycle/manager.js';
 import { type SelfUpdateDeps } from '../selfUpdate/executor.js';
 import type { AtpOrderConsentGate } from './atpConsent.js';
+import type { PrivateBoundReuseFeedback } from '../private/adapterLoader.js';
 import { type PublishRecallVerifierPort } from './publishRecallVerifier.js';
 type HubCapability = hubNs.HubCapability;
 type AssetStoreProvider = assetstore.AssetStoreProvider;
@@ -20,6 +21,9 @@ export interface ProxyDaemonDeps {
     hub: HubCapability;
     /** Identity actually presented by the connected Hub runtime; terminal lifecycle state is scoped to it. */
     currentNodeId?: () => string | undefined;
+    /** The private adapter must identify its effective endpoint/principal and atomically enforce
+     * that same identity at send time. A status-only fingerprint cannot prevent a route switch. */
+    boundReuseFeedback?: PrivateBoundReuseFeedback;
     /** Immutable Hub selection for IPC callers that must fail closed across public/private runtimes. */
     hubMode?: 'public' | 'private';
     /** 二选一: 传 storePath 让 ProxyDaemon 建 store, 或传已建 store(供 hub senderId 共享同一 node_id). */
@@ -109,6 +113,8 @@ export interface ProxyTickError {
     message: string;
 }
 export interface ProxyHealth {
+    pid: number;
+    processStartIdentity: util.FileLockProcessStartIdentity | null;
     running: boolean;
     ipcListening: boolean;
     lifecycleArmed: boolean;
@@ -195,6 +201,7 @@ export declare class ProxyDaemon {
     private started;
     private lifecycleArmed;
     private lastTickAt;
+    private readonly runtimeProcessIdentity;
     private nextTickDueAt;
     private consecutiveTickFailures;
     private storeClosed;
@@ -264,6 +271,7 @@ export declare class ProxyDaemon {
     private qualifyFetch;
     private recallAssets;
     private localFetchAssets;
+    private feedbackNodeId;
     private handleProxyRoute;
     private searchAssets;
     private searchRemoteAssets;

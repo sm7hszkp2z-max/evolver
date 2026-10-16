@@ -24,6 +24,7 @@ import { isSelfUpdateExplicit, resolveSelfUpdatePolicy, selfUpdateSupervisorAtte
 import { isStandaloneReleaseBinaryName, resolveSelfUpdateTarget, } from './releaseBinary.js';
 import { expandHomePath, parseEnvFile } from '../bin/envFile.js';
 import { migrateToStandaloneBinary, } from './migration.js';
+import { isLegacyAbsentServicePreflightBlock, } from './legacyLaunchdAbsentServiceBlock.js';
 const requireFromHere = createRequire(import.meta.url);
 const BOOTSTRAP_ATTEMPT_FILE = 'bootstrap-attempt.json';
 const BOOTSTRAP_REGISTRATION_INTENT_FILE = coreBootstrap.LIFECYCLE_BOOTSTRAP_REGISTRATION_INTENT_FILE;
@@ -353,7 +354,7 @@ function parseBootstrapLockOwnerJson(raw) {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
             return undefined;
         const record = parsed;
-        const keys = Object.keys(record).sort();
+        const keys = Object.keys(record).filter(key => key !== 'processStartCollector').sort();
         if (keys.length !== 4
             || keys[0] !== 'pid'
             || keys[1] !== 'processStart'
@@ -366,6 +367,12 @@ function parseBootstrapLockOwnerJson(raw) {
         }
         const processStartIdentity = util.parseFileLockProcessStartIdentity(record['processStart']);
         if (!processStartIdentity)
+            return undefined;
+        // The native Windows collector keeps the legacy identity wire shape. Its additive diagnostic
+        // marker is not authority; accept only the known value on that identity, preserving strict keys.
+        if (Object.hasOwn(record, 'processStartCollector')
+            && (record['processStartCollector'] !== 'kernel32-get-process-times'
+                || processStartIdentity.source !== 'windows-powershell'))
             return undefined;
         return {
             pid: record['pid'],
@@ -1502,7 +1509,7 @@ function observationDetail(observation, stdout, stderr) {
         parts.push(stderrText);
     return parts.length > 0 ? boundedBootstrapDetail(parts.join('; ')) : undefined;
 }
-function reconcileBootstrapOutcome(observation, state, stdout, stderr) {
+function reconcileBootstrapOutcome(observation, state, stdout, stderr, host) {
     const detail = observationDetail(observation, stdout, stderr);
     const failClosed = (reason, failureDetail) => ({
         ok: false,
@@ -1561,6 +1568,20 @@ function reconcileBootstrapOutcome(observation, state, stdout, stderr) {
         };
     }
     if (observation.cli?.outcome === 'blocked') {
+        if (state.status === 'clean' && isLegacyAbsentServicePreflightBlock({
+            platform: host.platform ?? process.platform,
+            exitCode: observation.code,
+            cliDetail: observation.cli.detail,
+            stdoutTruncated: stdout.truncated,
+        }, host.launchdServiceProbe)) {
+            // The child rejected its own preflight before publishing any artifact or journal, and
+            // launchd confirms no proxy service is loaded, so nothing is left to roll back.
+            return {
+                ok: false,
+                reason: 'rolled_back',
+                detail: boundedBootstrapDetail(`legacy_absent_service_preflight: ${observation.cli.detail}`),
+            };
+        }
         return failClosed('blocked', combinedDetail || observation.cli.detail);
     }
     return failClosed('ambiguous', combinedDetail || `CLI result did not prove commit or rollback (exit ${observation.code ?? 'null'})`);
@@ -1686,7 +1707,7 @@ async function terminateBootstrapProcessTree(child, platform, childClosed, deadl
 /** Spawn `evolver lifecycle bootstrap` and await its result within a bounded timeout. */
 export async function runBootstrap(options) {
     const emptyOutput = () => captureBootstrapOutput(undefined);
-    const reconcileNoChild = (reason, detail) => reconcileBootstrapOutcome({ kind: 'no_child', reason, ...(detail ? { detail } : {}) }, inspectLifecycleBootstrapDurableState(options.env, options), emptyOutput(), emptyOutput());
+    const reconcileNoChild = (reason, detail) => reconcileBootstrapOutcome({ kind: 'no_child', reason, ...(detail ? { detail } : {}) }, inspectLifecycleBootstrapDurableState(options.env, options), emptyOutput(), emptyOutput(), options);
     const invocation = resolveBootstrapCliInvocation(options);
     if (!invocation)
         return reconcileNoChild('cli_not_found');
@@ -1737,7 +1758,7 @@ export async function runBootstrap(options) {
             settled = true;
             if (timerRef.value)
                 clearTimeout(timerRef.value);
-            resolvePromise(reconcileBootstrapOutcome(observation, inspectLifecycleBootstrapDurableState(options.env, options), stdout, stderr));
+            resolvePromise(reconcileBootstrapOutcome(observation, inspectLifecycleBootstrapDurableState(options.env, options), stdout, stderr, options));
         };
         const containAndSettle = (confirmedObservation) => {
             if (settled || containmentStarted)
@@ -3229,6 +3250,7 @@ function defaultMigrationRegistrationRunner(options) {
             ...(options.treeKillSpawnFn !== undefined ? { treeKillSpawnFn: options.treeKillSpawnFn } : {}),
             ...(options.processKill !== undefined ? { processKill: options.processKill } : {}),
             ...(options.terminationGraceMs !== undefined ? { terminationGraceMs: options.terminationGraceMs } : {}),
+            ...(options.launchdServiceProbe !== undefined ? { launchdServiceProbe: options.launchdServiceProbe } : {}),
             ...(options.beforeIntentPublish !== undefined ? { beforeIntentPublish: options.beforeIntentPublish } : {}),
             ...(options.afterIntentPublicationStep !== undefined
                 ? { afterIntentPublicationStep: options.afterIntentPublicationStep }
@@ -3370,8 +3392,10 @@ export async function bootstrapDegradedSelfUpdateStartup(env, platform = process
         });
         const recoveringPendingOwnership = reason === 'migration_ambiguous'
             || reason === 'bootstrap_attempt_pending';
-        if (migration.requiresForegroundExit === true
-            || (recoveringPendingOwnership && migration.outcome !== 'migrated')) {
+        const pendingOwnershipUnresolved = recoveringPendingOwnership
+            && migration.outcome !== 'migrated'
+            && migration.priorOwnershipRolledBack !== true;
+        if (migration.requiresForegroundExit === true || pendingOwnershipUnresolved) {
             return {
                 disposition: 'fail_closed',
                 handedOver: false,
@@ -3389,7 +3413,9 @@ export async function bootstrapDegradedSelfUpdateStartup(env, platform = process
                 message: migration.message,
             };
         }
-        if (migration.outcome === 'skipped' && migration.reason !== 'cooldown') {
+        if (migration.outcome === 'skipped'
+            && migration.reason !== 'cooldown'
+            && migration.priorOwnershipRolledBack !== true) {
             recordBootstrapAttempt(bootstrapEnv, { ok: false, reason }, options);
         }
         return {

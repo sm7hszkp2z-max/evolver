@@ -12,6 +12,7 @@ export declare const COMMAND_GROUPS: {
     readonly run: "Evolution";
     readonly cycle: "Evolution";
     readonly autoexec: "Evolution";
+    readonly 'autoexec-feedback': "Evolution";
     readonly solidify: "Evolution";
     readonly distill: "Evolution";
     readonly review: "Evolution";

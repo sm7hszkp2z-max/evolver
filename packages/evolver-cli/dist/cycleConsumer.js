@@ -191,13 +191,16 @@ function printRuntimeCapabilities() {
     }
 }
 function resolveMaterialCycleDeps(deps = {}) {
+    assetstore.assertPromptProviderNotProxy(deps.store);
     const materialStore = deps.materialStore ?? new materialNs.MaterialStore({ path: events.materialStorePath() });
     const consumer = deps.consumer ?? new materialNs.ConsumerGroups({
         store: materialStore,
         path: join(dirname(events.materialStorePath()), 'cycle-consumer.json'),
     });
     const store = deps.store ?? new assetstore.LocalJsonlProvider(events.assetsDir());
-    const assetDir = store instanceof assetstore.LocalJsonlProvider ? store.baseDir : events.assetsDir();
+    const localDir = assetstore.LocalJsonlProvider.isBuiltInPromptReader(store)
+        ? Object.getOwnPropertyDescriptor(store, 'baseDir')?.value : undefined;
+    const assetDir = typeof localDir === 'string' ? localDir : events.assetsDir();
     const provenance = deps.provenance ?? new assetstore.ProvenanceStore(assetDir);
     const review = deps.review ?? new assetstore.ReviewLedger(assetDir);
     const ingestor = deps.ingestor ?? new events.Ingestor({ path: events.rootEventsPath() });
@@ -599,6 +602,11 @@ async function processMaterial(material, opts, deps) {
         const verdict = await exec.runAutoExecTask({
             engine: deps.engine,
             store: deps.store,
+            cycleId,
+            assertPromptAdapter: () => {
+                if (!assetstore.isBuiltInPromptProvider(deps.store))
+                    throw new Error('unsupported_unsupervised_prompt_provider_v1');
+            },
             provenance: deps.provenance,
             ...(process.env['EVOLVER_BENCHMARK_ID'] !== undefined ? { benchmark: assetstore.benchmarkContext(process.env['EVOLVER_BENCHMARK_ID']) } : {}),
             review: deps.review,

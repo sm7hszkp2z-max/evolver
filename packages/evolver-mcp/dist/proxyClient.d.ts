@@ -75,7 +75,11 @@ export interface ProxyReuseResultArgs {
     tokensSaved?: number;
     timeSavedSeconds?: number;
     reason?: string;
+    /** Caller-produced reuse evidence; forwarded verbatim, the Hub owns its schema. */
+    evidence?: Record<string, unknown>;
     expectedHubMode?: 'public' | 'private';
+    /** Destination fingerprint attested by /proxy/status before the queued report was prepared. */
+    expectedHubDestinationId?: string;
 }
 export interface ProxyAgentSearchArgs {
     query?: string;

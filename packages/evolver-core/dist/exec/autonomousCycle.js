@@ -5,6 +5,7 @@ import { isExecutionEligible } from '../reference/guard.js';
 import { CLAUDE_SAFE_AUTONOMOUS_TOOLS, hasBoundedClaudeFileAccess, makeClaudeExecBridge, validateAgentSessionResume } from './claudeBridge.js';
 import { assessSourceEligibility } from '../assetstore/sourceQualification.js';
 import { sha256Hash } from '../schema/common.js';
+import { makeExecContextResolver } from './contextResolver.js';
 const asStrings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 /**
  * Resolve a gene's strategy from the store and whether it is safe to EMBED into an autonomous agent's prompt —
@@ -14,7 +15,7 @@ const asStrings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'strin
  * is quarantined until a human approves). Both default-open, so cycle-self-produced/local genes are unaffected;
  * only hub-ingested (untrusted) and auto-distilled (unreviewed) drafts are withheld. Looks up by id or asset_id.
  */
-export function makeTrustedGeneResolver(store, provenance, review, includeProbation = false, benchmark) {
+export function makeTrustedGeneResolver(store, provenance, review, includeProbation = false, benchmark, onResolvedGene) {
     return async (geneId) => {
         const genes = await store.list('Gene', 1000);
         // 只识别完整digest；长度检查也防止正则$把尾随换行当作结束位置。
@@ -44,6 +45,7 @@ export function makeTrustedGeneResolver(store, provenance, review, includeProbat
             ...(typeof summary === 'string' ? { summary } : {}),
             trusted: trustedOrigin && (reviewApproved || probationOk), // trusted ORIGIN + (approved OR on probation)
         };
+        onResolvedGene?.(g);
         return info;
     };
 }
@@ -149,7 +151,8 @@ export function makeSafeExecute(repo, store, safety, opts = {}) {
         agentOptions: resolveAutonomousAgentOptions(runner, safety.isolation, safety.agentOptions),
         ...(safety.timeoutMs !== undefined ? { timeoutMs: safety.timeoutMs } : {}),
         ...(safety.signal ? { signal: safety.signal } : {}),
-        resolveGene: makeTrustedGeneResolver(store, opts.provenance, opts.review, opts.includeProbation ?? false, opts.benchmark),
+        resolveGene: makeTrustedGeneResolver(store, opts.provenance, opts.review, opts.includeProbation ?? false, opts.benchmark, opts.onResolvedGene),
+        resolveContext: makeExecContextResolver(store, opts, opts),
         ...(opts.validate ? { validate: opts.validate } : {}),
         ...(opts.validationCmds ? { validationCmds: opts.validationCmds } : {}),
         ...(opts.personality ? { personality: opts.personality } : {}),

@@ -15,6 +15,8 @@ export interface ProvenanceRecord {
     reason?: string;
     /** Canonical content id of the exact hash-mismatched body accepted by a supported unverified ingest. */
     frozenContentId?: string;
+    /** Opaque destinations that supplied this exact asset body; never inferred from source='hub'. */
+    hubOriginDestinationIds?: readonly string[];
     /** 独立benchmark资格，不进入asset_id，不被普通promote/approve覆盖。 */
     sourceQualifications?: readonly SourceQualification[];
 }
@@ -88,13 +90,15 @@ export declare class ProvenanceStore {
     mark(rec: Omit<ProvenanceRecord, 'at'> & {
         at?: string;
     }): ProvenanceRecord;
+    /** Add a destination only after the caller verifies a current-Hub fetch against the stored body. */
+    recordHubOrigin(assetId: string, destinationId: string): ProvenanceRecord | null;
     /** Stage a verified Hub write without replacing an in-flight conservative marker. */
-    stageUntrustedWriteTracked(assetId: string, source: ProvenanceSource): {
+    stageUntrustedWriteTracked(assetId: string, source: ProvenanceSource, hubOriginDestinationId?: string): {
         record: ProvenanceRecord;
         appended: boolean;
     };
     /** Finalize a verified write unless an operator made an explicit decision during I/O. */
-    finalizeUntrustedWrite(assetId: string, source: ProvenanceSource): ProvenanceRecord;
+    finalizeUntrustedWrite(assetId: string, source: ProvenanceSource, hubOriginDestinationId?: string): ProvenanceRecord;
     /** Stage an unverified write without overwriting an explicit trust decision or another conservative marker. */
     stageUnverifiedWrite(assetId: string, source: ProvenanceSource, frozenContentId: string): ProvenanceRecord;
     stageUnverifiedWriteTracked(assetId: string, source: ProvenanceSource, frozenContentId: string): {
@@ -125,7 +129,7 @@ export declare class ProvenanceStore {
  * remote-supplied asset_id is never trusted) and mark it untrusted in the sidecar. This is the ONLY path that
  * should bring hub-fetched assets into the local pool — trust-first from the first byte (#30.1).
  */
-export declare function ingestUntrusted(store: AssetStoreProvider, prov: ProvenanceStore, record: AssetRecord, source?: ProvenanceSource): Promise<PutResult>;
+export declare function ingestUntrusted(store: AssetStoreProvider, prov: ProvenanceStore, record: AssetRecord, source?: ProvenanceSource, hubOriginDestinationId?: string): Promise<PutResult>;
 /**
  * Hub → local-pool landing for an asset whose content does NOT hash to its declared asset_id. The hub
  * demonstrably rewrites delivered payloads (injected `validation`, wholesale `payload_backfill_reason`

@@ -12,6 +12,10 @@ export declare class ReferenceSessionScope implements ReferenceScope {
 }
 /** Out-of-band object provenance: no asset fields, JSON or content hashes are changed. */
 export declare function brandReferenceObject<T extends object>(value: T): T;
+/** A raw scan row is never executable authority, but is distinct from a
+ * genuinely reference-only asset. Nested scans must preserve that distinction. */
+export declare function brandScanRawObject<T extends object>(value: T): T;
+export declare function isReferenceObject(value: unknown): boolean;
 /** Explicit evidence modes never enter procedural paths. Legacy source_type is unrelated. */
 export declare function hasEvidenceMode(value: unknown): boolean;
 export declare function isKnownReferenceId(id: unknown, scope?: ReferenceScope | undefined): boolean;

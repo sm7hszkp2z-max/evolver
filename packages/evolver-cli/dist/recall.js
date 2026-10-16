@@ -23,6 +23,13 @@ export function pickInjectEvent(evts, sessionId) {
     let bestMatch;
     let bestAny;
     for (const e of evts) {
+        if (e.type === ops.GENE_CONTEXT_DELIVERY_EVENT) {
+            // New receipts must be session-matched. Never fall back to another session or consume shadow attempts.
+            if (sessionId !== undefined && e.payload?.['sessionId'] === sessionId && e.payload['transport'] === 'stdout_written'
+                && ops.readGeneContextDeliveryReceipt(e.payload['receipt']) && (bestMatch === undefined || e.seq > bestMatch.seq))
+                bestMatch = e;
+            continue;
+        }
         if (e.type !== ops.VALUE_INJECT_EVENT)
             continue;
         if (bestAny === undefined || e.seq > bestAny.seq)
@@ -33,6 +40,8 @@ export function pickInjectEvent(evts, sessionId) {
     return bestMatch ?? bestAny;
 }
 export function geneIdsOf(e) {
+    if (e?.type === ops.GENE_CONTEXT_DELIVERY_EVENT)
+        return ops.readGeneContextDeliveryReceipt(e.payload?.['receipt'])?.geneAssetIds ?? [];
     const ids = e?.payload?.['geneIds'];
     return Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : [];
 }
@@ -45,6 +54,10 @@ export function geneFromAsset(a) {
 }
 /** 仅来源资格事件中的实际 canonical 引用保留版本身份，历史和独立手动参数仍按 logical ID 归因。 */
 export function geneFromRecallSelection(asset, requestedId, inject) {
+    if (inject?.type === ops.GENE_CONTEXT_DELIVERY_EVENT) {
+        // A content digest without a trusted turn boundary cannot establish use of this delivery.
+        return asset.asset_id === requestedId && geneIdsOf(inject).includes(requestedId) ? { geneId: requestedId } : null;
+    }
     const canonicalReference = inject?.payload?.['sourceQualificationSchema'] === 'benchmark-source-references.v1'
         && geneIdsOf(inject).includes(requestedId);
     if (!canonicalReference)
@@ -95,6 +108,7 @@ export async function runRecall(argv, deps = {}) {
     const err = deps.err ?? ((s) => process.stderr.write(`${s}\n`));
     const { transcript, geneIds, fromInject } = parseArgs(argv);
     let selectedInject;
+    const injectedIds = new Set();
     // --from-inject: pull the geneIds off the most recent value.inject root_event so the operator does not have to
     // retype them (a semi-automatic step toward the auto-loop, which still needs the inject<->session key #205 to
     // pick the RIGHT inject for THIS transcript). Union with any explicit --gene; dedupe preserving order.
@@ -120,9 +134,11 @@ export async function runRecall(argv, deps = {}) {
             // inject is stamped at all (the precise-match path is simply dormant — e.g. pre-#205 events).
             err(`recall: no value.inject matched session ${wantSession}; using the most recent inject instead`);
         }
-        for (const id of fromEvent)
+        for (const id of fromEvent) {
+            injectedIds.add(id);
             if (!geneIds.includes(id))
                 geneIds.push(id);
+        }
     }
     if (!transcript || geneIds.length === 0) {
         err('用法: evolver recall <session-transcript> (--gene <id> ... | --from-inject)');
@@ -148,25 +164,30 @@ export async function runRecall(argv, deps = {}) {
     // for "unrecognized format" — a transcript of pure heartbeats correctly yields 'unknown' per gene.
     const turns = parsed.filter((t) => !t.isMeta).map((t) => ({ role: t.role, text: t.text }));
     const store = deps.store ?? new assetstore.LocalJsonlProvider(events.assetsDir());
-    const genes = [];
+    const genes = new Map();
     for (const id of geneIds) {
         const a = await resolveGene(store, id);
         if (!a) {
             err(`recall: gene not found in local store: ${id}`);
             continue;
         }
-        const gene = geneFromRecallSelection(a, id, selectedInject);
+        // Only identities actually supplied by the event inherit its receipt rules.
+        // Independent manual arguments retain legacy attribution; overlapping IDs
+        // still use the receipt and cannot turn delivered context into lexical proof.
+        const gene = geneFromRecallSelection(a, id, injectedIds.has(id) ? selectedInject : undefined);
         if (!gene) {
             err(`recall: injected gene identity mismatch: ${id}`);
             continue;
         }
-        genes.push(gene);
+        // Event-bound attribution wins over a manual alias; Map preserves the first asset's position.
+        if (!genes.has(a.asset_id) || injectedIds.has(id))
+            genes.set(a.asset_id, gene);
     }
-    if (genes.length === 0) {
+    if (genes.size === 0) {
         err('recall: no resolvable genes');
         return 1;
     }
-    const results = ops.verifyInjectedGenes(genes, turns);
+    const results = ops.verifyInjectedGenes([...genes.values()], turns);
     const sum = ops.summarizeRecall(results);
     for (const r of results) {
         log(`${r.recalled.toUpperCase().padEnd(7)} ${r.geneId}  score=${r.score.toFixed(2)}  matched=[${r.matched.join(', ')}]`);

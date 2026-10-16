@@ -59,6 +59,8 @@ export declare class UnsafeLockPathError extends Error {
     constructor(reason: UnsafeLockPathReason);
 }
 export declare const MAX_LOCK_OWNER_BYTES = 4096;
+/** Canonical v2 bytes shared by publication and strict byte-bound lifecycle receipts. */
+export declare function serializeFileLockOwnerRecord(owner: FileLockOwnerRecord): string;
 /** Fresh native process-start observation. Unlike lock acquisition, this does not use caches. */
 export declare function readFileLockProcessStartIdentity(pid: number): FileLockProcessStartIdentity | null;
 export declare function sameFileLockProcessStartIdentity(left: FileLockProcessStartIdentity, right: FileLockProcessStartIdentity): boolean;
@@ -71,6 +73,8 @@ export declare function inspectFileLockOwnerProcess(owner: Pick<FileLockOwnerRec
 export declare function _setFileLockTestHooksForTest(hooks?: {
     processStartIdentity?: (pid: number) => FileLockProcessStartIdentity | null;
     pidAlive?: (pid: number) => boolean;
+    beforeOwnerStat?: (path: string) => void;
+    beforeOwnerOpen?: (path: string) => void;
     beforeOwnerPublish?: (temporaryPath: string, lockPath: string) => void;
     beforeGuardianPublish?: (temporaryPath: string, guardianPath: string) => void;
     afterGuardianPublish?: (guardianPath: string, lockPath: string) => void;
@@ -78,6 +82,8 @@ export declare function _setFileLockTestHooksForTest(hooks?: {
     beforeMutationGuardRelease?: (mutationGuardPath: string, lockPath: string) => void;
 }): void;
 export declare function statRegularFileIdentity(path: string): BigIntStats;
+/** Observe an owner without acquiring, reclaiming or removing the lock. Legacy owners remain unverifiable. */
+export declare function readFileLockOwner(lockPath: string): FileLockOwnerRecord | null;
 /**
  * Pre-arm an acquired lock with the exact child PID generation while retaining local ownership.
  * A controller can therefore keep mutating its journal, while a hard controller crash cannot make
@@ -124,7 +130,16 @@ export interface ReleaseLockResult {
     released: boolean;
     reason: ReleaseLockReason;
 }
-export declare function releaseLock(lockPath: string): ReleaseLockResult;
+export type DeferLockReleaseResult = {
+    deferred: true;
+    reason: 'deferred';
+} | {
+    deferred: false;
+    reason: 'not_owned' | 'ownership_changed';
+};
+/** Remember an exact owner's cleanup without accessing a path whose trust was lost. */
+export declare function deferLockRelease(lockPath: string, expectedOwner: FileLockOwnerRecord): DeferLockReleaseResult;
+export declare function releaseLock(lockPath: string, expectedOwner?: FileLockOwnerRecord): ReleaseLockResult;
 export declare class LockReleaseError extends Error {
     readonly reason: ReleaseLockReason;
     readonly code = "LOCK_RELEASE_FAILED";

@@ -42,6 +42,8 @@ export interface SanitizeBundleResult {
     leaks: Leak[];
     mode: LeakCheckMode;
 }
+/** Keep each Event's content references attached after redaction changes IDs. */
+export declare function rebindSanitizedEvolutionEventBundle(original: readonly AssetRecord[], sanitized: readonly AssetRecord[]): AssetRecord[];
 /**
  * Pre-publish sanitize of a bundle (pure, never throws):
  * 1) mode != off: scan the ORIGINAL (pre-redaction) content for leaks; strict + found → blocked=true (chokepoint refuses); warn → flag only.

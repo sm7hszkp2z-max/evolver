@@ -23,7 +23,7 @@ export interface PublishBindingReceipt {
     executionDigest: string;
     receiptId: string;
 }
-/** 精确单成员授权；parent 必须存在于同一宿主 ledger，hash 本身不是授权。 */
+/** Gene/Capsule 精确单成员授权；Event 必须随完整三件包发布。 */
 export interface PublishMemberBindingReceipt {
     version: typeof PUBLISH_MEMBER_BINDING_VERSION;
     bundleDigest: string;
@@ -44,6 +44,8 @@ export declare function createPublishVerificationRequest(input: Record<string, u
 export declare function isPublishVerificationRequest(value: unknown): value is PublishVerificationRequest;
 export declare function isPublishVerificationEvidence(value: unknown): value is PublishVerificationEvidence;
 export declare function publishBundleDigest(bundle: readonly AssetRecord[]): string;
+/** An Event is an audit of the exact Gene/Capsule pair in this publication. */
+export declare function assertEvolutionEventPublishBundle(bundle: readonly AssetRecord[]): void;
 export declare function createPublishBindingReceipt(bundle: readonly AssetRecord[], evidence: PublishVerificationEvidence, execution: unknown): PublishBindingReceipt;
 export declare function assertPublishBindingReceipt(bundle: readonly AssetRecord[], value: unknown, runtimeDigest?: string): asserts value is PublishBindingReceipt;
 export declare function assertPublishBindingReceiptIdentity(value: unknown, runtimeDigest?: string): asserts value is PublishBindingReceipt;

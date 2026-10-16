@@ -26,6 +26,10 @@ export function soloMaxFails(env = process.env) {
  */
 export function applySoloLockdown(env = process.env) {
     const forced = {
+        // Startup has already loaded local settings. Freeze this profile across
+        // later connector reloads and child processes; the file cannot restore gates.
+        EVOLVER_SOLO: '1',
+        EVOLVER_ENV_FILE: '',
         // Offline: the hub-reuse + question links are gated on this flag; forcing it
         // off means resolveHubLink/resolveHubQuestionLink return undefined → zero hub calls.
         EVOLVER_REUSE_BEFORE_SOLVE: '0',

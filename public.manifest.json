@@ -1,11 +1,11 @@
 {
   "package": "@evomap/evolver",
-  "version": "2.0.42",
+  "version": "2.0.44",
   "channel": "latest",
   "publicRepo": "EvoMap/evolver",
   "publicBranch": "v2-beta",
-  "releaseTag": "v2.0.42",
-  "releaseTitle": "Evolver v2 v2.0.42",
+  "releaseTag": "v2.0.44",
+  "releaseTitle": "Evolver v2 v2.0.44",
   "prerelease": false,
   "obfuscate": [
     "packages/evolver-core/dist/algo",
@@ -21,6 +21,10 @@
     "packages/evolver-proxy/dist/llm",
     "packages/evolver-proxy/dist/sync",
     "packages/evolver-proxy/dist/lifecycle"
+  ],
+  "obfuscateExclude": [
+    "packages/evolver-core/dist/hub/sanitize.js",
+    "packages/evolver-proxy/dist/llm/bodyCapture.js"
   ],
   "workspacePackages": [
     "evolver-core",

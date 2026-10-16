@@ -1,8 +1,15 @@
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeSync, } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeSync, lstatSync, } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstat, readdir } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { acquireLock, releaseLock } from '../util/fileLock.js';
 import { rootEvent } from './eventSchema.js';
+import { relocateContextDeliveryProjections } from '../ops/geneContextDeliveryJournal.js';
+import { protectedAuditConfigured, protectedAuditRpc, protectedAuditRpcSync, protectedAuditReadSnapshotSync, isProtectedAuditServiceProcess, ProtectedAuditUnavailableError, validateProtectedAuditHistoryVersion } from './protectedAuditRpc.js';
 export const ROOT_EVENT_ARCHIVE_DEFAULT_KEEP_EVENTS = 10_000;
+// Keep rotation's published and temporary JSONL bytes inside the same physical
+// history contract as protected append/read admission.
+const MAX_PROTECTED_HISTORY_PHYSICAL_BYTES = 256 * 1024 * 1024;
 const SEGMENT_PATTERN = /^root-events-(\d{16})-(\d{16})\.jsonl$/;
 export class InvalidRootEventLogError extends Error {
     line;
@@ -49,10 +56,77 @@ export function rootEventArchiveDir(path) {
     const stem = ext.length > 0 ? basename(path, ext) : basename(path);
     return join(dirname(path), `${stem}.archive`);
 }
+/**
+ * Return an opaque version for the complete active+archived root-event history.
+ * On POSIX clients this is computed by the protected service, never by a
+ * same-UID WebUI process probing the private files directly.
+ */
+export async function rootEventHistoryVersion(path) {
+    const deadlineAt = Date.now() + 30_000;
+    if (protectedAuditConfigured()) {
+        return validateProtectedAuditHistoryVersion(await protectedAuditRpc('root_history_version', path, undefined, { deadlineAt }));
+    }
+    return localRootEventHistoryVersion(path, undefined, deadlineAt);
+}
+/** Service-only implementation. The optional owner constraint is supplied by
+ * the protected service after it resolves the caller's logical path. */
+export async function localRootEventHistoryVersion(path, expectedUid, deadlineAt = Date.now() + 30_000) {
+    const entries = [];
+    let totalBytes = 0n;
+    const checkDeadline = () => {
+        if (!Number.isFinite(deadlineAt) || Date.now() >= deadlineAt) {
+            throw new ProtectedAuditUnavailableError('request_expired');
+        }
+    };
+    const add = async (kind, file, directory = false) => {
+        checkDeadline();
+        let stat;
+        try {
+            stat = await lstat(file, { bigint: true });
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                entries.push(`${kind}:missing`);
+                return false;
+            }
+            throw error;
+        }
+        checkDeadline();
+        if (directory
+            ? (!stat.isDirectory() || stat.isSymbolicLink())
+            : (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n)) {
+            throw new ProtectedAuditUnavailableError('root_history_version_untrusted');
+        }
+        if (expectedUid !== undefined && (stat.uid !== BigInt(expectedUid) || (stat.mode & 63n) !== 0n)) {
+            throw new ProtectedAuditUnavailableError('root_history_version_untrusted');
+        }
+        if (!directory) {
+            totalBytes += stat.size;
+            if (totalBytes > 256n * 1024n * 1024n) {
+                throw new ProtectedAuditUnavailableError('root_history_version_capacity');
+            }
+        }
+        entries.push([kind, stat.dev, stat.ino, stat.birthtimeNs, stat.size, stat.mtimeNs, stat.ctimeNs,
+            stat.uid, stat.mode].map(String).join(':'));
+        return true;
+    };
+    await add('active', path);
+    const archiveDir = rootEventArchiveDir(path);
+    if (await add('archive', archiveDir, true)) {
+        const segments = (await readdir(archiveDir)).filter(name => SEGMENT_PATTERN.test(name)).sort();
+        checkDeadline();
+        for (const name of segments)
+            await add(`segment:${name}`, join(archiveDir, name));
+    }
+    checkDeadline();
+    return createHash('sha256').update(entries.join('\n')).digest('hex');
+}
 export function rootEventArchiveSegmentName(firstSeq, lastSeq) {
     return `root-events-${String(firstSeq).padStart(16, '0')}-${String(lastSeq).padStart(16, '0')}.jsonl`;
 }
 export function planRootEventArchive(opts) {
+    if (protectedAuditConfigured())
+        return protectedAuditRpcSync('plan_root_archive', opts.path, opts.keepEvents, { deadlineAt: Date.now() + 30_000 });
     const keepEvents = normalizeKeepEvents(opts.keepEvents);
     const active = readActiveStrict(opts.path);
     const wouldArchive = Math.max(0, active.length - keepEvents);
@@ -72,6 +146,8 @@ export function planRootEventArchive(opts) {
     };
 }
 export function archiveRootEvents(opts) {
+    if (protectedAuditConfigured())
+        return protectedAuditRpcSync('archive_root', opts.path, opts.keepEvents, { deadlineAt: Date.now() + 30_000 });
     const keepEvents = normalizeKeepEvents(opts.keepEvents);
     const lockPath = `${opts.path}.lock`;
     mkdirSync(dirname(opts.path), { recursive: true });
@@ -100,6 +176,19 @@ export function archiveRootEvents(opts) {
                 }
                 reusedSegment = true;
             }
+            if (isProtectedAuditServiceProcess()) {
+                const archiveBytes = archiveSegmentFiles(archiveDir).reduce((sum, name) => sum + lstatSync(join(archiveDir, name)).size, 0);
+                const missingBytes = Buffer.byteLength(serializeLines(missing));
+                const tailBytes = Buffer.byteLength(serializeLines(tail));
+                const finalBytes = archiveBytes + missingBytes + tailBytes;
+                // Recovery also copies the retained tail before replacing the active
+                // inode, even when every prefix record was already published.
+                const peakBytes = lstatSync(opts.path).size + finalBytes;
+                if (finalBytes > MAX_PROTECTED_HISTORY_PHYSICAL_BYTES
+                    || peakBytes > MAX_PROTECTED_HISTORY_PHYSICAL_BYTES) {
+                    throw new ProtectedAuditUnavailableError('archive_physical_capacity');
+                }
+            }
             for (const segment of contiguousGroups(missing)) {
                 const missingFirstSeq = segment[0].event.seq;
                 const missingLastSeq = segment[segment.length - 1].event.seq;
@@ -111,7 +200,46 @@ export function archiveRootEvents(opts) {
                 durableReplace(`${segmentPath}.tmp`, segmentPath, archiveBytes);
                 fsyncDirectoryBestEffort(archiveDir);
             }
-            durableReplace(`${opts.path}.archive.tmp`, opts.path, serializeLines(tail));
+            const fileIdentity = (path) => {
+                const stat = lstatSync(path);
+                if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1)
+                    throw new Error('unsafe_delivery_archive');
+                return `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
+            };
+            const originalIdentity = fileIdentity(opts.path);
+            durableReplace(`${opts.path}.archive.tmp`, opts.path, serializeLines(tail), () => {
+                const nextIdentity = fileIdentity(`${opts.path}.archive.tmp`);
+                // The existing archive operation already validates/materializes this inventory under the root lock.
+                // Build byte locators for receipt rows only; preserve exact serialization and reused segments.
+                const locations = new Map();
+                let offset = 0;
+                for (const item of tail) {
+                    const line = `${item.raw}\n`;
+                    if (item.event.type === 'value.gene_context_delivery')
+                        locations.set(line, { offset, identity: nextIdentity });
+                    offset += Buffer.byteLength(line);
+                }
+                let archivesLoaded = false;
+                relocateContextDeliveryProjections(opts.path, line => {
+                    if (!locations.has(line) && !archivesLoaded) {
+                        archivesLoaded = true;
+                        for (const name of archiveSegmentFiles(archiveDir)) {
+                            const path = join(archiveDir, name), identity = fileIdentity(path);
+                            let offset = 0;
+                            for (const raw of readFileSync(path, 'utf8').split('\n')) {
+                                if (!raw)
+                                    continue;
+                                const event = rootEvent.parse(JSON.parse(raw));
+                                const exact = `${raw}\n`;
+                                if (event.type === 'value.gene_context_delivery')
+                                    locations.set(exact, { archive: name, offset, identity });
+                                offset += Buffer.byteLength(exact);
+                            }
+                        }
+                    }
+                    return locations.get(line);
+                }, { before: originalIdentity, after: nextIdentity });
+            });
             fsyncDirectoryBestEffort(dirname(opts.path));
         }
         return {
@@ -131,6 +259,11 @@ export function archiveRootEvents(opts) {
     }
 }
 export function readRootEventHistory(path, archiveDir = rootEventArchiveDir(path)) {
+    if (protectedAuditConfigured()) {
+        if (archiveDir !== rootEventArchiveDir(path))
+            throw new ProtectedAuditUnavailableError('custom_archive_path_denied');
+        return protectedAuditReadSnapshotSync('root', path);
+    }
     // Snapshot active first. Writers publish archive segments before replacing active, so this prevents a reader
     // from combining an old archive inventory with the new active tail and temporarily dropping the rotated prefix.
     const active = readEventsLenient(path);
@@ -152,6 +285,8 @@ export function readRootEventHistory(path, archiveDir = rootEventArchiveDir(path
 }
 /** Strict replay for control-plane decisions that must fail closed on partial or conflicting history. */
 export function readRootEventHistoryStrict(path) {
+    if (protectedAuditConfigured())
+        return protectedAuditReadSnapshotSync('root_strict', path);
     const active = readActiveStrict(path);
     const bySeq = readValidatedArchive(path, active);
     for (const line of active)
@@ -162,6 +297,8 @@ export function validateRootEventHistory(path) {
     void readRootEventHistoryStrict(path);
 }
 export function inspectRootEventArchive(path) {
+    if (protectedAuditConfigured())
+        return protectedAuditRpcSync('inspect_root_archive', path, undefined, { deadlineAt: Date.now() + 30_000 });
     const archiveDir = rootEventArchiveDir(path);
     const files = archiveSegmentFiles(archiveDir);
     let bytes = 0;
@@ -313,7 +450,7 @@ function contiguousGroups(lines) {
 function serializeLines(lines) {
     return lines.length === 0 ? '' : `${lines.map((line) => line.raw).join('\n')}\n`;
 }
-function durableReplace(tmpPath, finalPath, contents) {
+function durableReplace(tmpPath, finalPath, contents, beforePublish) {
     let fd = null;
     try {
         fd = openSync(tmpPath, 'w', 0o600);
@@ -321,6 +458,7 @@ function durableReplace(tmpPath, finalPath, contents) {
         fsyncSync(fd);
         closeSync(fd);
         fd = null;
+        beforePublish?.();
         renameSync(tmpPath, finalPath);
     }
     catch (error) {

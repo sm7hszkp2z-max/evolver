@@ -34,6 +34,7 @@ export function connectPublicHub(opts) {
                 credPath: join(dir, 'token.json'),
                 machine: { softIdPath: join(dir, 'machine-id') },
                 transport,
+                ...(opts.expectedOAuthTokenBinding !== undefined ? { expectedTokenBinding: opts.expectedOAuthTokenBinding } : {}),
             });
             break;
         }

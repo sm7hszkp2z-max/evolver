@@ -1,6 +1,7 @@
 import { type RuntimeId, type McpServerCmd, type InjectionPlan } from './injection.js';
 import { type CursorGene } from './cursorRulesInstaller.js';
-export { EmptySharedConfigError, SymlinkRefusedError, UnparseableConfigError, } from './installerShared.js';
+import { type InstallComponents } from './installerShared.js';
+export { EmptySharedConfigError, SymlinkRefusedError, UnparseableConfigError, resolveInstallComponents, type InstallComponents, } from './installerShared.js';
 /** Marks a config file as containing evolver-managed entries, so uninstall only removes what we added. */
 export declare const MANAGED_MARKER = "_evolver_managed";
 /** Official command-handler metadata, also gives custom commands an ownership marker for reinstall/uninstall. */
@@ -24,6 +25,7 @@ export declare const DEFAULT_PROMPT_RECALL_HOOK_COMMAND = "evolver inject prompt
  */
 export type InstallScope = 'user' | 'project';
 export interface InstallOptions {
+    components?: InstallComponents;
     /** Runtime config root — the CC adapter writes <configRoot>/.mcp.json and <configRoot>/.claude/settings.json
      *  for PROJECT scope. For USER scope the MCP registration goes to ~/.claude.json instead (see `scope`). */
     configRoot: string;
@@ -80,6 +82,7 @@ export interface InstallOptions {
     opencodeUsername?: string;
 }
 export interface UninstallOptions {
+    components?: InstallComponents;
     configRoot: string;
     scope?: InstallScope;
     /** Antigravity only: override the user home used to resolve ~/.gemini config roots. */
@@ -128,10 +131,27 @@ export declare function stripEvolverHookEntries(entries: readonly unknown[], tru
  */
 export declare function mergeHooksUnion(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown>;
 /** Strip evolver-owned hook entries + the marker from a parsed config (uninstall). Returns [changed, data]. */
-export declare function stripManaged(data: Record<string, unknown>): {
+export declare function stripManaged(data: Record<string, unknown>, components?: InstallComponents): {
     changed: boolean;
     data: Record<string, unknown>;
 };
+interface ClaudeTargets {
+    /** File the evolver MCP server registration (mcpServers.evolver) is written to. */
+    mcpConfigPath: string;
+    /** True when mcpConfigPath is Claude Code's own shared ~/.claude.json (user scope) — we must NOT stamp the
+     *  _evolver_managed marker into it (it's not ours to mark); uninstall keys off the mcpServers.evolver entry. */
+    mcpIsSharedUserConfig: boolean;
+    claudeDir: string;
+    settingsPath: string;
+}
+/**
+ * Resolve the claude-code config targets for a scope. USER scope anchors at the home dir and is self-contained
+ * (it does NOT depend on configRoot): the MCP goes to ~/.claude.json's top-level mcpServers — Claude Code's real
+ * user scope — NOT ~/.mcp.json (a `.mcp.json` only loads when its dir is the launch cwd, so `~/.mcp.json` would
+ * silently do nothing outside $HOME). The SessionStart hook lands in ~/.claude/settings.json (already user-level).
+ * PROJECT scope keeps the legacy paths under configRoot.
+ */
+export declare function claudeCodeTargets(scope: InstallScope, configRoot: string, homeDir?: string): ClaudeTargets;
 /**
  * Execute an InjectionPlan against a runtime config root. Active runtimes:
  *  - claude-code (mcp-hooks): scope 'project' (default) writes/merges <root>/.mcp.json + <root>/.claude/settings.json;

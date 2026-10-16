@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 const activeScope = new AsyncLocalStorage();
 const referenceObjects = new WeakSet();
+const scanRawObjects = new WeakSet();
 /** Carries scope through promises without a mutable process-wide current store. */
 export function withReferenceScope(scope, fn) {
     return scope ? activeScope.run(scope, fn) : fn();
@@ -22,11 +23,20 @@ export function brandReferenceObject(value) {
     referenceObjects.add(value);
     return value;
 }
+/** A raw scan row is never executable authority, but is distinct from a
+ * genuinely reference-only asset. Nested scans must preserve that distinction. */
+export function brandScanRawObject(value) {
+    scanRawObjects.add(value);
+    return value;
+}
+export function isReferenceObject(value) {
+    return !!value && typeof value === 'object' && referenceObjects.has(value);
+}
 /** Explicit evidence modes never enter procedural paths. Legacy source_type is unrelated. */
 export function hasEvidenceMode(value) {
     if (!value || typeof value !== 'object')
         return false;
-    if (referenceObjects.has(value))
+    if (referenceObjects.has(value) || scanRawObjects.has(value))
         return true;
     if (Array.isArray(value))
         return value.some(hasEvidenceMode);

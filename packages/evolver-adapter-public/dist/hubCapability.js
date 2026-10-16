@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bootstrap, reference, hub as hubNs, signals, wire } from '@evomap/evolver-core';
-import { AuthError, HubFetch, HubClientError, globalFetchLike, referenceFetchLike, isHubUnreachableError } from './hubFetch.js';
+import { AuthError, HubFetch, HubClientError, terminalHubRejection, globalFetchLike, referenceFetchLike, isHubUnreachableError } from './hubFetch.js';
 import { isNodeSecret, parseNodeSecretVersion } from './auth/legacyShim.js';
 import { inboundToAgentEvent, agentEventToOutbound, publishRespToReceipt, searchQueryToFetchWire, searchQueryToSearchOnlyWire, } from './wireMap.js';
 import { antiAbuseTelemetryMode, buildHeartbeatAntiAbuseTelemetry, } from './antiAbuseTelemetry.js';
@@ -8,6 +8,7 @@ import { getWorkspaceKeychainMode } from './auth/workspaceKeychain.js';
 import { agentDirectoryFailure, parsePublicAgentPage, parsePublicAgentProfile, paginatePublicAgentPage, mergePublicAgentPages, publicAgentSearchQuery, publicTaskDiscoveryQuery, PUBLIC_TASK_DISCOVERY_MAX_CANDIDATES, unsupportedPublicAvailability, unsupportedPublicSort, withDirectoryTimeout, } from './agentDirectory.js';
 import { createRecipeExecution } from './recipeExecution.js';
 import { assetMatchesId, stripHubDeliveryMetadataForIntegrity } from './hubReuse.js';
+import { OAuthAuthenticationPreflightError, OAuthCredentialBindingError } from './auth/oauthDeviceToken.js';
 export const INBOUND_LIMIT = 100;
 export const OUTBOUND_MAX_BATCH = 50;
 export const OUTBOUND_MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -335,12 +336,21 @@ export class PublicHubCapability {
         },
     };
     async fetch(query) {
+        const page = await this.fetchPage(query);
+        if (page.confirmRequired)
+            throw new Error('hub_fetch_confirmation_required');
+        return page.assets;
+    }
+    async fetchPage(query) {
         reference.assertExecutionEligible(query, this.referenceScope);
         // #69: map camelCase SearchQuery → hub snake_case wire (signalsAny → signals) before sending.
         // /a2a/fetch responses are FULL GEP envelopes (buildResponse('fetch', …)); the rows live at payload.results,
         // NOT at the top level. Reading body.results here always yielded [] — every fetch silently returned nothing.
         const body = await this.http.call('POST', '/a2a/fetch', gepEnvelope('fetch', searchQueryToFetchWire(query)));
-        return reference.withReferenceScope(this.referenceScope, () => assetsFromBody(body));
+        return reference.withReferenceScope(this.referenceScope, () => {
+            reference.assertExecutionEligible(body);
+            return newbieFetchConfirmation(body) ?? { assets: assetsFromBody(body), confirmRequired: false };
+        });
     }
     /**
      * Fetch one asset AND say why, when the answer is not an asset. `fetchAssetById` collapses every outcome to
@@ -494,8 +504,10 @@ export class PublicHubCapability {
      * Report a cycle outcome to the hub's memory graph (POST /a2a/memory/record).
      * Unlike the protocol-message endpoints (publish/fetch), memory/record takes a
      * FLAT body — no GEP envelope. Reporting is observability for the network's
-     * attribution loop, never a dependency of the cycle itself, so this method
-     * NEVER throws: auth/4xx/5xx/network failures all degrade to `recorded:false`.
+     * attribution loop, never a dependency of the cycle itself.
+     * Remote auth/4xx/5xx/network failures degrade to `recorded:false`.
+     * Credential-binding and authentication preflight refusals are rethrown so the
+     * durable caller can prove no report POST began.
      * Costs hub credits per the hub's memory pricing (caller gates on enablement).
      */
     async recordOutcome(report) {
@@ -506,7 +518,7 @@ export class PublicHubCapability {
             return { recorded: false, reason: 'no_signals' }; // hub rejects empty signals; skip the paid call
         const usedAssetIds = [...new Set((report.usedAssetIds ?? []).filter((x) => typeof x === 'string' && x.length > 0 && x.length <= USED_ASSET_ID_MAX_LEN))].slice(0, USED_ASSET_IDS_MAX);
         try {
-            await this.http.call('POST', '/a2a/memory/record', {
+            const body = await this.http.call('POST', '/a2a/memory/record', {
                 signals,
                 status: report.status,
                 ...(report.geneId ? { gene_id: report.geneId } : {}),
@@ -514,9 +526,14 @@ export class PublicHubCapability {
                 ...(report.summary ? { summary: report.summary } : {}),
                 ...(usedAssetIds.length > 0 ? { used_asset_ids: usedAssetIds } : {}),
             });
-            return { recorded: true };
+            const payload = asRecord(body['payload']) ?? body;
+            return confirmedFeedbackReceipt(body, payload)
+                ? { recorded: true }
+                : { recorded: false, reason: feedbackReceiptReason(body, payload) ?? 'outcome_receipt_unconfirmed' };
         }
         catch (e) {
+            if (e instanceof OAuthCredentialBindingError || e instanceof OAuthAuthenticationPreflightError)
+                throw e;
             return { recorded: false, reason: e instanceof Error ? e.message : String(e) };
         }
     }
@@ -540,6 +557,11 @@ export class PublicHubCapability {
             return { recorded: false, reason: e instanceof Error ? e.message : String(e) };
         }
     }
+    /**
+     * Remote auth, HTTP and transport failures return recorded:false. Exact
+     * credential-binding and authentication preflight errors are rethrown so a
+     * durable caller can prove that no reuse-result POST began.
+     */
     async recordReuseResult(report) {
         if (!reference.isExecutionEligible(report, this.referenceScope))
             return { recorded: false, reason: 'reference_not_execution_evidence' };
@@ -560,16 +582,34 @@ export class PublicHubCapability {
                 ...(report.traceId ? { trace_id: report.traceId } : {}),
                 ...(timeSavedSeconds.value !== undefined ? { time_saved_seconds: timeSavedSeconds.value } : {}),
                 ...(report.reason ? { reason: report.reason } : {}),
+                ...(report.evidence ? { evidence: report.evidence } : {}),
             });
-            const payload = asRecord(body['payload']) ?? body;
+            const payload = body['payload'] === undefined ? body : asRecord(body['payload']) ?? {};
+            const terminalDeclared = payload['terminal'] === true || body['terminal'] === true;
+            const recorded = confirmedFeedbackReceipt(body, payload) && !terminalDeclared;
+            const rawReason = feedbackReceiptReason(body, payload);
+            const confirmedDuplicate = payload['reason'] === 'duplicate_report'
+                && confirmedFeedbackReceipt(body, payload, false) && !terminalDeclared;
+            const reason = rawReason === 'duplicate_report' && !recorded && !confirmedDuplicate
+                ? 'reuse_receipt_unconfirmed' : rawReason;
+            const reuseStats = recorded ? parseReuseStats(payload['reuse_stats'] ?? body['reuse_stats']) : undefined;
             return {
-                recorded: payload['recorded'] !== false && payload['ok'] !== false,
-                ...(stringField(payload, 'reason') ?? stringField(payload, 'error') ? { reason: stringField(payload, 'reason') ?? stringField(payload, 'error') } : {}),
-                ...(stringField(payload, 'id') ?? stringField(payload, 'receipt_id') ? { id: stringField(payload, 'id') ?? stringField(payload, 'receipt_id') } : {}),
+                recorded,
+                ...(!recorded || reason ? { reason: reason ?? 'reuse_receipt_unconfirmed' } : {}),
+                ...(recorded && (stringField(payload, 'id') ?? stringField(payload, 'receipt_id'))
+                    ? { id: stringField(payload, 'id') ?? stringField(payload, 'receipt_id') } : {}),
+                ...(reuseStats ? { reuseStats } : {}),
+                ...(recorded ? reuseAdmission(payload) : {}),
             };
         }
         catch (e) {
-            return { recorded: false, reason: e instanceof Error ? e.message : String(e) };
+            if (e instanceof OAuthCredentialBindingError || e instanceof OAuthAuthenticationPreflightError)
+                throw e;
+            const rejection = terminalHubRejection(e);
+            if (rejection)
+                return { recorded: false, terminal: true, ...rejection };
+            const reason = e instanceof Error ? e.message : String(e);
+            return { recorded: false, reason: reason === 'duplicate_report' ? 'reuse_receipt_unconfirmed' : reason };
         }
     }
     async listLearningAssets(options = {}) {
@@ -880,6 +920,28 @@ export class PublicHubCapability {
 function asRecord(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
 }
+function reuseAdmission(payload) {
+    const weight = payload['weight'];
+    return {
+        ...(typeof payload['eligible'] === 'boolean' ? { eligible: payload['eligible'] } : {}),
+        ...(typeof payload['counted'] === 'boolean' ? { counted: payload['counted'] } : {}),
+        ...(typeof weight === 'number' && Number.isFinite(weight) ? { weight } : {}),
+    };
+}
+function confirmedFeedbackReceipt(envelope, receipt, recorded = true) {
+    const permitsSuccess = (value) => value === undefined || value === true;
+    const hasNoError = (value) => value === undefined || value === null;
+    return receipt['recorded'] === recorded
+        && permitsSuccess(receipt['ok'])
+        && permitsSuccess(envelope['ok'])
+        && (envelope === receipt || envelope['recorded'] === undefined || envelope['recorded'] === recorded)
+        && hasNoError(receipt['error'])
+        && hasNoError(envelope['error']);
+}
+function feedbackReceiptReason(envelope, receipt) {
+    return stringField(envelope, 'reason') ?? stringField(envelope, 'error')
+        ?? stringField(receipt, 'reason') ?? stringField(receipt, 'error');
+}
 function searchAssets(value, source) {
     if (!Array.isArray(value))
         throw new Error(`${source}_results_invalid`);
@@ -899,6 +961,7 @@ function semanticSearchAssets(body) {
     const status = stringField(body, 'search_status');
     if (status === 'degraded' || body['retryable'] === true)
         throw new Error('semantic_search_degraded');
+    newbieFetchConfirmation(body);
     const assets = searchAssets(body['assets'], 'semantic_search');
     if (status === 'no_match') {
         if (assets.length !== 0)
@@ -917,6 +980,7 @@ function semanticSearchAssets(body) {
 }
 function signalSearchAssets(body) {
     reference.assertExecutionEligible(body);
+    newbieFetchConfirmation(body);
     const payload = asRecord(body['payload']);
     return searchAssets(payload?.['results'], 'signal_search');
 }
@@ -1033,6 +1097,9 @@ function dryRunRecipeReceipt(action, recipeId, extra = {}) {
 }
 function assetCandidatesFromBody(body) {
     reference.assertExecutionEligible(body);
+    const confirmation = newbieFetchConfirmation(body);
+    if (confirmation)
+        throw new Error(confirmation.confirmRequired ? 'hub_fetch_confirmation_required' : 'hub_fetch_confirmation_rejected');
     const payload = asRecord(body['payload']);
     const candidates = [
         body['asset'],
@@ -1044,6 +1111,17 @@ function assetCandidatesFromBody(body) {
     ];
     return candidates
         .filter((candidate) => Boolean(candidate && typeof candidate === 'object' && !Array.isArray(candidate)));
+}
+// The Hub holds a new account's paid fetch behind `status: confirm_required` with an empty result set.
+function newbieFetchConfirmation(body) {
+    const payload = asRecord(body['payload']) ?? body;
+    const failed = [body, payload].some((part) => part['ok'] === false || (part['error'] !== undefined && part['error'] !== null));
+    if (failed)
+        throw new Error(payload['status'] === 'confirm_required'
+            ? 'hub_fetch_confirmation_rejected' : 'hub_fetch_response_rejected');
+    if (payload['status'] !== 'confirm_required')
+        return undefined;
+    return { assets: [], confirmRequired: true, creditCostPreview: asRecord(payload['credit_cost_preview']) ?? {} };
 }
 function assetsFromBody(body) {
     return assetCandidatesFromBody(body).map(unwrapFetchDeliveryRow);
@@ -1516,6 +1594,18 @@ function mailboxPushFailureReason(row) {
         return error ?? status;
     }
     return undefined;
+}
+function parseReuseStats(value) {
+    const stats = asRecord(value);
+    if (!stats)
+        return undefined;
+    const { total, success, success_rate: successRate } = stats;
+    const isCount = (n) => Number.isSafeInteger(n) && n >= 0;
+    if (!isCount(total) || !isCount(success) || success > total)
+        return undefined;
+    if (typeof successRate !== 'number' || !Number.isFinite(successRate) || successRate < 0 || successRate > 1)
+        return undefined;
+    return { total, success, successRate };
 }
 function optionalReuseMetric(report, camelKey, snakeKey, reason) {
     const rawReport = report;

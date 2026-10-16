@@ -1,6 +1,6 @@
 {
   "name": "@evomap/evolver-mcp",
-  "version": "2.0.42",
+  "version": "2.0.44",
   "private": false,
   "type": "module",
   "engines": {
@@ -17,6 +17,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./env-file": {
+      "types": "./dist/envFile.d.ts",
+      "default": "./dist/envFile.js"
+    },
     "./stdio": {
       "types": "./dist/stdio.d.ts",
       "default": "./dist/stdio.js"
@@ -27,7 +31,7 @@
     }
   },
   "dependencies": {
-    "@evomap/evolver-core": "2.0.42",
+    "@evomap/evolver-core": "2.0.44",
     "smol-toml": "^1.6.1"
   },
   "repository": {

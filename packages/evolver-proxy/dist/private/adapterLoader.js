@@ -86,6 +86,7 @@ export async function connectPrivateProxyHub(opts) {
         env: opts.env,
         ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
     });
+    const boundReuseFeedback = privateBoundReuseFeedback(compatibleHub);
     let readyHelloPending = Boolean(nodeSecret);
     let invitationRedeemed = false;
     let enterpriseFallbackSelected = false;
@@ -183,6 +184,18 @@ export async function connectPrivateProxyHub(opts) {
         hub: compatibleHub,
         auth,
         hello,
+        ...(boundReuseFeedback ? { boundReuseFeedback } : {}),
+    };
+}
+function privateBoundReuseFeedback(hub) {
+    const candidate = hub;
+    const destination = candidate.feedbackDestinationId;
+    const send = candidate.recordReuseResultBound;
+    if (typeof destination !== 'function' || typeof send !== 'function')
+        return undefined;
+    return {
+        feedbackDestinationId: () => destination.call(hub),
+        recordReuseResultBound: (report, expected) => send.call(hub, report, expected),
     };
 }
 const NODE_SECRET_ADOPTION_TRACKERS = new WeakMap();

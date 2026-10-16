@@ -1,11 +1,20 @@
 import type { RuntimeId, InjectionPlan } from './injection.js';
-import { type InstallResult, type InstallOptions } from './installerShared.js';
+import { type InstallComponents, type InstallResult, type InstallOptions } from './installerShared.js';
 /** The MCP server id evolver registers under [mcp_servers.evolver] / removes on uninstall. */
 export declare const CODEX_MCP_SERVER_ID = "evolver";
 export declare const CODEX_PROJECT_REGISTRATION_PRESENT_WARNING = "codex_project_registration_present: the requested project still contains an Evolver registration; if this came from the legacy user/global scope bug, remove it explicitly with --runtime=codex --scope=project --uninstall --root=<project>";
 export declare const CODEX_PROJECT_REGISTRATION_UNREADABLE_WARNING = "codex_project_registration_unreadable: the requested project config could not be inspected safely; no project file was modified";
 type CodexConfigRaceHook = (path: string, attempt: number) => void;
 export declare function _setCodexConfigRaceHookForTest(hook?: CodexConfigRaceHook): void;
+interface CodexConfigTarget {
+    scope: 'project' | 'user';
+    codexDir: string;
+    configPath: string;
+    dirLabel: string;
+    configLabel: string;
+    configRoot?: string;
+}
+export declare function codexConfigTarget(opts: Pick<InstallOptions, 'configRoot' | 'scope' | 'homeDir' | 'codexHome'>): CodexConfigTarget;
 /** The [mcp_servers.evolver] table from a plan's launch command. env omitted when empty (no `[..env]` table). */
 export declare function codexMcpServerEntry(server: {
     command: string;
@@ -24,7 +33,7 @@ export declare function codexUserPromptSubmitHook(command: string): Record<strin
  */
 export declare function mergeCodexConfig(existing: Record<string, unknown>, mcpServer: Record<string, unknown>, sessionStartHook: Record<string, unknown>, userPromptSubmitHook?: Record<string, unknown>): Record<string, unknown>;
 /** Strip evolver's MCP server + SessionStart hook from parsed codex TOML (uninstall). Returns [changed, data]. */
-export declare function stripCodexManaged(data: Record<string, unknown>): {
+export declare function stripCodexManaged(data: Record<string, unknown>, components?: InstallComponents): {
     changed: boolean;
     data: Record<string, unknown>;
 };
@@ -35,5 +44,5 @@ export declare function stripCodexManaged(data: Record<string, unknown>): {
  */
 export declare function installCodex(plan: InjectionPlan, opts: InstallOptions): InstallResult;
 /** Remove Evolver's MCP registration and hooks from the requested Codex scope, leaving user content intact. */
-export declare function uninstallCodex(runtime: RuntimeId, opts: Pick<InstallOptions, 'configRoot' | 'scope' | 'homeDir' | 'codexHome' | 'dryRun' | 'targetPath'>): InstallResult;
+export declare function uninstallCodex(runtime: RuntimeId, opts: Pick<InstallOptions, 'configRoot' | 'scope' | 'homeDir' | 'codexHome' | 'dryRun' | 'targetPath' | 'components'>): InstallResult;
 export {};

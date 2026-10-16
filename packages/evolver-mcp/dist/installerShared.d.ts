@@ -18,7 +18,10 @@ export declare function stripEvolverHookEntries(entries: readonly unknown[], tru
 };
 /** Runtime configuration scope. Project is the default when omitted. */
 export type InstallScope = 'user' | 'project';
+export type InstallComponents = 'product-only' | 'evolution-only' | 'both';
+export declare function resolveInstallComponents(value: unknown): InstallComponents;
 export interface InstallOptions {
+    components?: InstallComponents;
     /** Runtime config root. Runtime-specific user scopes may resolve their own home-anchored paths. */
     configRoot: string;
     /** Claude Code scope. Other runtimes may also use this to select project or user configuration. */
@@ -71,6 +74,7 @@ export interface InstallOptions {
     opencodeUsername?: string;
 }
 export interface UninstallOptions {
+    components?: InstallComponents;
     configRoot: string;
     scope?: InstallScope;
     /** Antigravity only: override the user home used to resolve ~/.gemini config roots. */

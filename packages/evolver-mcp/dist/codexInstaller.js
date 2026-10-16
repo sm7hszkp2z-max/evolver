@@ -24,7 +24,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { util } from '@evomap/evolver-core';
 import { commitSharedFile, SharedFileConflictError } from './sharedFileCommit.js';
-import { SymlinkRefusedError, DEFAULT_HOOK_COMMAND, DEFAULT_PROMPT_RECALL_HOOK_COMMAND, evolverManagedHookStatus, stripEvolverHookEntries, } from './installerShared.js';
+import { SymlinkRefusedError, DEFAULT_HOOK_COMMAND, DEFAULT_PROMPT_RECALL_HOOK_COMMAND, evolverManagedHookStatus, stripEvolverHookEntries, resolveInstallComponents, } from './installerShared.js';
 import { withCodexProductBridge, isOwnedProductBridge, restoreProductBridgeEntry, PRODUCT_BRIDGE_SERVER_ID } from './productBridge.js';
 /** The MCP server id evolver registers under [mcp_servers.evolver] / removes on uninstall. */
 export const CODEX_MCP_SERVER_ID = 'evolver';
@@ -144,7 +144,7 @@ function writeTomlWithRetry(path, update, assertSafe) {
         throw releaseError;
     return operationResult;
 }
-function codexConfigTarget(opts) {
+export function codexConfigTarget(opts) {
     if ((opts.scope ?? 'project') === 'project') {
         const codexDir = join(opts.configRoot, '.codex');
         return {
@@ -268,18 +268,20 @@ export function mergeCodexConfig(existing, mcpServer, sessionStartHook, userProm
     return out;
 }
 /** Strip evolver's MCP server + SessionStart hook from parsed codex TOML (uninstall). Returns [changed, data]. */
-export function stripCodexManaged(data) {
+export function stripCodexManaged(data, components) {
+    const selected = resolveInstallComponents(components);
+    const evolution = selected !== 'product-only';
     let changed = false;
     const out = { ...data };
     const trustManagedStatus = isObj(out['mcp_servers'])
         && CODEX_MCP_SERVER_ID in out['mcp_servers'];
     if (isObj(out['mcp_servers'])) {
         const next = { ...out['mcp_servers'] };
-        if (CODEX_MCP_SERVER_ID in next) {
+        if (evolution && CODEX_MCP_SERVER_ID in next) {
             delete next[CODEX_MCP_SERVER_ID];
             changed = true;
         }
-        if (PRODUCT_BRIDGE_SERVER_ID in next && isOwnedProductBridge(next[PRODUCT_BRIDGE_SERVER_ID])) {
+        if (selected !== 'evolution-only' && PRODUCT_BRIDGE_SERVER_ID in next && isOwnedProductBridge(next[PRODUCT_BRIDGE_SERVER_ID])) {
             const restored = restoreProductBridgeEntry(next[PRODUCT_BRIDGE_SERVER_ID]);
             if (restored.restored)
                 next[PRODUCT_BRIDGE_SERVER_ID] = restored.entry;
@@ -292,7 +294,7 @@ export function stripCodexManaged(data) {
         else
             delete out['mcp_servers'];
     }
-    if (isObj(out['hooks'])) {
+    if (evolution && isObj(out['hooks'])) {
         const hooks = { ...out['hooks'] };
         for (const event of Object.keys(hooks)) {
             const value = hooks[event];
@@ -333,28 +335,34 @@ function codexAlreadyInstalled(cfg, sessionStartCommand, promptRecallCommand) {
  * lifecycle hooks. Idempotent (re-running without --force is a no-op) and symlink-safe.
  */
 export function installCodex(plan, opts) {
+    const components = resolveInstallComponents(opts.components);
+    const evolution = components !== 'product-only';
+    const product = components !== 'evolution-only';
     const hookCommand = opts.hookCommand ?? DEFAULT_HOOK_COMMAND;
     const promptRecallHookCommand = opts.promptRecallHookCommand ?? DEFAULT_PROMPT_RECALL_HOOK_COMMAND;
     const target = codexConfigTarget(opts);
-    const warnings = target.scope === 'user' ? userScopeProjectWarnings(opts.configRoot) : [];
+    const warnings = evolution && target.scope === 'user' ? userScopeProjectWarnings(opts.configRoot) : [];
     const { codexDir, configPath } = target;
     if (opts.targetPath !== undefined && resolve(opts.targetPath) !== resolve(configPath)) {
         throw new Error('lifecycle target is outside the Codex adapter target set');
     }
     const assertSafe = codexPathGuard(target);
     assertSafe();
-    const mcpServer = codexMcpServerEntry(opts.server);
-    const sessionStartHook = codexSessionStartHook(hookCommand);
-    const userPromptSubmitHook = codexUserPromptSubmitHook(promptRecallHookCommand);
+    const update = (current) => {
+        const merged = evolution && (opts.force || !codexAlreadyInstalled(current, hookCommand, promptRecallHookCommand))
+            ? mergeCodexConfig(current, codexMcpServerEntry(opts.server), codexSessionStartHook(hookCommand), codexUserPromptSubmitHook(promptRecallHookCommand))
+            : current;
+        if (!product)
+            return { changed: merged !== current, data: merged };
+        const bridged = withCodexProductBridge(merged, opts.force === true, opts.productBridgeNodePath);
+        if (bridged.skipped && (!evolution || opts.dryRun))
+            throw new Error('[setup-hooks] product bridge is user-owned; explicit --force is required');
+        return { changed: merged !== current || bridged.changed, data: bridged.data };
+    };
     if (opts.dryRun) {
         const current = readTomlSnapshot(configPath).data;
-        const alreadyInstalled = codexAlreadyInstalled(current, hookCommand, promptRecallHookCommand);
-        const next = !opts.force && alreadyInstalled
-            ? withCodexProductBridge(current, false, opts.productBridgeNodePath)
-            : {
-                changed: true,
-                data: withCodexProductBridge(mergeCodexConfig(current, mcpServer, sessionStartHook, userPromptSubmitHook), opts.force === true, opts.productBridgeNodePath).data,
-            };
+        const next = update(current);
+        const alreadyInstalled = !next.changed;
         return {
             ok: true,
             runtime: plan.runtime,
@@ -367,15 +375,7 @@ export function installCodex(plan, opts) {
         };
     }
     mkdirSync(codexDir, { recursive: true, mode: 0o700 });
-    const changed = writeTomlWithRetry(configPath, (current) => {
-        if (!opts.force && codexAlreadyInstalled(current, hookCommand, promptRecallHookCommand)) {
-            return withCodexProductBridge(current, false, opts.productBridgeNodePath);
-        }
-        return {
-            changed: true,
-            data: withCodexProductBridge(mergeCodexConfig(current, mcpServer, sessionStartHook, userPromptSubmitHook), opts.force === true, opts.productBridgeNodePath).data,
-        };
-    }, assertSafe);
+    const changed = writeTomlWithRetry(configPath, update, assertSafe);
     return {
         ok: true,
         runtime: plan.runtime,
@@ -387,6 +387,7 @@ export function installCodex(plan, opts) {
 }
 /** Remove Evolver's MCP registration and hooks from the requested Codex scope, leaving user content intact. */
 export function uninstallCodex(runtime, opts) {
+    resolveInstallComponents(opts.components);
     const target = codexConfigTarget(opts);
     const { configPath } = target;
     if (opts.targetPath !== undefined && resolve(opts.targetPath) !== resolve(configPath)) {
@@ -397,7 +398,7 @@ export function uninstallCodex(runtime, opts) {
     if (!existsSync(configPath))
         return { ok: true, runtime, mode: 'uninstall', files: [], ...(opts.dryRun ? { dryRun: true } : {}) };
     if (opts.dryRun) {
-        const stripped = stripCodexManaged(readTomlSnapshot(configPath).data);
+        const stripped = stripCodexManaged(readTomlSnapshot(configPath).data, opts.components);
         return {
             ok: true,
             runtime,
@@ -407,7 +408,7 @@ export function uninstallCodex(runtime, opts) {
         };
     }
     const changed = writeTomlWithRetry(configPath, (current) => {
-        const stripped = stripCodexManaged(current);
+        const stripped = stripCodexManaged(current, opts.components);
         return {
             ...stripped,
             remove: stripped.changed && Object.keys(stripped.data).length === 0,

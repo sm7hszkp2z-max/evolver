@@ -66,6 +66,13 @@ export function parseProvenanceRecord(value) {
     const frozenContentId = stringField(record, 'frozenContentId');
     if (frozenContentId !== undefined && !/^sha256:[0-9a-f]{64}$/.test(frozenContentId))
         return null;
+    const rawOrigins = record['hubOriginDestinationIds'];
+    if (rawOrigins !== undefined && (source !== 'hub' || !Array.isArray(rawOrigins)
+        || rawOrigins.length === 0 || rawOrigins.length > 32
+        || rawOrigins.some((origin) => typeof origin !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(origin))
+        || new Set(rawOrigins).size !== rawOrigins.length))
+        return null;
+    const hubOriginDestinationIds = rawOrigins;
     const qualifications = record['sourceQualifications'] === undefined ? undefined : parseSourceQualifications(record['sourceQualifications'], assetId);
     if (qualifications === null)
         return null;
@@ -79,6 +86,7 @@ export function parseProvenanceRecord(value) {
         ...(promotedBy ? { promotedBy } : {}),
         ...(reason ? { reason } : {}),
         ...(frozenContentId ? { frozenContentId } : {}),
+        ...(hubOriginDestinationIds ? { hubOriginDestinationIds } : {}),
         ...(qualifications ? { sourceQualifications: qualifications } : {}),
     };
 }

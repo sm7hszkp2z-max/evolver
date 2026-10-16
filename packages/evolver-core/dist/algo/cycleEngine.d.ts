@@ -28,6 +28,16 @@ export interface ExecutionResult {
         score: number;
         reason?: string;
     };
+    /** The execution bridge called the agent, regardless of whether a Gene strategy was included. */
+    agentInvoked?: true;
+    /** Bridge observation: the selected, resolved Gene strategy was included when the agent was invoked.
+     * This does not prove the agent followed it or that an independent verifier accepted the work. */
+    selectedGeneInvocation?: {
+        geneId: string;
+        assetId: string;
+    };
+    /** Host cleanup failed after execution; retain invocation facts without treating the run as learning evidence. */
+    postExecutionCleanupFailed?: true;
     bindingCorrelation?: {
         bindingDigest: `sha256:${string}`;
         runId: string;
@@ -43,6 +53,8 @@ export interface ExecutionResult {
     nativeSessionId?: string;
     proofOfWork?: ProofOfWork;
     strongEvidence?: boolean;
+    /** Method supplied to the runner, not proof that its prose steps were executed. */
+    plannedStrategy?: readonly string[];
     /** Optional logical failure identity supplied by the runner; absent keeps the failure as legacy advisory evidence. */
     failureIdentity?: FailureEvidenceIdentityInput;
     /** Structured runner failure metadata. Safe to persist; unlike sessionLog it contains no transcript text. */
@@ -57,6 +69,11 @@ export interface ExecutionResult {
      * writes only the derived failure_class, so it adds no root_events bloat and leaks no transcript content.
      */
     sessionLog?: string;
+}
+/** Execution returned evidence, but a later host cleanup failure prevents solidification. */
+export declare class ExecutionAttemptError extends Error {
+    readonly execution: ExecutionResult;
+    constructor(cause: unknown, execution: ExecutionResult);
 }
 export interface SolidifyPermitContext {
     cycleId: string;

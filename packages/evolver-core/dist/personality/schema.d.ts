@@ -67,14 +67,14 @@ export declare const personalityStats: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     fail: number;
     success: number;
-    updatedAt: string | null;
     n: number;
+    updatedAt: string | null;
     avgScore: number;
 }, {
     fail?: number | undefined;
     success?: number | undefined;
-    updatedAt?: string | null | undefined;
     n?: number | undefined;
+    updatedAt?: string | null | undefined;
     avgScore?: number | undefined;
 }>;
 export type PersonalityStats = z.infer<typeof personalityStats>;
@@ -134,14 +134,14 @@ export declare const personalityModel: z.ZodObject<{
     }, "strip", z.ZodTypeAny, {
         fail: number;
         success: number;
-        updatedAt: string | null;
         n: number;
+        updatedAt: string | null;
         avgScore: number;
     }, {
         fail?: number | undefined;
         success?: number | undefined;
-        updatedAt?: string | null | undefined;
         n?: number | undefined;
+        updatedAt?: string | null | undefined;
         avgScore?: number | undefined;
     }>>>;
     history: z.ZodDefault<z.ZodArray<z.ZodObject<{
@@ -167,6 +167,14 @@ export declare const personalityModel: z.ZodObject<{
     extensions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
 }, "strip", z.ZodTypeAny, {
     extensions: Record<string, unknown>;
+    stats: Record<string, {
+        fail: number;
+        success: number;
+        n: number;
+        updatedAt: string | null;
+        avgScore: number;
+    }>;
+    version: 1;
     current: {
         type: "PersonalityState";
         rigor: number;
@@ -175,15 +183,7 @@ export declare const personalityModel: z.ZodObject<{
         risk_tolerance: number;
         obedience: number;
     };
-    version: 1;
     updatedAt: string | null;
-    stats: Record<string, {
-        fail: number;
-        success: number;
-        updatedAt: string | null;
-        n: number;
-        avgScore: number;
-    }>;
     history: {
         at: string;
         score: number | null;
@@ -193,6 +193,14 @@ export declare const personalityModel: z.ZodObject<{
     }[];
 }, {
     extensions?: Record<string, unknown> | undefined;
+    stats?: Record<string, {
+        fail?: number | undefined;
+        success?: number | undefined;
+        n?: number | undefined;
+        updatedAt?: string | null | undefined;
+        avgScore?: number | undefined;
+    }> | undefined;
+    version?: 1 | undefined;
     current?: {
         type?: "PersonalityState" | undefined;
         rigor?: number | undefined;
@@ -201,15 +209,7 @@ export declare const personalityModel: z.ZodObject<{
         risk_tolerance?: number | undefined;
         obedience?: number | undefined;
     } | undefined;
-    version?: 1 | undefined;
     updatedAt?: string | null | undefined;
-    stats?: Record<string, {
-        fail?: number | undefined;
-        success?: number | undefined;
-        updatedAt?: string | null | undefined;
-        n?: number | undefined;
-        avgScore?: number | undefined;
-    }> | undefined;
     history?: {
         at: string;
         outcome: string;

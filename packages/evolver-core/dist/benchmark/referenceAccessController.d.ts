@@ -64,6 +64,8 @@ export declare class ReferenceAccessController {
     private readonly journalParent;
     private readonly parentIdentity;
     private readonly fileRoots;
+    private readonly protectedJournal;
+    private protectedJournalIdentity;
     private journalIdentity;
     private observedTrajectory;
     private fileReader;

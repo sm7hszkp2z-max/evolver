@@ -490,6 +490,64 @@ function parseCanonicalMigrationState(raw) {
         }
         : undefined;
 }
+// Releases cut before the canonical schema (2.0.0–2.0.2) wrote `migration.json` without
+// `schemaVersion` and recorded EVERY failure as `state: 'failed'`, including registration
+// failures whose child may still own the service manager. Only a failure in the signed download
+// or in signature/hash verification proves nothing was written into the install target or
+// executed from the artifact; a staged-binary preflight already ran the artifact.
+const LEGACY_PRE_INSTALL_FAILURE_PREFIXES = [
+    `${SELF_UPDATE_FAILURE_CODES.MIGRATION_DOWNLOAD_FAILED}:`,
+    `${SELF_UPDATE_FAILURE_CODES.MIGRATION_VERIFY_FAILED}:`,
+];
+const LEGACY_EXECUTED_ARTIFACT_FAILURE_PREFIX = `${SELF_UPDATE_FAILURE_CODES.MIGRATION_VERIFY_FAILED}:preflight:`;
+function parseLegacyPreInstallMigrationFailure(raw) {
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return undefined;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        return undefined;
+    const record = parsed;
+    const version = record['version'];
+    const destPath = record['destPath'];
+    const reason = record['reason'];
+    // The legacy writer never bounded or sanitized `reason`; only its leading failure code is read.
+    if (!exactMigrationRecordKeys(record, ['state', 'version', 'destPath', 'reason', 'attemptedAt'])
+        || record['state'] !== 'failed'
+        || typeof version !== 'string'
+        || version.length > 128
+        || ops.normalizeConcreteVersion(version) !== version
+        || typeof destPath !== 'string'
+        || !isAbsolute(destPath)
+        || destPath.length > 4_096
+        || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(destPath)
+        || !exactMigrationTimestamp(record['attemptedAt'])
+        || typeof reason !== 'string'
+        || !LEGACY_PRE_INSTALL_FAILURE_PREFIXES.some((prefix) => reason.startsWith(prefix))
+        || reason.startsWith(LEGACY_EXECUTED_ARTIFACT_FAILURE_PREFIX)) {
+        return undefined;
+    }
+    return { destPath };
+}
+/**
+ * A pre-schema record proves a clean rollback only while its install target is still absent:
+ * anything found there could belong to an earlier attempt the advisory record overwrote.
+ */
+function legacyPreInstallFailureInstalledNothing(raw) {
+    const legacy = parseLegacyPreInstallMigrationFailure(raw);
+    if (!legacy)
+        return false;
+    try {
+        lstatSync(legacy.destPath);
+        return false;
+    }
+    catch (error) {
+        return isErrno(error, 'ENOENT');
+    }
+}
 function inspectMigrationStartupState(env, options) {
     let raw;
     try {
@@ -502,6 +560,13 @@ function inspectMigrationStartupState(env, options) {
         return { classification: 'none', canonicalPresent: false };
     const record = parseCanonicalMigrationState(raw);
     if (!record) {
+        // Classified as if no canonical record existed, so a legacy ownership outcome in
+        // bootstrap-attempt.json still keeps this attempt fail-closed.
+        // regression: 2026-10-08 a 2.0.2 download timeout left this record and every later
+        // release exited fail-closed on each start without writing anything, so it never cleared.
+        if (legacyPreInstallFailureInstalledNothing(raw)) {
+            return { classification: 'none', canonicalPresent: false };
+        }
         return { classification: 'unsafe', canonicalPresent: true, detail: 'migration_state_invalid' };
     }
     if (record.state === 'rolled_back' || record.state === 'failed') {
@@ -682,20 +747,40 @@ function assertTrustedMigrationDirectoryChainSync(directory) {
     }
     assertWindowsMigrationAclTrusted(windowsChecks);
 }
-function unresolvedLegacyMigrationOwnership(env, readFile) {
+function recordedBootstrapAttemptOutcome(env, readFile) {
     try {
         const raw = readFile(join(resolveBootstrapStateDir(env), BOOTSTRAP_ATTEMPT_FILE));
         if (raw.length === 0 || raw.length > 4 * 1024)
-            return false;
+            return undefined;
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-            return false;
-        const outcome = parsed['outcome'];
-        return outcome === 'migration_ambiguous' || outcome === 'migrated' || outcome === 'completed';
+            return undefined;
+        return parsed['outcome'];
     }
     catch {
-        return false;
+        return undefined;
     }
+}
+function unresolvedLegacyMigrationOwnership(env, readFile) {
+    const outcome = recordedBootstrapAttemptOutcome(env, readFile);
+    return outcome === 'migration_ambiguous' || outcome === 'migrated' || outcome === 'completed';
+}
+/**
+ * Once the canonical record is durably `rolled_back` and the retried migration did not raise a new
+ * ambiguity, a leftover `migration_ambiguous` attempt marker no longer describes any owned artifact
+ * or child. A retry that recorded its own outcome already replaced it; a retry that was skipped did
+ * not, so replace it here with a clean failure. Returns whether the marker is no longer ambiguous.
+ */
+function retireRolledBackMigrationAmbiguity(env, options) {
+    const readFile = options.readFile ?? defaultReadTextFile;
+    if (recordedBootstrapAttemptOutcome(env, readFile) !== 'migration_ambiguous')
+        return true;
+    recordBootstrapAttempt(env, {
+        ok: false,
+        reason: 'migration_failed',
+        detail: `${SELF_UPDATE_FAILURE_CODES.MIGRATION_REGISTER_FAILED}: stored_registration_rolled_back`,
+    }, options);
+    return recordedBootstrapAttemptOutcome(env, readFile) !== 'migration_ambiguous';
 }
 async function assertTrustedMigrationDirectoryChain(directory, effectiveUid = resolveProcessUid()) {
     let current = resolvePath(directory);
@@ -1377,8 +1462,12 @@ async function removeMaterializedMigrationTemporaryFile(input) {
 }
 function parsePendingMigrationInstall(raw) {
     const record = parseCanonicalMigrationState(raw);
-    if (!record)
+    if (!record) {
+        // The pre-schema clean failure startup accepted is no install journal; re-proved under the lock.
+        if (legacyPreInstallFailureInstalledNothing(raw))
+            return undefined;
         throw new Error('migration_install_journal_invalid');
+    }
     if (record.state !== 'installing')
         return undefined;
     return {
@@ -2044,6 +2133,16 @@ export async function migrateToStandaloneBinary(env, platform = process.platform
     if (!hadPriorAmbiguity && recentBootstrapFailure(env, readText, now)) {
         return skipped('cooldown', 'one-time standalone migration skipped (recent bootstrap failure cooldown)');
     }
+    const retryCurrentAfterStoredRollback = async () => {
+        const markerOwnedByRolledBackMigration = recordedBootstrapAttemptOutcome(env, readText) === 'migration_ambiguous';
+        const retried = await migrateToStandaloneBinary(env, platform, options);
+        if (!markerOwnedByRolledBackMigration
+            || retried.requiresForegroundExit === true
+            || !retireRolledBackMigrationAmbiguity(env, { ...options, ...recordOptions })) {
+            return retried;
+        }
+        return { ...retried, priorOwnershipRolledBack: true };
+    };
     if (startupState.classification === 'retryable'
         && startupState.record.state === 'installing') {
         const reconciliation = await reconcileStoredMigrationInstall({
@@ -2072,7 +2171,7 @@ export async function migrateToStandaloneBinary(env, platform = process.platform
             return reconciliation.result;
         // Cleanup is idempotently complete and terminal state is durable; only now may the current
         // version/home request replace the old transaction authority.
-        return migrateToStandaloneBinary(env, platform, options);
+        return retryCurrentAfterStoredRollback();
     }
     if (startupState.classification === 'retryable'
         && isCanonicalMigrationRegistrationState(startupState.record)) {
@@ -2088,7 +2187,7 @@ export async function migrateToStandaloneBinary(env, platform = process.platform
             return reconciliation.result;
         // The exact old transaction is now durably rolled back. Re-read canonical state before
         // beginning the current version/home request so no stale in-memory authority crosses it.
-        return migrateToStandaloneBinary(env, platform, options);
+        return retryCurrentAfterStoredRollback();
     }
     // RESOLVE: version, asset name, dest path.
     const version = resolveMigrationVersion(env);

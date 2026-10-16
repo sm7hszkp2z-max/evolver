@@ -27,4 +27,7 @@ export const rootEvent = z.object({
     payload: z.unknown().default({}),
     human: humanNarrative,
     actor: actor.default({ kind: 'machine' }),
+    /** Protected-writer replay key, minted by the service and never by a caller. */
+    auditOperationId: z.string().min(1).max(128).optional(),
+    auditRequestHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 });

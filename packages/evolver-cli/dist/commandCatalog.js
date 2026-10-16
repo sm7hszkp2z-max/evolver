@@ -25,6 +25,7 @@ export const COMMAND_GROUPS = {
     run: 'Evolution',
     cycle: 'Evolution',
     autoexec: 'Evolution',
+    'autoexec-feedback': 'Evolution',
     solidify: 'Evolution',
     distill: 'Evolution',
     review: 'Evolution',

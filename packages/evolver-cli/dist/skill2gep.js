@@ -4,7 +4,7 @@
 // faithful to v1 (golden-tested). B2 adds `synthesizeGene` + the Capsule contracts (trace-only / empty→Gene-only /
 // validation-coverage); the human-review + real-trace red lines live there.
 import { createHash } from 'node:crypto';
-import { bootstrap, verify } from '@evomap/evolver-core';
+import { bootstrap, hub, verify } from '@evomap/evolver-core';
 const { isValidationCommandAllowed } = verify;
 // Re-export for backward compatibility (used by tests)
 export { isValidationCommandAllowed };
@@ -439,6 +439,7 @@ const buildContentSummary = (trace, blast) => {
  * Assemble a Capsule from a gene + real execution evidence (v1 assembleCapsule) — RED LINE #2/#3. Every
  * `Gene.validation` command MUST appear in `execution.trace` (whitespace-normalized exact match) AND carry an
  * integer exit code; otherwise refuse → the caller degrades to Gene-only. No coverage = no Capsule.
+ * Context projection requires an explicit source plannedStrategy. Synthesized Gene steps stay in the legacy field.
  */
 export function assembleCapsule(gene, execution, opts = {}) {
     const trace = Array.isArray(execution?.trace) ? execution.trace : [];
@@ -467,12 +468,29 @@ export function assembleCapsule(gene, execution, opts = {}) {
     const stableExecKey = execution?.started_at ??
         JSON.stringify({ s: status, sc: score, f: files, l: lines, t: trace.map((t) => `${normalizeCmd(t?.cmd)}:${Number.isInteger(t?.exit) ? t.exit : 'x'}`) });
     const idKey = shortHash(`${String(gene.id)}|${stableExecKey}`);
+    const summary = execution?.summary || `Applied ${gene.id} on scenario ${opts.scenario || 'local skill invocation'}`;
+    const trigger = Array.isArray(execution?.trigger) ? [...execution.trigger] : [...(gene.signals_match ?? [])].slice(0, 6);
+    // Gene synthesis may add generic fallback steps. Only a caller-supplied source
+    // plan can be projected as Skill method history; keep the legacy field below.
+    const plannedStrategy = opts.plannedStrategy ?? [];
     const capsule = {
         type: 'Capsule',
         id: CAPSULE_ID_PREFIX + slugify(geneIdSuffix) + '_' + idKey,
         gene: String(gene.id),
-        trigger: Array.isArray(execution?.trigger) ? [...execution.trigger] : [...(gene.signals_match ?? [])].slice(0, 6),
-        summary: execution?.summary || `Applied ${gene.id} on scenario ${opts.scenario || 'local skill invocation'}`,
+        trigger,
+        summary,
+        // The Skill supplies a plan; command exits do not prove each prose step ran.
+        // This projection is method content, not an extra verifier or permission channel.
+        a2a: { context_projection: {
+                schema: 'gene-context-projection.v1',
+                record_kind: 'method_record',
+                summary: hub.redactString(summary),
+                trigger: trigger.map(signal => hub.redactString(signal)),
+                strategy: Array.isArray(plannedStrategy) && plannedStrategy.length <= 64
+                    && plannedStrategy.every((step) => typeof step === 'string' && step.length <= 7900)
+                    ? plannedStrategy.filter((step) => step.trim()).map(step => hub.redactString(step))
+                    : [],
+            } },
         confidence: Math.max(0, Math.min(1, score)),
         blast_radius: { files, lines },
         outcome: { status, score },
@@ -517,6 +535,8 @@ export function reverseDistill(parsed, execution = {}, opts = {}) {
         }
         else {
             const r = assembleCapsule(gene, execution, {
+                // Do not project synthesizeGene's generic fallback steps as this Skill's actual method.
+                plannedStrategy: parsed.strategy ?? [],
                 ...(opts.scenario ? { scenario: opts.scenario } : {}),
                 ...(opts.evidenceMode ? { evidenceMode: opts.evidenceMode } : {}),
             });

@@ -1,7 +1,14 @@
-import { normalizeForPut } from '../assetstore/provider.js';
+// Autonomous-exec task runner — the productized per-task kernel a resident daemon polls (the deployment form
+// of the scratch autoexec daemon). One task → one fully-hardened evolution cycle, with a deny-by-default
+// allowlist pre-check that yields a clean "refused" verdict WITHOUT running anything when the repo is not
+// allowlisted. Secure by construction: the execute is built by makeSafeExecute (all six controls); callers
+// cannot bypass the safety composition.
+import { randomUUID } from 'node:crypto';
+import { frozenAssetRecordsEqual, normalizeForPut } from '../assetstore/provider.js';
 import { ingestUntrusted } from '../assetstore/provenance.js';
 import { mergePendingSignalsForStore } from '../assetstore/pendingSignals.js';
 import { intakeGene } from '../algo/geneIntake.js';
+import { ExecutionAttemptError } from '../algo/cycleEngine.js';
 import { runEvolutionCycle } from '../algo/orchestrator.js';
 import { makeSafeExecute, makeTrustedGeneResolver } from './autonomousCycle.js';
 import { defaultGitRunner, isWithinRoot } from './claudeBridge.js';
@@ -13,6 +20,65 @@ import { ExecutionBindingError, ExecutionBindingJournal, freezeExecutionBinding,
 /** Same path-containment as the bridge guard — used here to refuse before running anything (clean verdict). */
 function withinAllowlist(repo, roots) {
     return roots.some((root) => isWithinRoot(repo, root));
+}
+function learningOutcomeEligible(execution) {
+    if (!execution || execution.postExecutionCleanupFailed === true
+        || execution.failureKind === 'cancelled' || execution.failureKind === 'timeout'
+        || execution.failureKind === 'spawn_failed' || execution.failureKind === 'permission_denied')
+        return false;
+    const disposition = execution.executionTerminal?.disposition;
+    return disposition !== 'cancelled' && disposition !== 'timed_out' && disposition !== 'denied'
+        && disposition !== 'unsafe_to_replay' && disposition !== 'crashed';
+}
+function appliedUseStatus(result) {
+    // An interrupted or denied run is an observed attempt, not evidence that the strategy failed.
+    if (!learningOutcomeEligible(result.execution))
+        return 'inconclusive';
+    // A returned execution without a solidified Capsule has no durable learning outcome.
+    if (!result.capsule || result.capsule.outcome.status !== result.execution?.outcome.status)
+        return 'inconclusive';
+    if (result.finalStage === 'failed' && result.execution?.outcome.status === 'failed')
+        return 'failed';
+    if (result.finalStage === 'solidified' && result.execution?.outcome.status === 'success') {
+        if (result.producedValue === false)
+            return 'inert';
+        if (result.producedValue === true)
+            return 'success';
+    }
+    return 'inconclusive';
+}
+function appliedUseFromCycle(result, resolvedGene) {
+    const geneId = result.decision?.selectedGeneId;
+    const assetId = result.decision?.selectedAssetId;
+    if (!result.triggered || result.execution?.agentInvoked !== true || !geneId || !assetId)
+        return undefined;
+    // A returned failure can precede agent invocation (cancellation, deadline, binding refusal),
+    // or the bridge may have withheld the selected Gene after a trust change. Neither is use.
+    if (result.execution.selectedGeneInvocation?.geneId !== geneId
+        || result.execution.selectedGeneInvocation.assetId !== assetId)
+        return undefined;
+    // The verified identity belongs to the record resolved for this invocation, not a
+    // caller's selection claim or a later provider read after the agent has finished.
+    if (resolvedGene?.geneId !== geneId || resolvedGene.assetId !== assetId)
+        return undefined;
+    if (result.capsule && result.capsule.gene !== geneId)
+        return undefined;
+    const { source, hubOriginDestinationId } = resolvedGene;
+    return {
+        schemaVersion: 'applied-use.v1',
+        assetId,
+        geneId,
+        cycleId: result.cycleId,
+        source,
+        ...(hubOriginDestinationId ? { hubOriginDestinationId } : {}),
+        outcome: appliedUseStatus(result),
+        producedValue: result.producedValue ?? null,
+        applicationBinding: 'selected_execution',
+        verification: 'unverified',
+        ...(result.capsule?.asset_id ? { capsuleId: result.capsule.asset_id } : {}),
+        ...(result.event?.asset_id ? { eventId: result.event.asset_id } : {}),
+        ...(result.execution.executionTerminal ? { terminalDisposition: result.execution.executionTerminal.disposition } : {}),
+    };
 }
 function cleanForcedGeneId(value) {
     if (typeof value !== 'string')
@@ -41,16 +107,35 @@ async function landHubAssetIfPresent(deps, candidate) {
     if (!deps.provenance)
         return null;
     let normalized;
+    let fetchedExact = false;
     try {
-        normalized = normalizeForPut(candidate.hubAsset).record;
+        const prepared = normalizeForPut(candidate.hubAsset);
+        normalized = prepared.record;
+        fetchedExact = prepared.verified && candidate.assetId === normalized.asset_id;
     }
     catch {
         return null;
     }
     const existing = await deps.store.get(normalized.asset_id);
-    if (!existing) {
+    const destination = deps.hubFeedbackDestinationId;
+    const provenDestination = fetchedExact && destination && /^sha256:[a-f0-9]{64}$/.test(destination)
+        ? destination : undefined;
+    if (existing) {
+        // A matching id from a different body or a frozen import is not evidence
+        // that this Hub supplied the executable local Gene.
         try {
-            await ingestUntrusted(deps.store, deps.provenance, normalized, 'hub');
+            if (!normalizeForPut(existing).verified || !frozenAssetRecordsEqual(existing, normalized))
+                return null;
+            if (provenDestination)
+                deps.provenance.recordHubOrigin(normalized.asset_id, provenDestination);
+        }
+        catch {
+            return null;
+        }
+    }
+    else {
+        try {
+            await ingestUntrusted(deps.store, deps.provenance, normalized, 'hub', provenDestination);
         }
         catch {
             return null;
@@ -94,7 +179,20 @@ export async function runAutoExecTask(deps, rawTask, safety) {
     if (!withinAllowlist(task.repo, safety.allowedRoots)) {
         return { taskId: task.id, status: 'refused', reason: `repo not in allowlist: ${task.repo}` };
     }
-    const cycleId = `autoexec-${task.id}`;
+    const hostCycleId = deps.cycleId;
+    if (hostCycleId !== undefined && (typeof hostCycleId !== 'string'
+        || hostCycleId !== hostCycleId.trim() || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(hostCycleId)
+        || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(hostCycleId))) {
+        return { taskId: task.id, status: 'refused', reason: 'invalid host cycleId' };
+    }
+    const boundCycleId = `autoexec-${task.id}`;
+    if (task.execution_binding !== undefined && hostCycleId !== undefined && hostCycleId !== boundCycleId) {
+        return { taskId: task.id, status: 'refused', reason: 'cycleId conflicts with bound execution correlation' };
+    }
+    // Ordinary re-filings must not share feedback/trace ownership. A material
+    // consumer owns its durable identity and recovery lock; bound execution
+    // retains its canonical identity without rewriting authority correlation.
+    const cycleId = task.execution_binding !== undefined ? boundCycleId : hostCycleId ?? `autoexec-${randomUUID()}`;
     let binding;
     let bindingClaimed = false;
     let baseValidate;
@@ -225,7 +323,7 @@ export async function runAutoExecTask(deps, rawTask, safety) {
     catch { /* observability only */ }
     if (deps.hubReuse) {
         try {
-            hubCandidates = await executableHubCandidates(deps, await deps.hubReuse(cycleSignals, { cycleId }));
+            hubCandidates = await executableHubCandidates(deps, await deps.hubReuse(cycleSignals, { cycleId, taskId: task.id }));
         }
         catch {
             hubCandidates = [];
@@ -245,18 +343,59 @@ export async function runAutoExecTask(deps, rawTask, safety) {
             return v;
         }
         : undefined;
+    let inputContext;
     const observedProvenance = {
         gene_ids: [], capsule_ids: [], tool_decisions: [],
         policy_decisions: [], validator: null,
         result_asset_refs: [], proof_refs: [], terminal_disposition: 'crashed',
     };
-    const executionObserver = binding ? {
-        onToolDecision: (decision) => { observedProvenance.tool_decisions.push(decision); },
-        onPolicyDecision: (decision) => { observedProvenance.policy_decisions.push(decision); },
-        onValidatorDecision: (decision) => { observedProvenance.validator = decision; },
-        onProofReference: (reference) => { observedProvenance.proof_refs.push(reference); },
-    } : undefined;
+    const executionObserver = {
+        onInputContext: (receipt) => {
+            inputContext = receipt;
+            observedProvenance.input_context = { schema: receipt.schema, gene_asset_ids: receipt.inputGeneAssetIds,
+                capsule_asset_ids: receipt.inputCaseAssetIds, digest: receipt.digest };
+        },
+        onToolDecision: (decision) => { if (binding)
+            observedProvenance.tool_decisions.push(decision); },
+        onPolicyDecision: (decision) => { if (binding)
+            observedProvenance.policy_decisions.push(decision); },
+        onValidatorDecision: (decision) => { if (binding)
+            observedProvenance.validator = decision; },
+        onProofReference: (reference) => { if (binding)
+            observedProvenance.proof_refs.push(reference); },
+    };
+    let resolvedSelectedGene;
     const safeExecute = makeSafeExecute(task.repo, deps.store, safety, {
+        onResolvedGene: selected => {
+            resolvedSelectedGene = undefined;
+            try {
+                const { record, verified } = normalizeForPut(selected);
+                if (verified && record.type === 'Gene' && typeof record['id'] === 'string' && record['id']) {
+                    let source = 'local';
+                    let hubOriginDestinationId;
+                    try {
+                        const provenance = deps.provenance?.get(record.asset_id);
+                        if (provenance) {
+                            source = provenance.source;
+                            const destination = deps.hubFeedbackDestinationId;
+                            if (source === 'hub' && destination && /^sha256:[a-f0-9]{64}$/.test(destination)
+                                && provenance.hubOriginDestinationIds?.includes(destination)) {
+                                hubOriginDestinationId = destination;
+                            }
+                        }
+                    }
+                    catch {
+                        source = 'unknown';
+                    }
+                    // Bind attribution before invocation; later provenance changes cannot
+                    // credit a different source or Hub for the completed execution.
+                    resolvedSelectedGene = Object.freeze({ geneId: record['id'], assetId: record.asset_id,
+                        source, ...(hubOriginDestinationId ? { hubOriginDestinationId } : {}) });
+                }
+            }
+            catch { /* frozen or mismatched content cannot supply exact-use evidence */ }
+        },
+        ...(deps.assertPromptAdapter ? { assertPromptAdapter: deps.assertPromptAdapter } : {}),
         ...(deps.provenance ? { provenance: deps.provenance } : {}),
         ...(deps.benchmark ? { benchmark: deps.benchmark } : {}),
         ...(deps.review ? { review: deps.review } : {}),
@@ -269,7 +408,7 @@ export async function runAutoExecTask(deps, rawTask, safety) {
         ...(deps.gitPatchWriter ? { gitPatchWriter: deps.gitPatchWriter } : {}),
         ...(traceRecorder ? { traceRecorder } : {}),
         ...(executionObserver ? { executionObserver } : {}),
-        ...(binding ? { executionLimits: {
+        ...(binding ? { selectedContext: binding.selected_context, executionLimits: {
                 maxRuntimeMs: binding.resource_grant.max_runtime_ms,
                 maxFiles: binding.resource_grant.max_files,
                 maxLines: binding.resource_grant.max_lines,
@@ -279,9 +418,6 @@ export async function runAutoExecTask(deps, rawTask, safety) {
         ? async (mutation, decision) => {
             const selectedContext = binding.selected_context;
             try {
-                if (selectedContext.capsule_id !== null || selectedContext.capsule_asset_id !== null) {
-                    throw new ExecutionBindingError('binding_mismatched', 'preselected capsule context is not supported by the CycleEngine execution seam');
-                }
                 if (selectedContext.gene_id !== null && decision.selectedGeneId !== selectedContext.gene_id) {
                     throw new ExecutionBindingError('binding_mismatched', 'selected gene_id does not match frozen binding context');
                 }
@@ -336,6 +472,16 @@ export async function runAutoExecTask(deps, rawTask, safety) {
                     ? error.unsafeToReplay ? 'unsafe_to_replay' : 'denied'
                     : 'crashed';
                 observedProvenance.terminal_disposition = disposition;
+                if (error instanceof ExecutionAttemptError) {
+                    // Keep bridge observations so the cycle can abort cleanup-only failures without learning a failure.
+                    throw new ExecutionAttemptError(error.cause ?? error, {
+                        ...error.execution,
+                        bindingCorrelation: { bindingDigest: binding.binding_digest, runId: binding.correlation.run_id },
+                        executionTerminal: { status: 'failed', disposition },
+                        provenance: { ...observedProvenance, terminal_disposition: disposition },
+                        hubLifecycle: { state: 'not_submitted' },
+                    });
+                }
                 return {
                     outcome: { status: 'failed', score: 0, reason: message },
                     bindingCorrelation: { bindingDigest: binding.binding_digest, runId: binding.correlation.run_id },
@@ -475,7 +621,9 @@ export async function runAutoExecTask(deps, rawTask, safety) {
         ? 'unsafe_to_replay'
         : res.execution?.executionTerminal?.disposition === 'denied'
             ? 'refused'
-            : res.finalStage === 'solidified' ? 'solidified' : res.finalStage === 'failed' ? 'failed' : res.finalStage === 'aborted' ? 'refused' : 'innovated';
+            : res.finalStage === 'aborted' && res.execution?.postExecutionCleanupFailed === true
+                ? 'failed'
+                : res.finalStage === 'solidified' ? 'solidified' : res.finalStage === 'failed' ? 'failed' : res.finalStage === 'aborted' ? 'refused' : 'innovated';
     const cap = res.capsule;
     if (traceRecorder && deps.learningTrace) {
         // Proxy llm_turn fold (slice 5): fold the run window's per-request turns BEFORE run.completed so the
@@ -500,28 +648,40 @@ export async function runAutoExecTask(deps, rawTask, safety) {
             }
         }
         catch { /* observability only */ }
-        try {
-            traceRecorder.runCompleted({
-                status: res.finalStage === 'solidified' ? 'success' : 'failed',
-                ...(cap?.outcome?.score !== undefined ? { score: cap.outcome.score } : {}),
-                ...(res.reasons.length > 0 ? { reason: res.reasons.join('; ') } : {}),
-                ...(res.producedValue !== undefined ? { producedValue: res.producedValue } : {}),
-                ...(res.failureKind !== undefined ? { failureKind: res.failureKind } : {}),
-            });
-            await deps.learningTrace.packetSink.submit(buildLearningPacketDraft(traceRecorder, {
-                sourceRepo: deps.learningTrace.sourceRepo ?? 'evolver-v2',
-                taskSummary: task.expectedEffect,
-                signals: cycleSignals,
-                environment: {
-                    repo: task.repo,
-                    runner: safety.runner ?? (deps.agent ? 'claude' : 'codex'),
-                },
-                ...(observedVerification !== undefined ? { verification: observedVerification } : {}),
-            }));
+        // Cleanup-only aborts have an observed invocation but no quality verdict. The packet
+        // schema has only success/failed completion, so leave this trace uncompleted and do
+        // not submit it as negative offline learning evidence. Started/model events remain live.
+        if (res.execution?.postExecutionCleanupFailed !== true) {
+            try {
+                traceRecorder.runCompleted({
+                    status: res.finalStage === 'solidified' ? 'success' : 'failed',
+                    ...(cap?.outcome?.score !== undefined ? { score: cap.outcome.score } : {}),
+                    ...(res.reasons.length > 0 ? { reason: res.reasons.join('; ') } : {}),
+                    ...(res.producedValue !== undefined ? { producedValue: res.producedValue } : {}),
+                    ...(res.failureKind !== undefined ? { failureKind: res.failureKind } : {}),
+                });
+                await deps.learningTrace.packetSink.submit(buildLearningPacketDraft(traceRecorder, {
+                    sourceRepo: deps.learningTrace.sourceRepo ?? 'evolver-v2',
+                    taskSummary: task.expectedEffect,
+                    signals: cycleSignals,
+                    environment: {
+                        repo: task.repo,
+                        runner: safety.runner ?? (deps.agent ? 'claude' : 'codex'),
+                    },
+                    ...(observedVerification !== undefined ? { verification: observedVerification } : {}),
+                }));
+            }
+            catch { /* packet delivery is best-effort; never fail the task */ }
         }
-        catch { /* packet delivery is best-effort; never fail the task */ }
     }
-    if (deps.memoryGraph && res.decision?.selectedGeneId && (res.finalStage === 'solidified' || res.finalStage === 'failed')) {
+    // Attribute only the exact Gene resolved before this invocation; reporting must
+    // not add provider I/O after execution has reached its terminal result.
+    const appliedUse = appliedUseFromCycle(res, resolvedSelectedGene);
+    if (deps.memoryGraph && appliedUse && res.execution?.agentInvoked === true && learningOutcomeEligible(res.execution)
+        && res.decision?.selectedGeneId && res.decision.selectedAssetId
+        && res.execution.selectedGeneInvocation?.geneId === res.decision.selectedGeneId
+        && res.execution.selectedGeneInvocation.assetId === res.decision.selectedAssetId
+        && (res.finalStage === 'solidified' || res.finalStage === 'failed')) {
         const producedSuccess = res.finalStage === 'solidified' && res.producedValue === true;
         try {
             await deps.memoryGraph.recordOutcome({
@@ -547,6 +707,8 @@ export async function runAutoExecTask(deps, rawTask, safety) {
         taskId: task.id, status, finalStage: res.finalStage,
         ...(res.reasons.length > 0 && status !== 'solidified' ? { reason: res.reasons.join('; ') } : {}),
         ...(cap?.outcome ? { outcome: cap.outcome } : {}),
+        ...(res.producedValue !== undefined ? { producedValue: res.producedValue } : {}),
+        ...(res.execution?.agentInvoked === true ? { agentInvoked: true } : {}),
         ...(cap?.proof_of_work ? { proofOfWork: cap.proof_of_work } : {}),
         ...(res.failureKind !== undefined ? { failureKind: res.failureKind } : {}),
         ...(res.exitCode !== undefined ? { exitCode: res.exitCode } : {}),
@@ -555,6 +717,8 @@ export async function runAutoExecTask(deps, rawTask, safety) {
         ...(res.execution ? { execution_terminal: res.execution.executionTerminal } : {}),
         ...(res.execution?.hubLifecycle ? { hub_lifecycle: res.execution.hubLifecycle } : {}),
         ...(usedAssetIds.length > 0 ? { usedAssetIds } : {}),
+        ...(appliedUse ? { appliedUse } : {}),
+        ...(inputContext ? { inputContext } : {}),
         ...(res.capsule?.asset_id ? { resultAssetId: res.capsule.asset_id } : {}),
         ...(typeof task.generation === 'string' ? { generation: task.generation } : {}),
     };

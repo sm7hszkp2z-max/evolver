@@ -1,6 +1,6 @@
 {
   "name": "@evomap/evolver-cli",
-  "version": "2.0.42",
+  "version": "2.0.44",
   "private": false,
   "type": "module",
   "engines": {
@@ -17,18 +17,22 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./entry": {
+      "types": "./dist/cliEntry.d.ts",
+      "default": "./dist/cliEntry.js"
+    },
     "./dispatch": {
       "types": "./dist/dispatch.d.ts",
       "default": "./dist/dispatch.js"
     }
   },
   "dependencies": {
-    "@evomap/evolver-core": "2.0.42",
-    "@evomap/evolver-adapter-public": "2.0.42",
-    "@evomap/evolver-mcp": "2.0.42",
-    "@evomap/evolver-proxy": "2.0.42",
-    "@evomap/evolver-runtime-adapters": "2.0.42",
-    "@evomap/evolver-webui": "2.0.42"
+    "@evomap/evolver-core": "2.0.44",
+    "@evomap/evolver-adapter-public": "2.0.44",
+    "@evomap/evolver-mcp": "2.0.44",
+    "@evomap/evolver-proxy": "2.0.44",
+    "@evomap/evolver-runtime-adapters": "2.0.44",
+    "@evomap/evolver-webui": "2.0.44"
   },
   "repository": {
     "type": "git",

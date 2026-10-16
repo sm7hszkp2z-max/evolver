@@ -57,6 +57,15 @@ export interface RootEventArchiveStats {
     lastSeq: number | null;
 }
 export declare function rootEventArchiveDir(path: string): string;
+/**
+ * Return an opaque version for the complete active+archived root-event history.
+ * On POSIX clients this is computed by the protected service, never by a
+ * same-UID WebUI process probing the private files directly.
+ */
+export declare function rootEventHistoryVersion(path: string): Promise<string>;
+/** Service-only implementation. The optional owner constraint is supplied by
+ * the protected service after it resolves the caller's logical path. */
+export declare function localRootEventHistoryVersion(path: string, expectedUid?: number, deadlineAt?: number): Promise<string>;
 export declare function rootEventArchiveSegmentName(firstSeq: number, lastSeq: number): string;
 export declare function planRootEventArchive(opts: RootEventArchiveOptions): RootEventArchivePlan;
 export declare function archiveRootEvents(opts: RootEventArchiveOptions): RootEventArchiveResult;

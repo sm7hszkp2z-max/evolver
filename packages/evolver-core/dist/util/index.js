@@ -1,3 +1,4 @@
-export { acquireLock, attachLockGuardianToProcess, clearLockGuardianForProcess, inspectFileLockOwnerProcess, LockReleaseError, LockTimeoutError, MAX_LOCK_OWNER_BYTES, releaseLock, retainLockGuardianForProcess, readFileLockProcessStartIdentity, sameFileLockProcessStartIdentity, parseFileLockProcessStartIdentity, syncSleep, statRegularFileIdentity, transferLockOwnershipToProcess, UnsafeLockPathError, } from './fileLock.js';
+export { acquireLock, attachLockGuardianToProcess, clearLockGuardianForProcess, deferLockRelease, inspectFileLockOwnerProcess, LockReleaseError, LockTimeoutError, MAX_LOCK_OWNER_BYTES, releaseLock, retainLockGuardianForProcess, readFileLockProcessStartIdentity, readFileLockOwner, sameFileLockProcessStartIdentity, serializeFileLockOwnerRecord, parseFileLockProcessStartIdentity, syncSleep, statRegularFileIdentity, transferLockOwnershipToProcess, UnsafeLockPathError, } from './fileLock.js';
 export * from './fetchPort.js';
 export * from './version.js';
+export { canonicalEventPath } from './canonicalEventPath.js';

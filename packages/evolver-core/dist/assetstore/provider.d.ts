@@ -1,3 +1,6 @@
+import type { GeneReadSnapshot, GeneSnapshotQuery } from './boundedSnapshot.js';
+import type { GeneScanSessionV1 } from './geneScanV1.js';
+import type { RelatedCapsuleQuery, RelatedCapsuleResult } from './relatedCapsules.js';
 import { type ReferenceScope } from '../reference/guard.js';
 export type AssetKind = 'Gene' | 'Capsule' | 'EvolutionEvent' | 'AntiGene';
 /** 任意带 type/asset_id 的 wire 资产(schema SSOT=gep-sdk, 此处不重定义字段). */
@@ -50,12 +53,46 @@ export interface SearchQuery {
     domain?: string;
     limit?: number;
 }
+/** A bounded external read owns every dispatched side effect until terminal settlement.
+ * The operation handle is returned synchronously, before any asynchronous I/O.
+ * `cancelAndSettle` must not resolve merely because an AbortSignal was sent: it
+ * resolves only when the adapter has stopped its worker and cannot mutate state
+ * or publish a late result. Built-in local readers perform no external writes.
+ */
+export interface ContextReadOperationV1<T> {
+    readonly version: 1;
+    readonly result: Promise<T>;
+    cancelAndSettle(): Promise<void>;
+}
+/** Lookup budget shared by execution-context identity reads. */
+export interface ContextLookupQueryV1 {
+    readonly deadlineAt: number;
+    readonly signal: AbortSignal;
+}
 /**
  * 可插拔资产库接口(D19/M3-1). 一份接口, 多实现: LocalJsonlProvider(本地) + Remote(hub).
  * core 可同时连多个 provider(本地 + 远程), 不造第四套契约.
  */
 export interface AssetStoreProvider {
     readonly referenceScope?: ReferenceScope;
+    /** Async read-only Gene + own qualification snapshot. Never loads optional Capsule/event pools.
+     * Rejects on unknown authority, mutation or exhausted budget; no partial local-default trust. */
+    queryGeneSnapshot?(query?: GeneSnapshotQuery): Promise<GeneReadSnapshot>;
+    /** Required for prompt-time use of an injected provider. Legacy callbacks
+     * cannot attest terminal cancellation and are refused before dispatch. */
+    beginPromptGeneSnapshotV1?(query: GeneSnapshotQuery): ContextReadOperationV1<GeneReadSnapshot>;
+    /** Bounded, versioned raw-row scan with one retained cleanup owner. Required
+     * for authoritative multi-source Union reads; the legacy method alone cannot
+     * prove scanned rows or safely continue an exhausted source. */
+    beginGeneScanV1?(query?: GeneSnapshotQuery): GeneScanSessionV1;
+    /** Local-only, bounded batch of related Capsules WITH their own source qualification.
+     * Unsupported providers must not be emulated with remote search or unbounded list scans. */
+    queryRelatedCapsules?(query: RelatedCapsuleQuery): Promise<RelatedCapsuleResult>;
+    beginPromptRelatedCapsulesV1?(query: RelatedCapsuleQuery): ContextReadOperationV1<RelatedCapsuleResult>;
+    /** Exact content-addressed lookup for bounded execution context. */
+    beginPromptAssetGetV1?(assetId: string, query: ContextLookupQueryV1): ContextReadOperationV1<AssetRecord | null>;
+    /** Exact Gene logical-id lookup, capped at two matches to detect ambiguity. */
+    beginPromptLogicalGeneLookupV1?(id: string, query: ContextLookupQueryV1): ContextReadOperationV1<AssetRecord[]>;
     put(asset: AssetRecord): Promise<PutResult>;
     /** 可选的可崩溃恢复批量写入，用于保持相关资产（例如 Gene/Capsule 对）的一致性。
      * 需要持久化相关资产组的调用方必须先确认此能力存在，不得退回顺序单条写入。

@@ -25,7 +25,7 @@ export function buildEvolverPrimer(opts = {}) {
         lines.push('   - call evolver_recall when approved local genes are likely to help;', `   - call evolver_asset_search with concise key signals or error text to search ${searchWhere} (Recipe search needs a hub/proxy);`, '   - if a candidate fits, call evolver_asset_fetch and reuse only the parts that apply.');
     }
     if (proxy) {
-        lines.push('2. REPORT REAL REUSE. After a fetched asset materially affects the solution, call evolver_asset_reuse_result', '   (success / failed / mismatched / stale / unsafe) so the memory learns what is worth keeping.', '3. CAPTURE VERIFIED LEARNING. When you solve something non-trivial and have VERIFIED it, distill it for the next agent:');
+        lines.push('2. REPORT REAL REUSE. After a fetched asset materially affects the solution, call evolver_asset_reuse_result', '   (success / failed / mismatched / stale / unsafe) with taskId labelling the task it served,', '   so the memory learns what is worth keeping.', '3. CAPTURE VERIFIED LEARNING. When you solve something non-trivial and have VERIFIED it, distill it for the next agent:');
     }
     else {
         lines.push('2. CAPTURE VERIFIED LEARNING. When you solve something non-trivial and have VERIFIED it, distill it for the next agent:');

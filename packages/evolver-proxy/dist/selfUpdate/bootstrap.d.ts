@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { util } from '@evomap/evolver-core';
 import { type MigrationOptions } from './migration.js';
+import { type LaunchdServiceProbe } from './legacyLaunchdAbsentServiceBlock.js';
 export declare const RECOVERY_CONTROLLER_LIFECYCLE_OWNER_CAPABILITY_ENV = "EVOLVER_INTERNAL_RECOVERY_CONTROLLER_LIFECYCLE_OWNER";
 type BootstrapProcessKill = (pid: number, signal: NodeJS.Signals | 0) => boolean;
 type BootstrapSkipReason = 'already_supervised' | 'already_bootstrapped' | 'unsupported_install_shape' | 'policy_not_auto' | 'bootstrap_disabled' | 'ci_environment' | 'container_environment' | 'recent_failure' | 'migration_ambiguous' | 'bootstrap_attempt_invalid' | 'bootstrap_intent_pending' | 'bootstrap_attempt_pending';
@@ -60,6 +61,8 @@ export interface BootstrapRunOptions {
         token: string;
         processIdentityDigest: string;
     }>) => util.FileLockOwnerProcessStatus;
+    /** Test seam for the foreground launchd observation behind the legacy absent-service recovery. */
+    launchdServiceProbe?: LaunchdServiceProbe;
     /**
      * Extra seams forwarded to the one-time npm/JS → standalone migration (migration.ts).
      * Bootstrap-level seams (exists/readFile/writeFile/spawnFn/now/execPath) win when both

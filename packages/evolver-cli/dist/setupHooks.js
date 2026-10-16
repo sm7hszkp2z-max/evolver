@@ -6,6 +6,7 @@
 // cleanly removes only evolver's entries.
 import { planInjection, installInjection, uninstallInjection, runtimeSupport, renderManualWiring, renderServiceGuidance, SETUP_RUNTIMES, SERVICE_TARGETS, kiroConfigRoot, resolveOpenCodeConfig, McpConfigConflictError, McpConfigOwnershipError, McpConfigVerificationError, McpServerValidationError } from '@evomap/evolver-mcp';
 import { assetstore, events } from '@evomap/evolver-core';
+import { resolveInstallComponents } from '@evomap/evolver-mcp';
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -43,7 +44,7 @@ function parseFlags(argv) {
     }
     return out;
 }
-const USAGE = `usage: evolver setup-hooks [--runtime=${SETUP_RUNTIMES.join('|')}] [--scope=user|project|global] [--root=<dir>] [--lifecycle=capabilities|plan|verify|execute] [--action=install|uninstall] [--confirmed-plan=<base64url>] [--target-id=<id>] [--completed-targets=<id,id>] [--env-file=<path>] [--profile-descriptor=<json>] [--service=${SERVICE_TARGETS.join('|')}] [--verify] [--uninstall] [--dry-run] [--force] [--json] [--hook-command="evolver inject session-start"] [--server-node=<absolute-node>] [--server-command=<cmd>] [--server-args=a,b] [--service-command=<cmd>] [--service-args=a,b]\n  --verify is read-only for opencode and kiro\n  lifecycle operations are versioned JSON and require --json\n`;
+const USAGE = `usage: evolver setup-hooks [--runtime=${SETUP_RUNTIMES.join('|')}] [--scope=user|project|global] [--components=product-only|evolution-only|both] [--root=<dir>] [--lifecycle=capabilities|plan|verify|execute] [--action=install|uninstall] [--confirmed-plan=<base64url>] [--target-id=<id>] [--completed-targets=<id,id>] [--env-file=<path>] [--profile-descriptor=<json>] [--service=${SERVICE_TARGETS.join('|')}] [--verify] [--uninstall] [--dry-run] [--force] [--json] [--hook-command="evolver inject session-start"] [--server-node=<absolute-node>] [--server-command=<cmd>] [--server-args=a,b] [--service-command=<cmd>] [--service-args=a,b]\n  --verify is read-only for claude-code, codex, opencode and kiro\n  lifecycle operations are versioned JSON and require --json\n`;
 export function commandNamesForPath(command, platform, pathExt) {
     if (platform !== 'win32' || /\.[^\\/]+$/.test(command))
         return [command];
@@ -199,6 +200,8 @@ function displayResultPaths(paths, configRoot, scope) {
     return paths?.map((path) => displaySetupPath(path, configRoot, scope));
 }
 export function safeSetupOperationError(error) {
+    if (error instanceof Error && error.message === '[setup-hooks] product bridge is user-owned; explicit --force is required')
+        return error.message;
     if (error instanceof McpConfigConflictError)
         return error.message;
     if (error instanceof McpConfigOwnershipError)
@@ -448,6 +451,14 @@ function descriptorEnvFile(f, descriptor, descriptorServer) {
     return descriptorServer?.env?.['EVOLVER_ENV_FILE'] ?? descriptor.envFile;
 }
 function buildServer(f, descriptor = { manualHints: {} }, resolveNodePath) {
+    if (f['components'] === 'product-only') {
+        if (f['server-node'] === true)
+            throw new McpNodeOverrideError('missing value for --server-node');
+        const nodePath = typeof f['server-node'] === 'string'
+            ? resolveStableMcpNodePath({ execPath: f['server-node'], platform: process.platform, systemCandidates: [] })
+            : (resolveNodePath ?? resolveStableMcpNodePath)();
+        return { server: { command: nodePath }, nodePath };
+    }
     const serverArgs = argsFromFlag(f['server-args']);
     if (f['server-node'] === true)
         throw new McpNodeOverrideError('missing value for --server-node');
@@ -514,7 +525,7 @@ function appendAdapterNotes(text, hints) {
         : text;
 }
 const SETUP_VALUE_FLAGS = new Set([
-    'runtime', 'platform', 'scope', 'root', 'lifecycle', 'action', 'confirmed-plan', 'target-id', 'completed-targets', 'env-file', 'profile-descriptor', 'service',
+    'runtime', 'platform', 'scope', 'root', 'components', 'lifecycle', 'action', 'confirmed-plan', 'target-id', 'completed-targets', 'env-file', 'profile-descriptor', 'service',
     'hook-command', 'server-node', 'server-command', 'server-args', 'service-command', 'service-args',
 ]);
 function setupHelpRequested(argv) {
@@ -531,6 +542,12 @@ function setupHelpRequested(argv) {
 }
 function lifecycleAction(raw) {
     return raw === 'install' || raw === 'uninstall' ? raw : undefined;
+}
+function validateSetupComponents(f, runtime) {
+    resolveInstallComponents(f['components']);
+    if (f['components'] !== undefined && runtime !== 'claude-code' && runtime !== 'codex') {
+        throw new Error('component selection is available only for claude-code and codex');
+    }
 }
 function runSetupLifecycle(f, runtime, scope, configRoot, emit, deps) {
     const operation = f['lifecycle'];
@@ -557,6 +574,12 @@ function runSetupLifecycle(f, runtime, scope, configRoot, emit, deps) {
     if (operation === 'execute' && f['completed-targets'] !== undefined && f['target-id'] === undefined) {
         return fail('PLAN_INVALID', '--completed-targets requires --target-id');
     }
+    try {
+        validateSetupComponents(f, runtime);
+    }
+    catch (error) {
+        return fail('PLAN_INVALID', error instanceof Error ? error.message : 'invalid component selection');
+    }
     const capabilities = setupLifecycleCapabilities(runtime, scope);
     if (operation === 'capabilities') {
         emit({ schema: SETUP_LIFECYCLE_SCHEMA, operation, ok: true, capabilities });
@@ -568,7 +591,9 @@ function runSetupLifecycle(f, runtime, scope, configRoot, emit, deps) {
     if ((operation === 'plan' || operation === 'execute') && action === undefined) {
         return fail('PLAN_INVALID', '--action=install|uninstall is required');
     }
-    const descriptor = profileDescriptorFromFlag(f);
+    const descriptor = f['components'] === 'product-only'
+        ? { ok: true, descriptor: { manualHints: {} } }
+        : profileDescriptorFromFlag(f);
     if (!descriptor.ok)
         return fail('PLAN_INVALID', descriptor.error, 1);
     let server = { command: 'evolver-mcp' };
@@ -577,7 +602,9 @@ function runSetupLifecycle(f, runtime, scope, configRoot, emit, deps) {
         try {
             const built = buildServer(f, descriptor.descriptor, deps.resolveMcpNodePath);
             server = built.server;
-            productBridgeNodePath = built.nodePath ?? (deps.resolveMcpNodePath ?? resolveStableMcpNodePath)();
+            if (f['components'] !== 'evolution-only') {
+                productBridgeNodePath = built.nodePath ?? (deps.resolveMcpNodePath ?? resolveStableMcpNodePath)();
+            }
         }
         catch (error) {
             return fail('CAPABILITY_UNAVAILABLE', safeSetupOperationError(error), 1);
@@ -590,6 +617,7 @@ function runSetupLifecycle(f, runtime, scope, configRoot, emit, deps) {
         configRoot,
         injectionPlan,
         installOptions: {
+            components: resolveInstallComponents(f['components']),
             configRoot,
             server,
             scope,
@@ -689,6 +717,17 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
     const lifecycleCode = runSetupLifecycle(f, runtime, scope, configRoot, emit, deps);
     if (lifecycleCode !== undefined)
         return lifecycleCode;
+    try {
+        validateSetupComponents(f, runtime);
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'invalid component selection';
+        if (json)
+            emit({ runtime, outcome: 'error', files: [], error: message });
+        else
+            process.stderr.write(`${message}\n`);
+        return 2;
+    }
     // V1 exposed setup-hooks --verify as a read-only operation. Silently ignoring it is unsafe: the command then
     // falls through to installInjection and can rewrite runtime configuration while the operator asked only to
     // inspect it. V2's JSON MCP installers already have a transaction-free dry-run preflight, so use that as the
@@ -706,7 +745,7 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
                 process.stderr.write(`${error}\n${USAGE}`);
             return 2;
         }
-        if (runtime !== 'opencode' && runtime !== 'kiro') {
+        if (runtime !== 'opencode' && runtime !== 'kiro' && runtime !== 'claude-code' && runtime !== 'codex') {
             const error = `--verify is not available for ${runtime}; no config was written`;
             if (json)
                 emit({ runtime, action: 'verify', ok: false, verified: false, files: [], error });
@@ -714,7 +753,9 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
                 process.stderr.write(`${error}\n`);
             return 2;
         }
-        const verifyDescriptor = profileDescriptorFromFlag(f);
+        const verifyDescriptor = f['components'] === 'product-only'
+            ? { ok: true, descriptor: { manualHints: {} } }
+            : profileDescriptorFromFlag(f);
         if (!verifyDescriptor.ok) {
             if (json)
                 emit({ runtime, action: 'verify', ok: false, verified: false, files: [], error: verifyDescriptor.error });
@@ -724,13 +765,18 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
         }
         let verification;
         try {
-            const { server } = buildServer(f, verifyDescriptor.descriptor, deps.resolveMcpNodePath);
+            const built = buildServer(f, verifyDescriptor.descriptor, deps.resolveMcpNodePath);
+            const { server } = built;
             verification = installInjection(planInjection(runtime, server), {
+                components: runtime === 'claude-code' || runtime === 'codex' ? resolveInstallComponents(f['components']) : undefined,
                 configRoot,
                 server,
                 scope,
                 dryRun: true,
+                ...((runtime === 'claude-code' || runtime === 'codex') && f['components'] !== 'evolution-only'
+                    ? { productBridgeNodePath: built.nodePath ?? (deps.resolveMcpNodePath ?? resolveStableMcpNodePath)() } : {}),
                 homeDir: configuredHomeDir(),
+                codexHome: process.env['CODEX_HOME'],
                 kiroHome: process.env['KIRO_HOME'],
                 xdgConfigHome: process.env['XDG_CONFIG_HOME'],
                 opencodeConfig: process.env['OPENCODE_CONFIG'],
@@ -763,8 +809,8 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
                 : `evolver setup for ${runtime} is missing or does not match the requested configuration\n`);
         return verified ? 0 : 1;
     }
-    if (f['dry-run'] === true && runtime !== 'opencode' && runtime !== 'kiro') {
-        const error = `--dry-run is currently supported for opencode and kiro setup only; no config was written.`;
+    if (f['dry-run'] === true && runtime !== 'opencode' && runtime !== 'kiro' && runtime !== 'claude-code' && runtime !== 'codex') {
+        const error = `--dry-run is supported for claude-code, codex, opencode and kiro setup; no config was written.`;
         if (json)
             emit({ runtime, outcome: 'error', files: [], error });
         else
@@ -775,6 +821,7 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
         let r;
         try {
             r = uninstallInjection(runtime, {
+                components: runtime === 'claude-code' || runtime === 'codex' ? resolveInstallComponents(f['components']) : undefined,
                 configRoot,
                 scope,
                 homeDir: configuredHomeDir(),
@@ -817,7 +864,9 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
             process.stdout.write(files.length ? `removed evolver from: ${files.join(', ')}\n` : 'nothing to remove\n');
         return 0;
     }
-    const profileDescriptor = profileDescriptorFromFlag(f);
+    const profileDescriptor = f['components'] === 'product-only'
+        ? { ok: true, descriptor: { manualHints: {} } }
+        : profileDescriptorFromFlag(f);
     if (!profileDescriptor.ok) {
         if (json)
             emit({ runtime: runtimeRaw, outcome: 'error', files: [], error: profileDescriptor.error });
@@ -919,8 +968,8 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
     // cursor seeds .cursor/rules/evolver.mdc with the CURRENT top REVIEW-APPROVED genes so the file is useful
     // immediately (before the first daemon rewrite) without seeding an unapproved draft (A2a). The renderer thus
     // has a real production caller even without the daemon running.
-    const cursorStore = store ?? new assetstore.LocalJsonlProvider(events.assetsDir());
-    const cursorGenes = runtime === 'cursor'
+    const cursorStore = runtime === 'cursor' ? store ?? new assetstore.LocalJsonlProvider(events.assetsDir()) : undefined;
+    const cursorGenes = cursorStore
         ? await currentTopCursorGenes(cursorStore, review ?? reviewLedgerForStore(cursorStore))
         : undefined;
     let r;
@@ -929,10 +978,11 @@ export async function runSetupHooks(argv, store, review, deps = {}) {
         // It must not inherit a package-manager-local process.execPath (#1068): give it the same stable Node the
         // evolver entry uses — the pinned --server-node when set, otherwise the default stable resolution. Runtimes
         // without a bridge entry never resolve a Node here.
-        const productBridgeNodePath = (runtime === 'claude-code' || runtime === 'codex')
+        const productBridgeNodePath = (runtime === 'claude-code' || runtime === 'codex') && f['components'] !== 'evolution-only'
             ? serverNodePath ?? (deps.resolveMcpNodePath ?? resolveStableMcpNodePath)()
             : undefined;
         r = installInjection(planInjection(runtime, server), {
+            components: runtime === 'claude-code' || runtime === 'codex' ? resolveInstallComponents(f['components']) : undefined,
             configRoot, server, scope,
             ...(productBridgeNodePath !== undefined ? { productBridgeNodePath } : {}),
             ...(typeof f['hook-command'] === 'string' ? { hookCommand: f['hook-command'] } : {}),
