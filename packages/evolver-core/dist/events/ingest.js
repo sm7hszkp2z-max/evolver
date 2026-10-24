@@ -3,6 +3,7 @@ import { loadReferenceFence } from '../reference/store.js';
 import { basename, dirname, join } from 'node:path';
 import { EventStore, EventWriteNotCommittedError } from './eventStore.js';
 import { createIssueDraftForEventBestEffort } from '../issueReporter/index.js';
+import { DEFAULT_CONTEXT_PREPARATION_BUDGET_MS } from './boundedAudit.js';
 import { prepareContextDelivery, recoverContextDeliveries, contextDeliveryStatus, snapshotContextDelivery } from '../ops/geneContextDeliveryJournal.js';
 import { fitsRootEventLine } from './eventStore.js';
 import { readGeneContextDeliveryReceipt } from '../ops/geneContextDelivery.js';
@@ -125,14 +126,14 @@ export class Ingestor {
         return Ingestor.ingestBoundedReceipt(raw, { ...options, path: this.store.path, referenceScope: this.referenceScope });
     }
     static prepareContextDelivery(raw, opts) {
+        const deadlineAt = opts.deadlineAt ?? Date.now() + DEFAULT_CONTEXT_PREPARATION_BUDGET_MS;
         const snapshot = validatedPreparation(raw, opts.referenceScope);
         if (protectedAuditConfigured()) {
             const path = opts.path;
-            const deadlineAt = opts.deadlineAt ?? Date.now() + 30_000;
             const prepared = protectedAuditRpcSync('prepare_delivery', path, snapshot, { deadlineAt });
             return protectedPreparedDelivery(path, prepared.operationId);
         }
-        return prepareContextDelivery(snapshot, opts.path, projector(opts.referenceScope), opts);
+        return prepareContextDelivery(snapshot, opts.path, projector(opts.referenceScope), { ...opts, deadlineAt });
     }
     prepareContextDelivery(raw, options = {}) {
         return Ingestor.prepareContextDelivery(raw, { ...options, path: this.store.path, referenceScope: this.referenceScope });
@@ -141,13 +142,13 @@ export class Ingestor {
      * The returned confirmation/release capability retains the legacy sync semantics. */
     static async prepareContextDeliveryAsync(raw, opts) {
         const path = opts.path, referenceScope = opts.referenceScope;
-        const deadlineAt = opts.deadlineAt, signal = opts.signal;
+        const deadlineAt = opts.deadlineAt ?? Date.now() + DEFAULT_CONTEXT_PREPARATION_BUDGET_MS, signal = opts.signal;
         const snapshot = validatedPreparation(raw, referenceScope);
         if (protectedAuditConfigured()) {
-            const prepared = await protectedAuditRpc('prepare_delivery', path, snapshot, { deadlineAt: deadlineAt ?? Date.now() + 30_000, ...(signal ? { signal } : {}) });
+            const prepared = await protectedAuditRpc('prepare_delivery', path, snapshot, { deadlineAt, ...(signal ? { signal } : {}) });
             return protectedPreparedDelivery(path, prepared.operationId);
         }
-        return prepareContextDelivery(snapshot, path, projector(referenceScope), { ...(deadlineAt === undefined ? {} : { deadlineAt }), ...(signal ? { signal } : {}) });
+        return prepareContextDelivery(snapshot, path, projector(referenceScope), { deadlineAt, ...(signal ? { signal } : {}) });
     }
     prepareContextDeliveryAsync(raw, options = {}) {
         return Ingestor.prepareContextDeliveryAsync(raw, { ...options, path: this.store.path, referenceScope: this.referenceScope });

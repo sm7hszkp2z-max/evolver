@@ -28,7 +28,10 @@ export class LegacyAuthShim {
         this.onRotate = onRotate;
         this.onVersionUpdate = onVersionUpdate;
         this.onDiverged = onDiverged;
-        if (!nodeSecret || !isNodeSecret(nodeSecret))
+        // An absent secret is the enrollment state, not an error: a node with no credential yet, and one whose
+        // secret notifyNodeSecretDiverged just dropped, both hello unauthenticated so the hub can mint one.
+        // Rejecting it here would fence off the re-acquisition this class is written to perform.
+        if (nodeSecret !== undefined && !isNodeSecret(nodeSecret))
             throw new Error('node_secret 必须是 64-hex');
         this.nodeSecretVersion = parseNodeSecretVersion(initialNodeSecretVersion);
     }

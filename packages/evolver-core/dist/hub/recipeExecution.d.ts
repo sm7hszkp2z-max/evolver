@@ -7,546 +7,159 @@ export declare const recipeIpcBodyLimits: Readonly<{
 export type RecipeJson = null | boolean | number | string | RecipeJson[] | {
     [key: string]: RecipeJson;
 };
-export declare const recipeEvidenceSchema: z.ZodDiscriminatedUnion<"type", [z.ZodObject<{
+export declare const recipeEvidenceSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     artifacts: z.ZodArray<z.ZodObject<{
         name: z.ZodString;
         sha256: z.ZodString;
         bytes: z.ZodNumber;
-    }, "strict", z.ZodTypeAny, {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }, {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }>, "many">;
+    }, z.core.$strict>>;
     input_digest: z.ZodString;
     output_digest: z.ZodString;
     type: z.ZodLiteral<"artifact">;
-}, "strict", z.ZodTypeAny, {
-    type: "artifact";
-    artifacts: {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }[];
-    input_digest: string;
-    output_digest: string;
-}, {
-    type: "artifact";
-    artifacts: {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }[];
-    input_digest: string;
-    output_digest: string;
-}>, z.ZodObject<{
+}, z.core.$strict>, z.ZodObject<{
     artifacts: z.ZodArray<z.ZodObject<{
         name: z.ZodString;
         sha256: z.ZodString;
         bytes: z.ZodNumber;
-    }, "strict", z.ZodTypeAny, {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }, {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }>, "many">;
+    }, z.core.$strict>>;
     input_digest: z.ZodString;
     output_digest: z.ZodString;
     type: z.ZodLiteral<"tool_result">;
-}, "strict", z.ZodTypeAny, {
-    type: "tool_result";
-    artifacts: {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }[];
-    input_digest: string;
-    output_digest: string;
-}, {
-    type: "tool_result";
-    artifacts: {
-        sha256: string;
-        name: string;
-        bytes: number;
-    }[];
-    input_digest: string;
-    output_digest: string;
-}>, z.ZodObject<{
+}, z.core.$strict>, z.ZodObject<{
     input_digest: z.ZodString;
     output_digest: z.ZodString;
     type: z.ZodLiteral<"text_transform">;
-}, "strict", z.ZodTypeAny, {
-    type: "text_transform";
-    input_digest: string;
-    output_digest: string;
-}, {
-    type: "text_transform";
-    input_digest: string;
-    output_digest: string;
-}>, z.ZodObject<{
-    status: z.ZodEnum<["failed", "refused", "unsupported"]>;
+}, z.core.$strict>, z.ZodObject<{
+    status: z.ZodEnum<{
+        failed: "failed";
+        unsupported: "unsupported";
+        refused: "refused";
+    }>;
     reason: z.ZodString;
     input_digest: z.ZodString;
     output_digest: z.ZodString;
     type: z.ZodLiteral<"failure">;
-}, "strict", z.ZodTypeAny, {
-    type: "failure";
-    status: "failed" | "unsupported" | "refused";
-    reason: string;
-    input_digest: string;
-    output_digest: string;
-}, {
-    type: "failure";
-    status: "failed" | "unsupported" | "refused";
-    reason: string;
-    input_digest: string;
-    output_digest: string;
-}>]>;
+}, z.core.$strict>], "type">;
 export declare const recipeExecutionSchemas: {
     express: z.ZodObject<{
         recipeId: z.ZodString;
-        inputPayload: z.ZodOptional<z.ZodEffects<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>, RecipeJson, RecipeJson>>;
+        inputPayload: z.ZodOptional<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         requestKey: z.ZodString;
         maxCredits: z.ZodNumber;
-        executionMode: z.ZodEnum<["caller", "provider"]>;
+        executionMode: z.ZodEnum<{
+            provider: "provider";
+            caller: "caller";
+        }>;
         ttl: z.ZodOptional<z.ZodNumber>;
-    }, "strict", z.ZodTypeAny, {
-        recipeId: string;
-        requestKey: string;
-        maxCredits: number;
-        executionMode: "provider" | "caller";
-        inputPayload?: RecipeJson | undefined;
-        ttl?: number | undefined;
-    }, {
-        recipeId: string;
-        requestKey: string;
-        maxCredits: number;
-        executionMode: "provider" | "caller";
-        inputPayload?: RecipeJson | undefined;
-        ttl?: number | undefined;
-    }>;
+    }, z.core.$strict>;
     get: z.ZodObject<{
         organismId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        organismId: string;
-    }, {
-        organismId: string;
-    }>;
+    }, z.core.$strict>;
     list: z.ZodObject<{
-        role: z.ZodOptional<z.ZodEnum<["participant", "requester", "executor"]>>;
+        role: z.ZodOptional<z.ZodEnum<{
+            participant: "participant";
+            requester: "requester";
+            executor: "executor";
+        }>>;
         limit: z.ZodOptional<z.ZodNumber>;
         cursor: z.ZodOptional<z.ZodString>;
-    }, "strict", z.ZodTypeAny, {
-        cursor?: string | undefined;
-        limit?: number | undefined;
-        role?: "participant" | "requester" | "executor" | undefined;
-    }, {
-        cursor?: string | undefined;
-        limit?: number | undefined;
-        role?: "participant" | "requester" | "executor" | undefined;
-    }>;
+    }, z.core.$strict>;
     task: z.ZodObject<{
         taskId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        taskId: string;
-    }, {
-        taskId: string;
-    }>;
+    }, z.core.$strict>;
     claim: z.ZodObject<{
         leaseId: z.ZodString;
         organismId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        organismId: string;
-        leaseId: string;
-    }, {
-        organismId: string;
-        leaseId: string;
-    }>;
+    }, z.core.$strict>;
     next: z.ZodObject<{
         leaseId: z.ZodString;
         fence: z.ZodNumber;
         organismId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        organismId: string;
-        leaseId: string;
-        fence: number;
-    }, {
-        organismId: string;
-        leaseId: string;
-        fence: number;
-    }>;
+    }, z.core.$strict>;
     report: z.ZodObject<{
         position: z.ZodNumber;
         assetId: z.ZodString;
-        output: z.ZodEffects<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>, RecipeJson, RecipeJson>;
-        evidence: z.ZodDiscriminatedUnion<"type", [z.ZodObject<{
+        output: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        evidence: z.ZodDiscriminatedUnion<[z.ZodObject<{
             artifacts: z.ZodArray<z.ZodObject<{
                 name: z.ZodString;
                 sha256: z.ZodString;
                 bytes: z.ZodNumber;
-            }, "strict", z.ZodTypeAny, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }>, "many">;
+            }, z.core.$strict>>;
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"artifact">;
-        }, "strict", z.ZodTypeAny, {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }>, z.ZodObject<{
+        }, z.core.$strict>, z.ZodObject<{
             artifacts: z.ZodArray<z.ZodObject<{
                 name: z.ZodString;
                 sha256: z.ZodString;
                 bytes: z.ZodNumber;
-            }, "strict", z.ZodTypeAny, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }>, "many">;
+            }, z.core.$strict>>;
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"tool_result">;
-        }, "strict", z.ZodTypeAny, {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }>, z.ZodObject<{
+        }, z.core.$strict>, z.ZodObject<{
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"text_transform">;
-        }, "strict", z.ZodTypeAny, {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        }>, z.ZodObject<{
-            status: z.ZodEnum<["failed", "refused", "unsupported"]>;
+        }, z.core.$strict>, z.ZodObject<{
+            status: z.ZodEnum<{
+                failed: "failed";
+                unsupported: "unsupported";
+                refused: "refused";
+            }>;
             reason: z.ZodString;
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"failure">;
-        }, "strict", z.ZodTypeAny, {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        }>]>;
+        }, z.core.$strict>], "type">;
         requestKey: z.ZodString;
         leaseId: z.ZodString;
         fence: z.ZodNumber;
         organismId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        assetId: string;
-        output: RecipeJson;
-        evidence: {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        };
-        requestKey: string;
-        organismId: string;
-        leaseId: string;
-        fence: number;
-        position: number;
-    }, {
-        assetId: string;
-        output: RecipeJson;
-        evidence: {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        };
-        requestKey: string;
-        organismId: string;
-        leaseId: string;
-        fence: number;
-        position: number;
-    }>;
+    }, z.core.$strict>;
     finalize: z.ZodObject<{
-        output: z.ZodEffects<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>, RecipeJson, RecipeJson>;
-        evidence: z.ZodDiscriminatedUnion<"type", [z.ZodObject<{
+        output: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        evidence: z.ZodDiscriminatedUnion<[z.ZodObject<{
             artifacts: z.ZodArray<z.ZodObject<{
                 name: z.ZodString;
                 sha256: z.ZodString;
                 bytes: z.ZodNumber;
-            }, "strict", z.ZodTypeAny, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }>, "many">;
+            }, z.core.$strict>>;
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"artifact">;
-        }, "strict", z.ZodTypeAny, {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }>, z.ZodObject<{
+        }, z.core.$strict>, z.ZodObject<{
             artifacts: z.ZodArray<z.ZodObject<{
                 name: z.ZodString;
                 sha256: z.ZodString;
                 bytes: z.ZodNumber;
-            }, "strict", z.ZodTypeAny, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }, {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }>, "many">;
+            }, z.core.$strict>>;
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"tool_result">;
-        }, "strict", z.ZodTypeAny, {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        }>, z.ZodObject<{
+        }, z.core.$strict>, z.ZodObject<{
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"text_transform">;
-        }, "strict", z.ZodTypeAny, {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        }>, z.ZodObject<{
-            status: z.ZodEnum<["failed", "refused", "unsupported"]>;
+        }, z.core.$strict>, z.ZodObject<{
+            status: z.ZodEnum<{
+                failed: "failed";
+                unsupported: "unsupported";
+                refused: "refused";
+            }>;
             reason: z.ZodString;
             input_digest: z.ZodString;
             output_digest: z.ZodString;
             type: z.ZodLiteral<"failure">;
-        }, "strict", z.ZodTypeAny, {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        }, {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        }>]>;
+        }, z.core.$strict>], "type">;
         leaseId: z.ZodString;
         fence: z.ZodNumber;
         organismId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        output: RecipeJson;
-        evidence: {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        };
-        organismId: string;
-        leaseId: string;
-        fence: number;
-    }, {
-        output: RecipeJson;
-        evidence: {
-            type: "artifact";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "tool_result";
-            artifacts: {
-                sha256: string;
-                name: string;
-                bytes: number;
-            }[];
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "text_transform";
-            input_digest: string;
-            output_digest: string;
-        } | {
-            type: "failure";
-            status: "failed" | "unsupported" | "refused";
-            reason: string;
-            input_digest: string;
-            output_digest: string;
-        };
-        organismId: string;
-        leaseId: string;
-        fence: number;
-    }>;
+    }, z.core.$strict>;
     cancel: z.ZodObject<{
         organismId: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        organismId: string;
-    }, {
-        organismId: string;
-    }>;
+    }, z.core.$strict>;
 };
 export type RecipeExecutionOperation = keyof typeof recipeExecutionSchemas;
 export type RecipeExecutionInputs = {
@@ -569,10 +182,10 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
     billing_mode: z.ZodString;
     request_key: z.ZodNullable<z.ZodString>;
     cause_of_death: z.ZodNullable<z.ZodString>;
-    input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-    output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-    expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-    capsule_ids: z.ZodArray<z.ZodString, "many">;
+    input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+    output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+    expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+    capsule_ids: z.ZodArray<z.ZodString>;
     task_id: z.ZodNullable<z.ZodString>;
     bounty_id: z.ZodNullable<z.ZodString>;
     manifest: z.ZodNullable<z.ZodObject<{
@@ -582,107 +195,27 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
         ownerNodeId: z.ZodString;
         title: z.ZodString;
         price: z.ZodNumber;
-        inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+        inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         digest: z.ZodString;
         steps: z.ZodArray<z.ZodObject<{
             position: z.ZodNumber;
             geneAssetId: z.ZodString;
             assetType: z.ZodString;
             condition: z.ZodNullable<z.ZodString>;
-            parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             optional: z.ZodBoolean;
             fallbackGeneId: z.ZodNullable<z.ZodString>;
-        }, "strip", z.ZodTypeAny, {
-            geneAssetId: string;
-            assetType: string;
-            position: number;
-            condition: string | null;
-            parameters: RecipeJson;
-            optional: boolean;
-            fallbackGeneId: string | null;
-        }, {
-            geneAssetId: string;
-            assetType: string;
-            position: number;
-            condition: string | null;
-            parameters: RecipeJson;
-            optional: boolean;
-            fallbackGeneId: string | null;
-        }>, "many">;
+        }, z.core.$strip>>;
         assets: z.ZodRecord<z.ZodString, z.ZodObject<{
             assetId: z.ZodString;
             assetType: z.ZodString;
-            payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+            payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
             triggerText: z.ZodString;
             digest: z.ZodString;
-        }, "strip", z.ZodTypeAny, {
-            payload: RecipeJson;
-            digest: string;
-            assetId: string;
-            assetType: string;
-            triggerText: string;
-        }, {
-            payload: RecipeJson;
-            digest: string;
-            assetId: string;
-            assetType: string;
-            triggerText: string;
-        }>>;
-    }, "strip", z.ZodTypeAny, {
-        digest: string;
-        assets: Record<string, {
-            payload: RecipeJson;
-            digest: string;
-            assetId: string;
-            assetType: string;
-            triggerText: string;
-        }>;
-        version: number;
-        schema: "recipe_execution.v1";
-        title: string;
-        steps: {
-            geneAssetId: string;
-            assetType: string;
-            position: number;
-            condition: string | null;
-            parameters: RecipeJson;
-            optional: boolean;
-            fallbackGeneId: string | null;
-        }[];
-        recipeId: string;
-        ownerNodeId: string;
-        price: number;
-        inputSchema: RecipeJson;
-        outputSchema: RecipeJson;
-    }, {
-        digest: string;
-        assets: Record<string, {
-            payload: RecipeJson;
-            digest: string;
-            assetId: string;
-            assetType: string;
-            triggerText: string;
-        }>;
-        version: number;
-        schema: "recipe_execution.v1";
-        title: string;
-        steps: {
-            geneAssetId: string;
-            assetType: string;
-            position: number;
-            condition: string | null;
-            parameters: RecipeJson;
-            optional: boolean;
-            fallbackGeneId: string | null;
-        }[];
-        recipeId: string;
-        ownerNodeId: string;
-        price: number;
-        inputSchema: RecipeJson;
-        outputSchema: RecipeJson;
-    }>>;
-    completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
     execution_fence: z.ZodNumber;
     lease_expires_at: z.ZodNullable<z.ZodString>;
     assurance: z.ZodString;
@@ -690,154 +223,12 @@ export declare const recipePrivateExpressionSchema: z.ZodObject<{
         position: z.ZodNumber;
         asset_id: z.ZodString;
         status: z.ZodString;
-        output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+        output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         input_digest: z.ZodNullable<z.ZodString>;
         attempt: z.ZodNumber;
-    }, "strip", z.ZodTypeAny, {
-        status: string;
-        asset_id: string;
-        output: RecipeJson;
-        evidence: RecipeJson;
-        attempt: number;
-        input_digest: string | null;
-        position: number;
-    }, {
-        status: string;
-        asset_id: string;
-        output: RecipeJson;
-        evidence: RecipeJson;
-        attempt: number;
-        input_digest: string | null;
-        position: number;
-    }>, "many">>;
-}, "strip", z.ZodTypeAny, {
-    status: string;
-    id: string;
-    created_at: string;
-    bounty_id: string | null;
-    task_id: string | null;
-    lease_expires_at: string | null;
-    capsule_ids: string[];
-    ttl: number;
-    recipe_id: string;
-    born_at: string;
-    died_at: string | null;
-    total_duration: number | null;
-    genes_expressed: number;
-    genes_total_count: number;
-    requester_node_id: string | null;
-    executor_node_id: string | null;
-    execution_mode: string;
-    billing_mode: string;
-    request_key: string | null;
-    cause_of_death: string | null;
-    input_payload: RecipeJson;
-    output_payload: RecipeJson;
-    expression_log: RecipeJson;
-    manifest: {
-        digest: string;
-        assets: Record<string, {
-            payload: RecipeJson;
-            digest: string;
-            assetId: string;
-            assetType: string;
-            triggerText: string;
-        }>;
-        version: number;
-        schema: "recipe_execution.v1";
-        title: string;
-        steps: {
-            geneAssetId: string;
-            assetType: string;
-            position: number;
-            condition: string | null;
-            parameters: RecipeJson;
-            optional: boolean;
-            fallbackGeneId: string | null;
-        }[];
-        recipeId: string;
-        ownerNodeId: string;
-        price: number;
-        inputSchema: RecipeJson;
-        outputSchema: RecipeJson;
-    } | null;
-    completion_evidence: RecipeJson;
-    execution_fence: number;
-    assurance: string;
-    steps?: {
-        status: string;
-        asset_id: string;
-        output: RecipeJson;
-        evidence: RecipeJson;
-        attempt: number;
-        input_digest: string | null;
-        position: number;
-    }[] | undefined;
-}, {
-    status: string;
-    id: string;
-    created_at: string;
-    bounty_id: string | null;
-    task_id: string | null;
-    lease_expires_at: string | null;
-    capsule_ids: string[];
-    ttl: number;
-    recipe_id: string;
-    born_at: string;
-    died_at: string | null;
-    total_duration: number | null;
-    genes_expressed: number;
-    genes_total_count: number;
-    requester_node_id: string | null;
-    executor_node_id: string | null;
-    execution_mode: string;
-    billing_mode: string;
-    request_key: string | null;
-    cause_of_death: string | null;
-    input_payload: RecipeJson;
-    output_payload: RecipeJson;
-    expression_log: RecipeJson;
-    manifest: {
-        digest: string;
-        assets: Record<string, {
-            payload: RecipeJson;
-            digest: string;
-            assetId: string;
-            assetType: string;
-            triggerText: string;
-        }>;
-        version: number;
-        schema: "recipe_execution.v1";
-        title: string;
-        steps: {
-            geneAssetId: string;
-            assetType: string;
-            position: number;
-            condition: string | null;
-            parameters: RecipeJson;
-            optional: boolean;
-            fallbackGeneId: string | null;
-        }[];
-        recipeId: string;
-        ownerNodeId: string;
-        price: number;
-        inputSchema: RecipeJson;
-        outputSchema: RecipeJson;
-    } | null;
-    completion_evidence: RecipeJson;
-    execution_fence: number;
-    assurance: string;
-    steps?: {
-        status: string;
-        asset_id: string;
-        output: RecipeJson;
-        evidence: RecipeJson;
-        attempt: number;
-        input_digest: string | null;
-        position: number;
-    }[] | undefined;
-}>;
+    }, z.core.$strip>>>;
+}, z.core.$strip>;
 export declare const recipeExecutionResponses: {
     express: z.ZodObject<{
         status: z.ZodLiteral<"accepted">;
@@ -858,10 +249,10 @@ export declare const recipeExecutionResponses: {
             billing_mode: z.ZodString;
             request_key: z.ZodNullable<z.ZodString>;
             cause_of_death: z.ZodNullable<z.ZodString>;
-            input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-            capsule_ids: z.ZodArray<z.ZodString, "many">;
+            input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+            capsule_ids: z.ZodArray<z.ZodString>;
             task_id: z.ZodNullable<z.ZodString>;
             bounty_id: z.ZodNullable<z.ZodString>;
             manifest: z.ZodNullable<z.ZodObject<{
@@ -871,107 +262,27 @@ export declare const recipeExecutionResponses: {
                 ownerNodeId: z.ZodString;
                 title: z.ZodString;
                 price: z.ZodNumber;
-                inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-                outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+                outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 digest: z.ZodString;
                 steps: z.ZodArray<z.ZodObject<{
                     position: z.ZodNumber;
                     geneAssetId: z.ZodString;
                     assetType: z.ZodString;
                     condition: z.ZodNullable<z.ZodString>;
-                    parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                    parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                     optional: z.ZodBoolean;
                     fallbackGeneId: z.ZodNullable<z.ZodString>;
-                }, "strip", z.ZodTypeAny, {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }, {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }>, "many">;
+                }, z.core.$strip>>;
                 assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                     assetId: z.ZodString;
                     assetType: z.ZodString;
-                    payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                    payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                     triggerText: z.ZodString;
                     digest: z.ZodString;
-                }, "strip", z.ZodTypeAny, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>>;
-            }, "strip", z.ZodTypeAny, {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            }, {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            }>>;
-            completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                }, z.core.$strip>>;
+            }, z.core.$strip>>;
+            completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             execution_fence: z.ZodNumber;
             lease_expires_at: z.ZodNullable<z.ZodString>;
             assurance: z.ZodString;
@@ -979,287 +290,13 @@ export declare const recipeExecutionResponses: {
                 position: z.ZodNumber;
                 asset_id: z.ZodString;
                 status: z.ZodString;
-                output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-                evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+                evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 input_digest: z.ZodNullable<z.ZodString>;
                 attempt: z.ZodNumber;
-            }, "strip", z.ZodTypeAny, {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }, {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }>, "many">>;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        }, {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        }>;
-    }, "strip", z.ZodTypeAny, {
-        status: "accepted";
-        organism: {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        };
-    }, {
-        status: "accepted";
-        organism: {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        };
-    }>;
+            }, z.core.$strip>>>;
+        }, z.core.$strip>;
+    }, z.core.$strip>;
     get: z.ZodObject<{
         id: z.ZodString;
         recipe_id: z.ZodString;
@@ -1277,10 +314,10 @@ export declare const recipeExecutionResponses: {
         billing_mode: z.ZodString;
         request_key: z.ZodNullable<z.ZodString>;
         cause_of_death: z.ZodNullable<z.ZodString>;
-        input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-        capsule_ids: z.ZodArray<z.ZodString, "many">;
+        input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        capsule_ids: z.ZodArray<z.ZodString>;
         task_id: z.ZodNullable<z.ZodString>;
         bounty_id: z.ZodNullable<z.ZodString>;
         manifest: z.ZodNullable<z.ZodObject<{
@@ -1290,107 +327,27 @@ export declare const recipeExecutionResponses: {
             ownerNodeId: z.ZodString;
             title: z.ZodString;
             price: z.ZodNumber;
-            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             digest: z.ZodString;
             steps: z.ZodArray<z.ZodObject<{
                 position: z.ZodNumber;
                 geneAssetId: z.ZodString;
                 assetType: z.ZodString;
                 condition: z.ZodNullable<z.ZodString>;
-                parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
-            }, "strip", z.ZodTypeAny, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }>, "many">;
+            }, z.core.$strip>>;
             assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                 assetId: z.ZodString;
                 assetType: z.ZodString;
-                payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                 triggerText: z.ZodString;
                 digest: z.ZodString;
-            }, "strip", z.ZodTypeAny, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>>;
-        }, "strip", z.ZodTypeAny, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }>>;
-        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
+        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         execution_fence: z.ZodNumber;
         lease_expires_at: z.ZodNullable<z.ZodString>;
         assurance: z.ZodString;
@@ -1398,154 +355,12 @@ export declare const recipeExecutionResponses: {
             position: z.ZodNumber;
             asset_id: z.ZodString;
             status: z.ZodString;
-            output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             input_digest: z.ZodNullable<z.ZodString>;
             attempt: z.ZodNumber;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }>, "many">>;
-    }, "strip", z.ZodTypeAny, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>;
     list: z.ZodObject<{
         organisms: z.ZodArray<z.ZodObject<{
             id: z.ZodString;
@@ -1564,10 +379,10 @@ export declare const recipeExecutionResponses: {
             billing_mode: z.ZodString;
             request_key: z.ZodNullable<z.ZodString>;
             cause_of_death: z.ZodNullable<z.ZodString>;
-            input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-            capsule_ids: z.ZodArray<z.ZodString, "many">;
+            input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+            capsule_ids: z.ZodArray<z.ZodString>;
             task_id: z.ZodNullable<z.ZodString>;
             bounty_id: z.ZodNullable<z.ZodString>;
             manifest: z.ZodNullable<z.ZodObject<{
@@ -1577,107 +392,27 @@ export declare const recipeExecutionResponses: {
                 ownerNodeId: z.ZodString;
                 title: z.ZodString;
                 price: z.ZodNumber;
-                inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-                outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+                outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 digest: z.ZodString;
                 steps: z.ZodArray<z.ZodObject<{
                     position: z.ZodNumber;
                     geneAssetId: z.ZodString;
                     assetType: z.ZodString;
                     condition: z.ZodNullable<z.ZodString>;
-                    parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                    parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                     optional: z.ZodBoolean;
                     fallbackGeneId: z.ZodNullable<z.ZodString>;
-                }, "strip", z.ZodTypeAny, {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }, {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }>, "many">;
+                }, z.core.$strip>>;
                 assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                     assetId: z.ZodString;
                     assetType: z.ZodString;
-                    payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                    payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                     triggerText: z.ZodString;
                     digest: z.ZodString;
-                }, "strip", z.ZodTypeAny, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>>;
-            }, "strip", z.ZodTypeAny, {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            }, {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            }>>;
-            completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                }, z.core.$strip>>;
+            }, z.core.$strip>>;
+            completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             execution_fence: z.ZodNumber;
             lease_expires_at: z.ZodNullable<z.ZodString>;
             assurance: z.ZodString;
@@ -1685,288 +420,14 @@ export declare const recipeExecutionResponses: {
                 position: z.ZodNumber;
                 asset_id: z.ZodString;
                 status: z.ZodString;
-                output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-                evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+                evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 input_digest: z.ZodNullable<z.ZodString>;
                 attempt: z.ZodNumber;
-            }, "strip", z.ZodTypeAny, {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }, {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }>, "many">>;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        }, {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        }>, "many">;
+            }, z.core.$strip>>>;
+        }, z.core.$strip>>;
         next_cursor: z.ZodNullable<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        next_cursor: string | null;
-        organisms: {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        }[];
-    }, {
-        next_cursor: string | null;
-        organisms: {
-            status: string;
-            id: string;
-            created_at: string;
-            bounty_id: string | null;
-            task_id: string | null;
-            lease_expires_at: string | null;
-            capsule_ids: string[];
-            ttl: number;
-            recipe_id: string;
-            born_at: string;
-            died_at: string | null;
-            total_duration: number | null;
-            genes_expressed: number;
-            genes_total_count: number;
-            requester_node_id: string | null;
-            executor_node_id: string | null;
-            execution_mode: string;
-            billing_mode: string;
-            request_key: string | null;
-            cause_of_death: string | null;
-            input_payload: RecipeJson;
-            output_payload: RecipeJson;
-            expression_log: RecipeJson;
-            manifest: {
-                digest: string;
-                assets: Record<string, {
-                    payload: RecipeJson;
-                    digest: string;
-                    assetId: string;
-                    assetType: string;
-                    triggerText: string;
-                }>;
-                version: number;
-                schema: "recipe_execution.v1";
-                title: string;
-                steps: {
-                    geneAssetId: string;
-                    assetType: string;
-                    position: number;
-                    condition: string | null;
-                    parameters: RecipeJson;
-                    optional: boolean;
-                    fallbackGeneId: string | null;
-                }[];
-                recipeId: string;
-                ownerNodeId: string;
-                price: number;
-                inputSchema: RecipeJson;
-                outputSchema: RecipeJson;
-            } | null;
-            completion_evidence: RecipeJson;
-            execution_fence: number;
-            assurance: string;
-            steps?: {
-                status: string;
-                asset_id: string;
-                output: RecipeJson;
-                evidence: RecipeJson;
-                attempt: number;
-                input_digest: string | null;
-                position: number;
-            }[] | undefined;
-        }[];
-    }>;
+    }, z.core.$strip>;
     task: z.ZodNullable<z.ZodObject<{
         id: z.ZodString;
         recipe_id: z.ZodString;
@@ -1984,10 +445,10 @@ export declare const recipeExecutionResponses: {
         billing_mode: z.ZodString;
         request_key: z.ZodNullable<z.ZodString>;
         cause_of_death: z.ZodNullable<z.ZodString>;
-        input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-        capsule_ids: z.ZodArray<z.ZodString, "many">;
+        input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        capsule_ids: z.ZodArray<z.ZodString>;
         task_id: z.ZodNullable<z.ZodString>;
         bounty_id: z.ZodNullable<z.ZodString>;
         manifest: z.ZodNullable<z.ZodObject<{
@@ -1997,107 +458,27 @@ export declare const recipeExecutionResponses: {
             ownerNodeId: z.ZodString;
             title: z.ZodString;
             price: z.ZodNumber;
-            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             digest: z.ZodString;
             steps: z.ZodArray<z.ZodObject<{
                 position: z.ZodNumber;
                 geneAssetId: z.ZodString;
                 assetType: z.ZodString;
                 condition: z.ZodNullable<z.ZodString>;
-                parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
-            }, "strip", z.ZodTypeAny, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }>, "many">;
+            }, z.core.$strip>>;
             assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                 assetId: z.ZodString;
                 assetType: z.ZodString;
-                payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                 triggerText: z.ZodString;
                 digest: z.ZodString;
-            }, "strip", z.ZodTypeAny, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>>;
-        }, "strip", z.ZodTypeAny, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }>>;
-        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
+        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         execution_fence: z.ZodNumber;
         lease_expires_at: z.ZodNullable<z.ZodString>;
         assurance: z.ZodString;
@@ -2105,222 +486,36 @@ export declare const recipeExecutionResponses: {
             position: z.ZodNumber;
             asset_id: z.ZodString;
             status: z.ZodString;
-            output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             input_digest: z.ZodNullable<z.ZodString>;
             attempt: z.ZodNumber;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }>, "many">>;
-    }, "strip", z.ZodTypeAny, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }>>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>>;
     claim: z.ZodObject<{
         organism_id: z.ZodString;
         lease_id: z.ZodString;
         fence: z.ZodNumber;
         lease_expires_at: z.ZodString;
-    }, "strip", z.ZodTypeAny, {
-        lease_id: string;
-        lease_expires_at: string;
-        fence: number;
-        organism_id: string;
-    }, {
-        lease_id: string;
-        lease_expires_at: string;
-        fence: number;
-        organism_id: string;
-    }>;
-    next: z.ZodDiscriminatedUnion<"done", [z.ZodObject<{
+    }, z.core.$strip>;
+    next: z.ZodDiscriminatedUnion<[z.ZodObject<{
         organism_id: z.ZodString;
         done: z.ZodLiteral<true>;
         finalization_input_digest: z.ZodString;
-        output_schema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-    }, "strip", z.ZodTypeAny, {
-        done: true;
-        organism_id: string;
-        finalization_input_digest: string;
-        output_schema: RecipeJson;
-    }, {
-        done: true;
-        organism_id: string;
-        finalization_input_digest: string;
-        output_schema: RecipeJson;
-    }>, z.ZodObject<{
+        output_schema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+    }, z.core.$strip>, z.ZodObject<{
         organism_id: z.ZodString;
         done: z.ZodLiteral<false>;
         position: z.ZodNumber;
         asset_id: z.ZodString;
         asset_type: z.ZodString;
-        asset_payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-        input: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+        asset_payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        input: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
         input_digest: z.ZodString;
         optional: z.ZodBoolean;
         fence: z.ZodNumber;
         assurance: z.ZodLiteral<"executor_reported">;
-    }, "strip", z.ZodTypeAny, {
-        asset_id: string;
-        asset_type: string;
-        done: false;
-        input: RecipeJson;
-        input_digest: string;
-        fence: number;
-        position: number;
-        optional: boolean;
-        assurance: "executor_reported";
-        organism_id: string;
-        asset_payload: RecipeJson;
-    }, {
-        asset_id: string;
-        asset_type: string;
-        done: false;
-        input: RecipeJson;
-        input_digest: string;
-        fence: number;
-        position: number;
-        optional: boolean;
-        assurance: "executor_reported";
-        organism_id: string;
-        asset_payload: RecipeJson;
-    }>]>;
+    }, z.core.$strip>], "done">;
     report: z.ZodObject<{
         id: z.ZodString;
         recipe_id: z.ZodString;
@@ -2338,10 +533,10 @@ export declare const recipeExecutionResponses: {
         billing_mode: z.ZodString;
         request_key: z.ZodNullable<z.ZodString>;
         cause_of_death: z.ZodNullable<z.ZodString>;
-        input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-        capsule_ids: z.ZodArray<z.ZodString, "many">;
+        input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        capsule_ids: z.ZodArray<z.ZodString>;
         task_id: z.ZodNullable<z.ZodString>;
         bounty_id: z.ZodNullable<z.ZodString>;
         manifest: z.ZodNullable<z.ZodObject<{
@@ -2351,107 +546,27 @@ export declare const recipeExecutionResponses: {
             ownerNodeId: z.ZodString;
             title: z.ZodString;
             price: z.ZodNumber;
-            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             digest: z.ZodString;
             steps: z.ZodArray<z.ZodObject<{
                 position: z.ZodNumber;
                 geneAssetId: z.ZodString;
                 assetType: z.ZodString;
                 condition: z.ZodNullable<z.ZodString>;
-                parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
-            }, "strip", z.ZodTypeAny, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }>, "many">;
+            }, z.core.$strip>>;
             assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                 assetId: z.ZodString;
                 assetType: z.ZodString;
-                payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                 triggerText: z.ZodString;
                 digest: z.ZodString;
-            }, "strip", z.ZodTypeAny, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>>;
-        }, "strip", z.ZodTypeAny, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }>>;
-        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
+        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         execution_fence: z.ZodNumber;
         lease_expires_at: z.ZodNullable<z.ZodString>;
         assurance: z.ZodString;
@@ -2459,154 +574,12 @@ export declare const recipeExecutionResponses: {
             position: z.ZodNumber;
             asset_id: z.ZodString;
             status: z.ZodString;
-            output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             input_digest: z.ZodNullable<z.ZodString>;
             attempt: z.ZodNumber;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }>, "many">>;
-    }, "strip", z.ZodTypeAny, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>;
     finalize: z.ZodObject<{
         id: z.ZodString;
         recipe_id: z.ZodString;
@@ -2624,10 +597,10 @@ export declare const recipeExecutionResponses: {
         billing_mode: z.ZodString;
         request_key: z.ZodNullable<z.ZodString>;
         cause_of_death: z.ZodNullable<z.ZodString>;
-        input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-        capsule_ids: z.ZodArray<z.ZodString, "many">;
+        input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        capsule_ids: z.ZodArray<z.ZodString>;
         task_id: z.ZodNullable<z.ZodString>;
         bounty_id: z.ZodNullable<z.ZodString>;
         manifest: z.ZodNullable<z.ZodObject<{
@@ -2637,107 +610,27 @@ export declare const recipeExecutionResponses: {
             ownerNodeId: z.ZodString;
             title: z.ZodString;
             price: z.ZodNumber;
-            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             digest: z.ZodString;
             steps: z.ZodArray<z.ZodObject<{
                 position: z.ZodNumber;
                 geneAssetId: z.ZodString;
                 assetType: z.ZodString;
                 condition: z.ZodNullable<z.ZodString>;
-                parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
-            }, "strip", z.ZodTypeAny, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }>, "many">;
+            }, z.core.$strip>>;
             assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                 assetId: z.ZodString;
                 assetType: z.ZodString;
-                payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                 triggerText: z.ZodString;
                 digest: z.ZodString;
-            }, "strip", z.ZodTypeAny, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>>;
-        }, "strip", z.ZodTypeAny, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }>>;
-        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
+        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         execution_fence: z.ZodNumber;
         lease_expires_at: z.ZodNullable<z.ZodString>;
         assurance: z.ZodString;
@@ -2745,154 +638,12 @@ export declare const recipeExecutionResponses: {
             position: z.ZodNumber;
             asset_id: z.ZodString;
             status: z.ZodString;
-            output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             input_digest: z.ZodNullable<z.ZodString>;
             attempt: z.ZodNumber;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }>, "many">>;
-    }, "strip", z.ZodTypeAny, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>;
     cancel: z.ZodObject<{
         id: z.ZodString;
         recipe_id: z.ZodString;
@@ -2910,10 +661,10 @@ export declare const recipeExecutionResponses: {
         billing_mode: z.ZodString;
         request_key: z.ZodNullable<z.ZodString>;
         cause_of_death: z.ZodNullable<z.ZodString>;
-        input_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        output_payload: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-        expression_log: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
-        capsule_ids: z.ZodArray<z.ZodString, "many">;
+        input_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        output_payload: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+        expression_log: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
+        capsule_ids: z.ZodArray<z.ZodString>;
         task_id: z.ZodNullable<z.ZodString>;
         bounty_id: z.ZodNullable<z.ZodString>;
         manifest: z.ZodNullable<z.ZodObject<{
@@ -2923,107 +674,27 @@ export declare const recipeExecutionResponses: {
             ownerNodeId: z.ZodString;
             title: z.ZodString;
             price: z.ZodNumber;
-            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            inputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            outputSchema: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             digest: z.ZodString;
             steps: z.ZodArray<z.ZodObject<{
                 position: z.ZodNumber;
                 geneAssetId: z.ZodString;
                 assetType: z.ZodString;
                 condition: z.ZodNullable<z.ZodString>;
-                parameters: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+                parameters: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
                 optional: z.ZodBoolean;
                 fallbackGeneId: z.ZodNullable<z.ZodString>;
-            }, "strip", z.ZodTypeAny, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }, {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }>, "many">;
+            }, z.core.$strip>>;
             assets: z.ZodRecord<z.ZodString, z.ZodObject<{
                 assetId: z.ZodString;
                 assetType: z.ZodString;
-                payload: z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>;
+                payload: z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>;
                 triggerText: z.ZodString;
                 digest: z.ZodString;
-            }, "strip", z.ZodTypeAny, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>>;
-        }, "strip", z.ZodTypeAny, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }, {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        }>>;
-        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            }, z.core.$strip>>;
+        }, z.core.$strip>>;
+        completion_evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
         execution_fence: z.ZodNumber;
         lease_expires_at: z.ZodNullable<z.ZodString>;
         assurance: z.ZodString;
@@ -3031,154 +702,12 @@ export declare const recipeExecutionResponses: {
             position: z.ZodNumber;
             asset_id: z.ZodString;
             status: z.ZodString;
-            output: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
-            evidence: z.ZodNullable<z.ZodType<RecipeJson, z.ZodTypeDef, RecipeJson>>;
+            output: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
+            evidence: z.ZodNullable<z.ZodType<RecipeJson, unknown, z.core.$ZodTypeInternals<RecipeJson, unknown>>>;
             input_digest: z.ZodNullable<z.ZodString>;
             attempt: z.ZodNumber;
-        }, "strip", z.ZodTypeAny, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }, {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }>, "many">>;
-    }, "strip", z.ZodTypeAny, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }, {
-        status: string;
-        id: string;
-        created_at: string;
-        bounty_id: string | null;
-        task_id: string | null;
-        lease_expires_at: string | null;
-        capsule_ids: string[];
-        ttl: number;
-        recipe_id: string;
-        born_at: string;
-        died_at: string | null;
-        total_duration: number | null;
-        genes_expressed: number;
-        genes_total_count: number;
-        requester_node_id: string | null;
-        executor_node_id: string | null;
-        execution_mode: string;
-        billing_mode: string;
-        request_key: string | null;
-        cause_of_death: string | null;
-        input_payload: RecipeJson;
-        output_payload: RecipeJson;
-        expression_log: RecipeJson;
-        manifest: {
-            digest: string;
-            assets: Record<string, {
-                payload: RecipeJson;
-                digest: string;
-                assetId: string;
-                assetType: string;
-                triggerText: string;
-            }>;
-            version: number;
-            schema: "recipe_execution.v1";
-            title: string;
-            steps: {
-                geneAssetId: string;
-                assetType: string;
-                position: number;
-                condition: string | null;
-                parameters: RecipeJson;
-                optional: boolean;
-                fallbackGeneId: string | null;
-            }[];
-            recipeId: string;
-            ownerNodeId: string;
-            price: number;
-            inputSchema: RecipeJson;
-            outputSchema: RecipeJson;
-        } | null;
-        completion_evidence: RecipeJson;
-        execution_fence: number;
-        assurance: string;
-        steps?: {
-            status: string;
-            asset_id: string;
-            output: RecipeJson;
-            evidence: RecipeJson;
-            attempt: number;
-            input_digest: string | null;
-            position: number;
-        }[] | undefined;
-    }>;
+        }, z.core.$strip>>>;
+    }, z.core.$strip>;
 };
 export type RecipeExecutionOutputs = {
     [K in RecipeExecutionOperation]: z.infer<typeof recipeExecutionResponses[K]>;

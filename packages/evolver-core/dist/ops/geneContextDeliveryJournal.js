@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { canonicalEventPath } from '../util/canonicalEventPath.js';
 import { openSqliteDatabase } from '../util/sqlite.js';
 import { AuditBudget } from '../events/boundedAudit.js';
@@ -133,13 +134,14 @@ function database(owner, path, run, binding, readonly = false, initialize = fals
                 db.exec('PRAGMA synchronous=FULL; PRAGMA max_page_count=8192;');
             finishOpen?.('fulfilled');
             const finishTransaction = initialize ? startContextReadStage('delivery_journal_transaction') : undefined;
+            const timing = finishTransaction ? {} : undefined;
             try {
-                const result = run(db);
-                finishTransaction?.('fulfilled');
+                const result = run(db, timing);
+                finishTransaction?.('fulfilled', undefined, timing);
                 return result;
             }
             catch (error) {
-                finishTransaction?.('rejected');
+                finishTransaction?.('rejected', undefined, timing);
                 throw error;
             }
         }
@@ -165,16 +167,37 @@ function database(owner, path, run, binding, readonly = false, initialize = fals
         throw error;
     }
 }
-function transaction(db, run) {
-    db.exec('BEGIN IMMEDIATE');
+function transaction(db, run, timing) {
+    // Only the opt-in initial preparation supplies timing. Confirmation/recovery
+    // retains the same transaction, with no additional collector stages or I/O.
+    const step = (part, action) => {
+        if (!timing)
+            return action();
+        const started = performance.now();
+        let outcome = 'fulfilled';
+        try {
+            return action();
+        }
+        catch (error) {
+            outcome = 'rejected';
+            throw error;
+        }
+        finally {
+            try {
+                timing[part] = [Math.round(Math.max(0, performance.now() - started) * 100) / 100, outcome];
+            }
+            catch { /* Timing cannot replace an actual transaction outcome. */ }
+        }
+    };
+    step('begin', () => db.exec('BEGIN IMMEDIATE'));
     try {
-        const result = run();
-        db.exec('COMMIT');
+        const result = step('body', run);
+        step('commit', () => db.exec('COMMIT'));
         return result;
     }
     catch (error) {
         try {
-            db.exec('ROLLBACK');
+            step('rollback', () => db.exec('ROLLBACK'));
         }
         catch { /* database cleanup remains owned */ }
         throw error;
@@ -277,7 +300,7 @@ async function projectOwned(owner, project, options) {
 }
 /** Called only after Ingestor validation. No event-log writes happen in the outbox. */
 export function prepareContextDelivery(raw, path, project, options = {}) {
-    const budget = new AuditBudget(options);
+    const budget = new AuditBudget(options, 'context_preparation');
     budget.check();
     const owner = reserveOwner();
     try {
@@ -296,44 +319,47 @@ export function prepareContextDelivery(raw, path, project, options = {}) {
             if (!missing(error))
                 throw error;
         }
-        const binding = database(owner, journal, db => transaction(db, () => {
-            validateNamespace(db, journal, true);
-            db.exec(`CREATE TABLE IF NOT EXISTS context_delivery_instance (id INTEGER PRIMARY KEY CHECK(id=1), instance TEXT NOT NULL, target TEXT NOT NULL, parent_identity TEXT NOT NULL, journal_identity TEXT NOT NULL);
+        const binding = database(owner, journal, (db, timing) => {
+            budget.check();
+            return transaction(db, () => {
+                validateNamespace(db, journal, true);
+                db.exec(`CREATE TABLE IF NOT EXISTS context_delivery_instance (id INTEGER PRIMARY KEY CHECK(id=1), instance TEXT NOT NULL, target TEXT NOT NULL, parent_identity TEXT NOT NULL, journal_identity TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS context_deliveries (operation_id TEXT PRIMARY KEY, state TEXT NOT NULL, raw TEXT NOT NULL,
           target_identity TEXT, plan TEXT, created INTEGER NOT NULL, turn INTEGER NOT NULL, owner_pid INTEGER NOT NULL, reason TEXT);
         CREATE INDEX IF NOT EXISTS context_delivery_turn ON context_deliveries(turn);`);
-            if (!db.prepare('SELECT instance FROM context_delivery_instance WHERE id=1').get())
-                db.prepare('INSERT INTO context_delivery_instance VALUES(1,?,?,?,?)').run(randomUUID(), path, identity(lstatSync(dirname(path))), privateFile(journal));
-            // Terminal metadata is compactable; ambiguous rows are never evicted to make output admissible.
-            const live = new Set([...owners].map(item => item.id));
-            const old = db.prepare("SELECT operation_id, owner_pid FROM context_deliveries WHERE state='projected' ORDER BY turn DESC LIMIT -1 OFFSET 256").all();
-            for (const row of old) {
-                if (live.has(String(row['operation_id'])))
-                    continue;
-                const pid = Number(row['owner_pid']);
-                if (!Number.isSafeInteger(pid) || pid < 1)
-                    continue;
-                if (pid !== process.pid) {
-                    // PID reuse/live or unverifiable foreign owners are conservatively retained.
-                    // Only a dead process proves its actual OS handles can no longer be active.
-                    try {
-                        process.kill(pid, 0);
+                if (!db.prepare('SELECT instance FROM context_delivery_instance WHERE id=1').get())
+                    db.prepare('INSERT INTO context_delivery_instance VALUES(1,?,?,?,?)').run(randomUUID(), path, identity(lstatSync(dirname(path))), privateFile(journal));
+                // Terminal metadata is compactable; ambiguous rows are never evicted to make output admissible.
+                const live = new Set([...owners].map(item => item.id));
+                const old = db.prepare("SELECT operation_id, owner_pid FROM context_deliveries WHERE state='projected' ORDER BY turn DESC LIMIT -1 OFFSET 256").all();
+                for (const row of old) {
+                    if (live.has(String(row['operation_id'])))
                         continue;
-                    }
-                    catch (error) {
-                        if (error.code !== 'ESRCH')
+                    const pid = Number(row['owner_pid']);
+                    if (!Number.isSafeInteger(pid) || pid < 1)
+                        continue;
+                    if (pid !== process.pid) {
+                        // PID reuse/live or unverifiable foreign owners are conservatively retained.
+                        // Only a dead process proves its actual OS handles can no longer be active.
+                        try {
+                            process.kill(pid, 0);
                             continue;
+                        }
+                        catch (error) {
+                            if (error.code !== 'ESRCH')
+                                continue;
+                        }
                     }
+                    db.prepare("DELETE FROM context_deliveries WHERE operation_id=? AND state='projected'").run(row['operation_id']);
                 }
-                db.prepare("DELETE FROM context_deliveries WHERE operation_id=? AND state='projected'").run(row['operation_id']);
-            }
-            if (Number(db.prepare('SELECT count(*) AS n FROM context_deliveries').get()?.['n']) >= MAX_ROWS)
-                throw new Error('context_delivery_capacity');
-            budget.check();
-            const turn = Number(db.prepare('SELECT coalesce(max(turn),0)+1 AS n FROM context_deliveries').get()?.['n']);
-            db.prepare("INSERT INTO context_deliveries VALUES (?, 'prepared', ?, ?, NULL, ?, ?, ?, 'output_unconfirmed')").run(id, JSON.stringify(snapshot), targetIdentity, Date.now(), turn, process.pid);
-            return { path, journal, identity: privateFile(journal), instance: String(db.prepare('SELECT instance FROM context_delivery_instance WHERE id=1').get()?.['instance']) };
-        }), undefined, false, true);
+                if (Number(db.prepare('SELECT count(*) AS n FROM context_deliveries').get()?.['n']) >= MAX_ROWS)
+                    throw new Error('context_delivery_capacity');
+                budget.check();
+                const turn = Number(db.prepare('SELECT coalesce(max(turn),0)+1 AS n FROM context_deliveries').get()?.['n']);
+                db.prepare("INSERT INTO context_deliveries VALUES (?, 'prepared', ?, ?, NULL, ?, ?, ?, 'output_unconfirmed')").run(id, JSON.stringify(snapshot), targetIdentity, Date.now(), turn, process.pid);
+                return { path, journal, identity: privateFile(journal), instance: String(db.prepare('SELECT instance FROM context_delivery_instance WHERE id=1').get()?.['instance']) };
+            }, timing);
+        }, undefined, false, true);
         owner.binding = binding;
         owner.id = id;
         owner.outputPending = true;

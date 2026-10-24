@@ -1,9 +1,9 @@
-import { contextDeliveryRejectionCode, startContextReadStage } from '@evomap/evolver-core/prompt-recall';
+import { DEFAULT_CONTEXT_PREPARATION_BUDGET_MS, contextDeliveryRejectionCode, startContextReadStage } from '@evomap/evolver-core/prompt-recall';
 import { waitContextDelivery, writeHookStdout } from './promptRecallShared.js';
 export { waitContextDelivery } from './promptRecallShared.js';
 /** Both production context entrypoints share the same prepare -> actual callback -> projection protocol. */
 export async function deliverContextOutput(options) {
-    const deadlineAt = Date.now() + 200;
+    const deadlineAt = Date.now() + DEFAULT_CONTEXT_PREPARATION_BUDGET_MS;
     const finishPreparation = startContextReadStage('delivery_prepare');
     let failureCode = 'timeout';
     const { text, prepare, stdout, stdoutWithSettlement, onOutputWritten } = options;

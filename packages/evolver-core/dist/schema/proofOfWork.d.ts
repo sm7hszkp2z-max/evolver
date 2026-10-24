@@ -1,185 +1,50 @@
 import { z } from 'zod';
 export declare const proofOfWork: z.ZodObject<{
-    kind: z.ZodEnum<["git_diff", "artifact_hash", "external_receipt", "tool_call_trace"]>;
+    kind: z.ZodEnum<{
+        git_diff: "git_diff";
+        artifact_hash: "artifact_hash";
+        external_receipt: "external_receipt";
+        tool_call_trace: "tool_call_trace";
+    }>;
     git_diff: z.ZodOptional<z.ZodObject<{
         files: z.ZodOptional<z.ZodNumber>;
         lines: z.ZodOptional<z.ZodNumber>;
         patch_ref: z.ZodOptional<z.ZodString>;
-    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
-        files: z.ZodOptional<z.ZodNumber>;
-        lines: z.ZodOptional<z.ZodNumber>;
-        patch_ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
-        files: z.ZodOptional<z.ZodNumber>;
-        lines: z.ZodOptional<z.ZodNumber>;
-        patch_ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough">>>;
+    }, z.core.$loose>>;
     artifact_hash: z.ZodOptional<z.ZodObject<{
         sha256: z.ZodOptional<z.ZodString>;
         mime: z.ZodOptional<z.ZodString>;
         size: z.ZodOptional<z.ZodNumber>;
-    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
-        sha256: z.ZodOptional<z.ZodString>;
-        mime: z.ZodOptional<z.ZodString>;
-        size: z.ZodOptional<z.ZodNumber>;
-    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
-        sha256: z.ZodOptional<z.ZodString>;
-        mime: z.ZodOptional<z.ZodString>;
-        size: z.ZodOptional<z.ZodNumber>;
-    }, z.ZodTypeAny, "passthrough">>>;
+    }, z.core.$loose>>;
     external_receipt: z.ZodOptional<z.ZodObject<{
         provider: z.ZodOptional<z.ZodString>;
         receipt_id: z.ZodOptional<z.ZodString>;
         ts: z.ZodOptional<z.ZodString>;
-    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
-        provider: z.ZodOptional<z.ZodString>;
-        receipt_id: z.ZodOptional<z.ZodString>;
-        ts: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
-        provider: z.ZodOptional<z.ZodString>;
-        receipt_id: z.ZodOptional<z.ZodString>;
-        ts: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough">>>;
+    }, z.core.$loose>>;
     tool_call_trace: z.ZodOptional<z.ZodObject<{
         calls: z.ZodOptional<z.ZodNumber>;
         ref: z.ZodOptional<z.ZodString>;
-    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
-        calls: z.ZodOptional<z.ZodNumber>;
-        ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
-        calls: z.ZodOptional<z.ZodNumber>;
-        ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough">>>;
+    }, z.core.$loose>>;
     gitDiff: z.ZodOptional<z.ZodObject<{
         files: z.ZodNumber;
         lines: z.ZodNumber;
         patchRef: z.ZodOptional<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        files: number;
-        lines: number;
-        patchRef?: string | undefined;
-    }, {
-        files: number;
-        lines: number;
-        patchRef?: string | undefined;
-    }>>;
+    }, z.core.$strip>>;
     artifactHash: z.ZodOptional<z.ZodObject<{
         sha256: z.ZodString;
         mime: z.ZodOptional<z.ZodString>;
         size: z.ZodNumber;
-    }, "strip", z.ZodTypeAny, {
-        sha256: string;
-        size: number;
-        mime?: string | undefined;
-    }, {
-        sha256: string;
-        size: number;
-        mime?: string | undefined;
-    }>>;
+    }, z.core.$strip>>;
     externalReceipt: z.ZodOptional<z.ZodObject<{
         provider: z.ZodString;
         receiptId: z.ZodString;
         ts: z.ZodString;
-    }, "strip", z.ZodTypeAny, {
-        provider: string;
-        ts: string;
-        receiptId: string;
-    }, {
-        provider: string;
-        ts: string;
-        receiptId: string;
-    }>>;
+    }, z.core.$strip>>;
     toolCallTrace: z.ZodOptional<z.ZodObject<{
         calls: z.ZodNumber;
         ref: z.ZodOptional<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        calls: number;
-        ref?: string | undefined;
-    }, {
-        calls: number;
-        ref?: string | undefined;
-    }>>;
-}, "strip", z.ZodTypeAny, {
-    kind: "git_diff" | "artifact_hash" | "external_receipt" | "tool_call_trace";
-    git_diff?: z.objectOutputType<{
-        files: z.ZodOptional<z.ZodNumber>;
-        lines: z.ZodOptional<z.ZodNumber>;
-        patch_ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    artifact_hash?: z.objectOutputType<{
-        sha256: z.ZodOptional<z.ZodString>;
-        mime: z.ZodOptional<z.ZodString>;
-        size: z.ZodOptional<z.ZodNumber>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    external_receipt?: z.objectOutputType<{
-        provider: z.ZodOptional<z.ZodString>;
-        receipt_id: z.ZodOptional<z.ZodString>;
-        ts: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    tool_call_trace?: z.objectOutputType<{
-        calls: z.ZodOptional<z.ZodNumber>;
-        ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    gitDiff?: {
-        files: number;
-        lines: number;
-        patchRef?: string | undefined;
-    } | undefined;
-    artifactHash?: {
-        sha256: string;
-        size: number;
-        mime?: string | undefined;
-    } | undefined;
-    externalReceipt?: {
-        provider: string;
-        ts: string;
-        receiptId: string;
-    } | undefined;
-    toolCallTrace?: {
-        calls: number;
-        ref?: string | undefined;
-    } | undefined;
-}, {
-    kind: "git_diff" | "artifact_hash" | "external_receipt" | "tool_call_trace";
-    git_diff?: z.objectInputType<{
-        files: z.ZodOptional<z.ZodNumber>;
-        lines: z.ZodOptional<z.ZodNumber>;
-        patch_ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    artifact_hash?: z.objectInputType<{
-        sha256: z.ZodOptional<z.ZodString>;
-        mime: z.ZodOptional<z.ZodString>;
-        size: z.ZodOptional<z.ZodNumber>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    external_receipt?: z.objectInputType<{
-        provider: z.ZodOptional<z.ZodString>;
-        receipt_id: z.ZodOptional<z.ZodString>;
-        ts: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    tool_call_trace?: z.objectInputType<{
-        calls: z.ZodOptional<z.ZodNumber>;
-        ref: z.ZodOptional<z.ZodString>;
-    }, z.ZodTypeAny, "passthrough"> | undefined;
-    gitDiff?: {
-        files: number;
-        lines: number;
-        patchRef?: string | undefined;
-    } | undefined;
-    artifactHash?: {
-        sha256: string;
-        size: number;
-        mime?: string | undefined;
-    } | undefined;
-    externalReceipt?: {
-        provider: string;
-        ts: string;
-        receiptId: string;
-    } | undefined;
-    toolCallTrace?: {
-        calls: number;
-        ref?: string | undefined;
-    } | undefined;
-}>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
 export type ProofOfWork = z.infer<typeof proofOfWork>;
 /** #961 兼容读: snake_case 优先, 旧别名只补齐部分迁移 payload 缺失的字段. */
 export declare function gitDiffOf(p: ProofOfWork | undefined): ProofOfWork['git_diff'] | ProofOfWork['gitDiff'] | undefined;

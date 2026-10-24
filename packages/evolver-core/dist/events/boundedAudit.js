@@ -12,14 +12,19 @@ export class AuditWriteSkipped extends Error {
         this.reason = reason;
     }
 }
+/** Shared only by durable context preparation and its stdout admission callers. */
+export const DEFAULT_CONTEXT_PREPARATION_BUDGET_MS = 750;
 export class AuditBudget {
     options;
     deadline;
-    constructor(options = {}) {
+    constructor(options = {}, phase = 'audit') {
         this.options = options;
-        const requested = options.deadlineAt ?? Date.now() + 250;
+        // Preparation may spend its own window; ordinary audit/projection/recovery
+        // retains the original 250ms default and 500ms cap. Shorter callers always win.
+        const preparing = phase === 'context_preparation';
+        const requested = options.deadlineAt ?? Date.now() + (preparing ? DEFAULT_CONTEXT_PREPARATION_BUDGET_MS : 250);
         const remaining = Number.isFinite(requested) ? requested - Date.now() : 0;
-        this.deadline = performance.now() + Math.max(0, Math.min(500, remaining));
+        this.deadline = performance.now() + Math.max(0, Math.min(preparing ? DEFAULT_CONTEXT_PREPARATION_BUDGET_MS : 500, remaining));
     }
     check() {
         if (this.options.signal?.aborted || performance.now() >= this.deadline)

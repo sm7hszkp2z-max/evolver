@@ -1,10 +1,10 @@
+import { redactQuotedCredentialText, redactBearerCredentials, readQuotedCredentialValue, remapCredentialTextRanges } from './authenticationRedaction.js';
 export const EXECUTION_REDACTION_POLICY_VERSION = 'execution-redaction.v1';
 export const EXECUTION_REDACTED = '[REDACTED]';
 const MAX_EXECUTION_TEXT_LENGTH = 64 * 1024;
 // These expressions intentionally exclude email and filesystem paths. Execution evidence needs those diagnostics,
 // while credential-bearing URL authorities, authorization headers, private keys, and provider tokens remain secret.
 const KNOWN_CREDENTIAL_PATTERNS = [
-    /Bearer\s+[A-Za-z0-9-._~+/]+=*/gi,
     /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}(?=$|[\s,;)}\]])/gi,
     /\b(?:AIza[0-9A-Za-z_-]{20,}|ya29\.[0-9A-Za-z_-]{20,}|(?:xai|hf|glpat|dop_v1|pk_live|pk_test|sk_live|sk_test|rk_live|rk_test)[-_][A-Za-z0-9_-]{16,}|sq0(?:atp|csp)-[A-Za-z0-9_-]{16,})\b/g,
     /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}|npm_[A-Za-z0-9]{36,})\b/g,
@@ -34,7 +34,8 @@ const CURL_EXECUTABLES = new Set(['curl']);
 const CURL_CREDENTIAL_FLAGS = new Set(['-u', '--user', '--proxy-user']);
 const SHELL_EXECUTABLES = new Set(['bash', 'cmd', 'dash', 'fish', 'ksh', 'nu', 'powershell', 'pwsh', 'sh', 'zsh']);
 const SHELL_COMMAND_FLAGS = new Set(['-c', '/c', '-command']);
-const STRUCTURED_CREDENTIAL_PREFIX = /(?<![A-Za-z0-9_-])(["']?)(node[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|token|secret|password|passwd|passphrase|credential|credentials|authorization|auth|bearer|cookie|dsn|webhook|signature)\1(\s*[:=]\s*)/gi;
+const STRUCTURED_CREDENTIAL_PREFIX = /(?<![A-Za-z0-9_-])(["']?)(node[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|token|secret|password|passwd|passphrase|credential|credentials|authorization|auth|bearer|cookie|dsn|webhook|signature|status)\1(\s*[:=]\s*)/gi;
+const STRUCTURED_CREDENTIAL_AT_TOKEN = new RegExp(STRUCTURED_CREDENTIAL_PREFIX.source, 'iy');
 const DIAGNOSTIC_STATUS_VALUE = /^(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|refresh needed|not configured|not found|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i;
 const DIAGNOSTIC_ASSIGNMENT_VALUE = /^(?:policy|mode|state|status|configured|enabled)=(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i;
 function normalizeName(value) {
@@ -180,26 +181,11 @@ function isHighEntropyCredential(raw) {
     return classes >= 3 ? entropy >= 3.5 : compact.length >= 32 && entropy >= 4.2;
 }
 function readStructuredValue(input, start) {
-    const quote = input[start] ?? '';
-    if (quote === '"' || quote === "'") {
-        let escaped = false;
-        for (let index = start + 1; index < input.length; index += 1) {
-            const char = input[index] ?? '';
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (char === '\\') {
-                escaped = true;
-                continue;
-            }
-            if (char === quote)
-                return { end: index + 1, raw: input.slice(start, index + 1), quote };
-            if (char === '\r' || char === '\n')
-                return undefined;
-        }
+    const quoted = readQuotedCredentialValue(input, start);
+    if (quoted)
+        return quoted;
+    if (input[start] === '"' || input[start] === "'")
         return undefined;
-    }
     if (input.startsWith(EXECUTION_REDACTED, start)) {
         return { end: start + EXECUTION_REDACTED.length, raw: EXECUTION_REDACTED, quote: '' };
     }
@@ -208,42 +194,64 @@ function readStructuredValue(input, start) {
         end += 1;
     return end > start ? { end, raw: input.slice(start, end), quote: '' } : undefined;
 }
-function structuredValueIsDiagnostic(key, raw) {
+function structuredValueIsDiagnostic(key, value) {
     const normalizedKey = normalizeName(key);
     if (!new Set(['token', 'secret', 'credential', 'credentials', 'authorization', 'auth', 'cookie', 'signature']).has(normalizedKey))
         return false;
-    const value = semanticValue(raw).trim();
     const status = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
     return !value || value === EXECUTION_REDACTED || DIAGNOSTIC_STATUS_VALUE.test(status) || DIAGNOSTIC_ASSIGNMENT_VALUE.test(value);
 }
-function redactStructuredCredentials(input, reasons) {
+function redactStructuredCredentials(input, reasons, credentialFields, processed) {
+    const edits = processed?.length ? [] : undefined;
     let cursor = 0;
     let output = '';
     STRUCTURED_CREDENTIAL_PREFIX.lastIndex = 0;
     let match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
     while (match) {
         const valueStart = STRUCTURED_CREDENTIAL_PREFIX.lastIndex;
+        if (match[2]?.toLowerCase() === 'status') {
+            const span = readQuotedCredentialValue(input, valueStart);
+            if (span && (span.end === input.length || /[\s,;)}\]]/.test(input[span.end]))) {
+                credentialFields?.add(output.length + match.index - cursor);
+            }
+            // Diagnostic fields cannot hide nested credentials or own arbitrary padding.
+            match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
+            continue;
+        }
         const span = readStructuredValue(input, valueStart);
-        if (!span || structuredValueIsDiagnostic(match[2] ?? '', span.raw)) {
+        const value = span ? (span.quote ? span.raw.slice(span.quote.length, -span.quote.length) : span.raw).trim() : '';
+        // The prepass must leave a bare scheme attached to the credential that follows it.
+        if (!span || (credentialFields && /^(?:Bearer|Basic)$/i.test(value))
+            || structuredValueIsDiagnostic(match[2] ?? '', value)) {
+            if (span && (value === EXECUTION_REDACTED || (span.quote && structuredValueIsDiagnostic(match[2] ?? '', value)
+                && (span.end === input.length || /[\s,;)}\]]/.test(input[span.end]))))) {
+                credentialFields?.add(output.length + match.index - cursor);
+            }
             match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
             continue;
         }
         output += input.slice(cursor, valueStart);
-        output += `${span.quote}${EXECUTION_REDACTED}${span.quote}`;
+        credentialFields?.add(output.length - (valueStart - match.index));
+        const replacement = `${span.quote}${EXECUTION_REDACTED}${span.quote}`;
+        output += replacement;
+        if (replacement !== span.raw)
+            edits?.push({ start: valueStart, end: span.end, replacementLength: replacement.length });
         reasons.add('known_credential');
         cursor = span.end;
         STRUCTURED_CREDENTIAL_PREFIX.lastIndex = span.end;
         match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
     }
+    if (processed && edits?.length)
+        remapCredentialTextRanges(processed, edits);
     return cursor === 0 ? input : output + input.slice(cursor);
 }
 function redactKnownCredentials(input, reasons) {
-    const quote = outerQuote(input);
-    if (quote) {
-        const inner = redactKnownCredentials(input.slice(1, -1), reasons);
-        return `${quote}${inner}${quote}`;
-    }
-    let output = input;
+    const processed = [];
+    const scoped = redactQuotedCredentialText(input, (text) => redactKnownCredentials(text, reasons), processed);
+    const credentialFields = new Set();
+    let output = redactBearerCredentials(redactStructuredCredentials(scoped, reasons, credentialFields, processed), EXECUTION_REDACTED, credentialFields, processed);
+    if (output !== input)
+        reasons.add('known_credential');
     for (const pattern of KNOWN_CREDENTIAL_PATTERNS) {
         pattern.lastIndex = 0;
         output = output.replace(pattern, (match) => {
@@ -297,7 +305,8 @@ function replacementForValue(raw, force, reason, reasons) {
         return raw;
     const urlSafe = redactUrlQueryCredentials(raw, reasons);
     const known = redactKnownCredentials(urlSafe, reasons);
-    if (known !== raw)
+    // A forced sensitive value must be atomic on the first pass as well as subsequent passes.
+    if (!force && known !== raw)
         return known;
     if (!force && !isHighEntropyCredential(raw))
         return raw;
@@ -337,7 +346,13 @@ function sanitizeText(input) {
         reasons.add('malformed_input');
         return { value: EXECUTION_REDACTED, changed: input !== EXECUTION_REDACTED, malformed: true, reasons };
     }
-    const parsed = tokenizeWithoutExecution(input);
+    const originalParsed = tokenizeWithoutExecution(input);
+    if (originalParsed.malformed) {
+        reasons.add('malformed_input');
+        return { value: EXECUTION_REDACTED, changed: input !== EXECUTION_REDACTED, malformed: true, reasons };
+    }
+    const scoped = redactQuotedCredentialText(input, (text) => redactKnownCredentials(text, reasons));
+    const parsed = scoped === input ? originalParsed : tokenizeWithoutExecution(scoped);
     if (parsed.malformed) {
         reasons.add('malformed_input');
         return { value: EXECUTION_REDACTED, changed: input !== EXECUTION_REDACTED, malformed: true, reasons };
@@ -409,6 +424,20 @@ function sanitizeText(input) {
             continue;
         }
         if (isSensitiveName(semantic)) {
+            STRUCTURED_CREDENTIAL_AT_TOKEN.lastIndex = token.start;
+            const field = STRUCTURED_CREDENTIAL_AT_TOKEN.exec(scoped);
+            const span = field ? readStructuredValue(scoped, STRUCTURED_CREDENTIAL_AT_TOKEN.lastIndex) : undefined;
+            if (span) {
+                // Leave owned values to the final pass without losing executable context for later flags.
+                let next = parsed.tokens[index + 1];
+                while (next && !next.separator && next.end <= span.end) {
+                    index += 1;
+                    seenShell ||= shellIndexes.has(index);
+                    seenCurl ||= curlIndexes.has(index);
+                    next = parsed.tokens[index + 1];
+                }
+                continue;
+            }
             const next = nextValueToken(parsed.tokens, index + 1);
             if (next !== undefined) {
                 const nextRaw = parsed.tokens[next]?.raw ?? '';
@@ -439,11 +468,11 @@ function sanitizeText(input) {
         const token = parsed.tokens[index];
         if (!token)
             continue;
-        output += input.slice(cursor, token.start);
+        output += scoped.slice(cursor, token.start);
         output += replacements.get(index) ?? token.raw;
         cursor = token.end;
     }
-    output += input.slice(cursor);
+    output += scoped.slice(cursor);
     output = redactKnownCredentials(output, reasons);
     return { value: output, changed: output !== input, malformed: false, reasons };
 }

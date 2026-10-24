@@ -1,7 +1,7 @@
 import { type RelatedCapsuleQuery, type RelatedCapsuleResult } from './relatedCapsules.js';
 import { type GeneSnapshotQuery, type GeneReadSnapshot } from './boundedSnapshot.js';
 import { type ReferenceScope } from '../reference/guard.js';
-import { type AssetKind, type AssetRecord, type AssetStoreProvider, type ConditionalPutOptions, type ConditionalPutResult, type PutResult, type SearchQuery } from './provider.js';
+import { type AssetKind, type AssetRecord, type AssetStoreProvider, type ConditionalPutOptions, type ConditionalPutResult, type PutResult, type SearchQuery, type LocalProjectContextV1 } from './provider.js';
 /** Signal names a record advertises, across the four key spellings the pool uses. */
 export declare function signalsOf(a: AssetRecord): string[];
 export declare class LocalJsonlProvider implements AssetStoreProvider {
@@ -39,6 +39,9 @@ export declare class LocalJsonlProvider implements AssetStoreProvider {
     put(asset: AssetRecord): Promise<PutResult>;
     putConditional(asset: AssetRecord, options?: ConditionalPutOptions): Promise<ConditionalPutResult>;
     putBundle(assets: readonly AssetRecord[]): Promise<PutResult[]>;
+    putBundleWithLocalContextV1(assets: readonly AssetRecord[], value: LocalProjectContextV1): Promise<PutResult[]>;
+    readLocalContextsV1(capsuleAssetIds: readonly string[]): Promise<LocalProjectContextV1[]>;
+    private putBundleRecords;
     /**
      * 迁移专用(M8-2): 以**冻结 asset_id** 原样写入, 不经 normalizeForPut 重算/校验.
      * 仅 v1→v2 导入用(硬化 A6 存量冻结); 普通写一律走 put(). record 必须自带 asset_id.

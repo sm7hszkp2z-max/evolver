@@ -665,7 +665,7 @@ export async function withWindowsAuditLock(path, budget, run, injected) {
                     continue;
                 }
             }
-            if (await publish(name)) {
+            if (!await directory.exists(name) && await publish(name)) {
                 if (await directory.exists(guard) || await directory.exists(guardian))
                     throw new AuditWriteSkipped('mutation_busy');
                 budget.check();

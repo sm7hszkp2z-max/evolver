@@ -14,8 +14,6 @@ export function connectPublicHub(opts) {
     let auth;
     switch (opts.authMode) {
         case 'legacy':
-            if (!opts.nodeSecret)
-                throw new Error('legacy 模式需 nodeSecret');
             auth = new LegacyAuthShim(opts.nodeSecret, opts.onNodeSecretRotated, opts.nodeSecretVersion, opts.onNodeSecretVersionUpdated, opts.onNodeSecretDiverged);
             break;
         case 'keypair':

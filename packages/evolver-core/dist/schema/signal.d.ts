@@ -6,8 +6,13 @@ export declare const problemSignature: z.ZodString;
 /** 选择压. 三条腿: 结构化强 / corpus 弱 / agent 自标 (批注#13). */
 export declare const signal: z.ZodObject<{
     signalId: z.ZodString;
-    fromMaterial: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-    kind: z.ZodEnum<["strong_structured", "weak_corpus", "agent_marked", "verified_success"]>;
+    fromMaterial: z.ZodDefault<z.ZodArray<z.ZodString>>;
+    kind: z.ZodEnum<{
+        strong_structured: "strong_structured";
+        weak_corpus: "weak_corpus";
+        agent_marked: "agent_marked";
+        verified_success: "verified_success";
+    }>;
     text: z.ZodString;
     score: z.ZodDefault<z.ZodNumber>;
     eventSignature: z.ZodString;
@@ -15,27 +20,5 @@ export declare const signal: z.ZodObject<{
     signatureV: z.ZodDefault<z.ZodNumber>;
     discoveredAt: z.ZodString;
     extensions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    kind: "strong_structured" | "weak_corpus" | "agent_marked" | "verified_success";
-    extensions: Record<string, unknown>;
-    signalId: string;
-    fromMaterial: string[];
-    text: string;
-    score: number;
-    eventSignature: string;
-    problemSignature: string;
-    signatureV: number;
-    discoveredAt: string;
-}, {
-    kind: "strong_structured" | "weak_corpus" | "agent_marked" | "verified_success";
-    signalId: string;
-    text: string;
-    eventSignature: string;
-    problemSignature: string;
-    discoveredAt: string;
-    extensions?: Record<string, unknown> | undefined;
-    fromMaterial?: string[] | undefined;
-    score?: number | undefined;
-    signatureV?: number | undefined;
-}>;
+}, z.core.$strip>;
 export type Signal = z.infer<typeof signal>;

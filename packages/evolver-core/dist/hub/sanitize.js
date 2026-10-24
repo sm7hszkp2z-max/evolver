@@ -6,13 +6,13 @@
 // rejects it. See feedback_public_repo_no_internal_leak.
 import { computeAssetId } from '../wire/index.js';
 import { sanitizeExecutionCommand, sanitizeExecutionPayload } from '../verify/executionRedaction.js';
+import { redactQuotedCredentialText, redactBearerCredentials, readQuotedCredentialValue, remapCredentialTextRanges } from '../verify/authenticationRedaction.js';
 import { checkEmbeddedSourceIntegrity, embeddedSourceTexts, sanitizeEmbeddedSourceContent } from './embeddedSource.js';
 export { checkEmbeddedSourceIntegrity } from './embeddedSource.js';
 export const REDACTED = '[REDACTED]';
 /** Redaction patterns (ported verbatim from v1, 30 entries). A match is replaced with [REDACTED]. */
 const REDACT_PATTERNS = [
     // API keys & tokens (generic)
-    /Bearer\s+[A-Za-z0-9-._~+/]+=*/g,
     /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}(?=$|[\s,;)}\]])/gi,
     /\b(?:AIza[0-9A-Za-z_-]{20,}|ya29\.[0-9A-Za-z_-]{20,}|(?:xai|hf|glpat|dop_v1|pk_live|pk_test|sk_live|sk_test|rk_live|rk_test)[-_][A-Za-z0-9_-]{16,}|sq0(?:atp|csp)-[A-Za-z0-9_-]{16,})\b/g,
     /sk-[A-Za-z0-9]{20,}/g,
@@ -58,7 +58,7 @@ const REDACT_PATTERNS = [
 // 结构化执行诊断可能来自 JSON、YAML 或键值输出，字段名与分隔符之间也可能有空格。
 // 这里只识别字段前缀，值由下面两个小解析器分别读取：带引号的值读取到匹配的闭合引号，
 // 不带引号的值在空白或结构分隔符处停止，避免把凭据后的普通说明文字一起吞掉。
-const STRUCTURED_CREDENTIAL_PREFIX = /(?<![A-Za-z0-9_-])(["']?)(node[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|token|secret|password|passwd|passphrase|credential|credentials|authorization|auth|bearer|cookie|dsn|webhook|signature)\1(\s*(?:#[^\r\n]*\r?\n\s*)*[:=]\s*)/gi;
+const STRUCTURED_CREDENTIAL_PREFIX = /(?<![A-Za-z0-9_-])(["']?)(node[_-]?secret|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key|client[_-]?secret|private[_-]?key|token|secret|password|passwd|passphrase|credential|credentials|authorization|auth|bearer|cookie|dsn|webhook|signature|status)\1(\s*(?:#[^\r\n]*\r?\n\s*)*[:=]\s*)/gi;
 const OPAQUE_CREDENTIAL_PATTERN = /(?<![A-Za-z0-9_-])[A-Za-z0-9][A-Za-z0-9._~+=-]{31,}(?![A-Za-z0-9_-])/g;
 const AMBIGUOUS_STRUCTURED_KEYS = new Set([
     'token', 'secret', 'credential', 'credentials', 'authorization', 'auth', 'cookie', 'signature',
@@ -67,16 +67,18 @@ const DIAGNOSTIC_STATUS_VALUE = /^(?:ok|success|successful|succeeded|failed|fail
 const DIAGNOSTIC_ASSIGNMENT_VALUE = /^(?:policy|mode|state|status|configured|enabled)=(?:ok|success|successful|succeeded|failed|failure|pending|missing|invalid|expired|mismatch|denied|unavailable|none|null|true|false|enabled|disabled|present|absent|unknown|skipped|unsupported)$/i;
 function unquoteStructuredValue(value) {
     const trimmed = value.trim();
-    if (trimmed.length >= 2 && ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))) {
-        return trimmed.slice(1, -1).trim();
-    }
+    const span = readQuotedCredentialValue(trimmed, 0);
+    if (span?.end === trimmed.length)
+        return trimmed.slice(span.quote.length, -span.quote.length).trim();
     return trimmed;
 }
 function shouldRedactStructuredField(key, rawValue) {
     const normalizedKey = key.toLowerCase().replace(/[_-]/g, '');
     // Exact Python null and this public API-key fixture are not credentials. Do not
     // allow arbitrary identifiers, quoted nulls, or values merely prefixed with "test".
-    if (normalizedKey === 'apikey' && /^(?:None|"test-key"|'test-key')$/.test(rawValue))
+    const quoted = readQuotedCredentialValue(rawValue, 0);
+    if (normalizedKey === 'apikey' && (rawValue === 'None'
+        || (quoted?.end === rawValue.length && rawValue.slice(quoted.quote.length, -quoted.quote.length) === 'test-key')))
         return false;
     if (!AMBIGUOUS_STRUCTURED_KEYS.has(normalizedKey))
         return true;
@@ -139,28 +141,7 @@ function readBlockStructuredValue(input, parentIndent, start) {
     return { end, raw, quote: '', blockSuffix };
 }
 function readQuotedStructuredValue(input, start) {
-    const quote = input[start];
-    if (quote !== '"' && quote !== "'")
-        return undefined;
-    let escaped = false;
-    for (let index = start + 1; index < input.length; index += 1) {
-        const char = input[index];
-        if (escaped) {
-            escaped = false;
-            continue;
-        }
-        if (char === '\\') {
-            escaped = true;
-            continue;
-        }
-        if (char === quote) {
-            const end = index + 1;
-            return { end, raw: input.slice(start, end), quote };
-        }
-        if (char === '\r' || char === '\n')
-            break;
-    }
-    return undefined;
+    return readQuotedCredentialValue(input, start);
 }
 function readUnquotedStructuredValue(input, start) {
     if (input.startsWith(REDACTED, start)) {
@@ -177,7 +158,8 @@ function readUnquotedStructuredValue(input, start) {
         return undefined;
     return { end, raw: input.slice(start, end), quote: '' };
 }
-function redactStructuredCredentials(input) {
+function redactStructuredCredentials(input, credentialFields, processed) {
+    const edits = processed?.length ? [] : undefined;
     let cursor = 0;
     let output = '';
     let lineStart = 0;
@@ -236,6 +218,15 @@ function redactStructuredCredentials(input) {
             blockKey = keyPrefix();
         }
         const valueStart = STRUCTURED_CREDENTIAL_PREFIX.lastIndex;
+        if (match[2]?.toLowerCase() === 'status') {
+            const span = readQuotedStructuredValue(input, valueStart);
+            if (span && (span.end === input.length || /[\s,;)}\]]/.test(input[span.end]))) {
+                credentialFields?.add(output.length + match.index - cursor);
+            }
+            // Do not consume diagnostic values or repeatedly scan an unquoted suffix.
+            match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
+            continue;
+        }
         let block;
         if (match.index === blockKey.start) {
             // An explicit key's ':' can be on a later line, at a different indentation.
@@ -251,14 +242,24 @@ function redactStructuredCredentials(input) {
             match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
             continue;
         }
+        const quotedField = span.quote && (span.end === input.length || /[\s,;)}\]]/.test(input[span.end]));
         output += input.slice(cursor, valueStart);
+        if (span.blockSuffix !== undefined || shouldRedactStructuredField(match[2] ?? '', span.raw)
+            || /^\[redacted\]$/i.test(unquoteStructuredValue(span.raw)) || quotedField) {
+            credentialFields?.add(output.length - (valueStart - match.index));
+        }
         // 裸[REDACTED]会成为YAML sequence；块标量替换仍保持string。
-        output += span.blockSuffix !== undefined ? `"${REDACTED}"${span.blockSuffix}`
+        const replacement = span.blockSuffix !== undefined ? `"${REDACTED}"${span.blockSuffix}`
             : shouldRedactStructuredField(match[2] ?? '', span.raw) ? `${span.quote}${REDACTED}${span.quote}` : span.raw;
+        output += replacement;
+        if (replacement !== span.raw)
+            edits?.push({ start: valueStart, end: span.end, replacementLength: replacement.length });
         cursor = span.end;
         STRUCTURED_CREDENTIAL_PREFIX.lastIndex = span.end;
         match = STRUCTURED_CREDENTIAL_PREFIX.exec(input);
     }
+    if (processed && edits?.length)
+        remapCredentialTextRanges(processed, edits);
     return cursor === 0 ? input : output + input.slice(cursor);
 }
 function isOpaqueCredential(candidate) {
@@ -319,7 +320,10 @@ const ANONYMIZE_PATTERNS = [
 export function redactString(s) {
     if (typeof s !== 'string' || !s)
         return s;
-    let out = s;
+    const processed = [];
+    const scoped = redactQuotedCredentialText(s, redactString, processed);
+    const credentialFields = new Set();
+    let out = redactBearerCredentials(redactStructuredCredentials(scoped, credentialFields, processed), REDACTED, credentialFields, processed);
     for (const p of REDACT_PATTERNS) {
         p.lastIndex = 0;
         out = out.replace(p, (m) => (isAllowlisted(m) ? m : REDACTED));
@@ -350,6 +354,16 @@ function redactDeepWith(v, redact) {
     }
     return v;
 }
+const PROJECT_CONTEXT_FIELDS = new Set(['project_notes', 'project_fingerprint']);
+function withoutProjectContext(value) {
+    if (Array.isArray(value))
+        return value.map(withoutProjectContext);
+    if (!value || typeof value !== 'object')
+        return value;
+    return Object.fromEntries(Object.entries(value)
+        .filter(([field]) => !PROJECT_CONTEXT_FIELDS.has(field))
+        .map(([field, nested]) => [field, withoutProjectContext(nested)]));
+}
 const EXECUTION_PAYLOAD_KEYS = new Set(['execution', 'execution_trace', 'execution_receipt', 'receipt', 'validator']);
 function sanitizeAssetContent(asset, env) {
     const fixtureIsCredential = detectEnvValueLeaks('test-key', env).length > 0;
@@ -360,8 +374,18 @@ function sanitizeAssetContent(asset, env) {
     const redact = (value) => redactDeepWith(value, redactText);
     const output = {};
     for (const [key, value] of Object.entries(asset)) {
+        if (key === 'trigger_context' && asset.type === 'Capsule') {
+            // The task prompt stays local with the project context; only its signals and model leave this node.
+            if (value && typeof value === 'object' && !Array.isArray(value)) {
+                const { prompt: _local, ...shared } = value;
+                output[key] = redact(shared);
+            }
+            continue;
+        }
         if (key === 'content') {
-            output[key] = sanitizeEmbeddedSourceContent(value, redact, REDACTED, (text) => (detectEnvValueLeaks(text, env).length > 0 ? REDACTED : redactText(text)));
+            // Project context remains local even when a draft uses a generic publication entrypoint.
+            const content = asset.type === 'Capsule' ? withoutProjectContext(value) : value;
+            output[key] = sanitizeEmbeddedSourceContent(content, redact, REDACTED, (text) => (detectEnvValueLeaks(text, env).length > 0 ? REDACTED : redactText(text)));
             continue;
         }
         if (key === 'validation' && Array.isArray(value)) {

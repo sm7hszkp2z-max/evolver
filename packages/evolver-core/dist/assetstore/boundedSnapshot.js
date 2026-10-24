@@ -7,7 +7,8 @@ import { computeAssetId } from '../wire/index.js';
 import { PosixSnapshotProcess, PosixSnapshotExitConfirmedError } from './boundedSnapshotPosix.js';
 import { WindowsSnapshotReader } from './boundedSnapshotWindows.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { measureContextReadStage } from './contextReadDiagnostics.js';
+import { measureContextReadStage, startContextReadStage } from './contextReadDiagnostics.js';
+import { performance } from 'node:perf_hooks';
 import { AsyncLocalStorage } from 'node:async_hooks';
 const snapshotInvocation = new AsyncLocalStorage();
 function trackSnapshotInvocation(owned) {
@@ -671,74 +672,144 @@ async function closeSnapshotOwner(key, reader) {
     }
 }
 async function readLocalSnapshotOwned(baseDir, query, capsules, signal, beforeRecord, onReader, onClosed, pageBytes, onRecord) {
-    const absolute = resolve(baseDir);
-    const key = snapshotRootKey(absolute);
-    const retained = retainedSnapshotReaders.get(key);
-    if (retained)
-        await closeSnapshotOwner(key, retained.reader);
-    const invocation = snapshotInvocation.getStore();
-    const previous = activeSnapshotRoots.get(key);
-    if (previous && (!invocation || previous.invocation !== invocation || !previous.reusable))
-        throw new Error('snapshot_source_busy');
-    if (!previous && activeSnapshotRoots.size >= MAX_ACTIVE_SNAPSHOT_ROOTS)
-        throw new Error('snapshot_source_capacity');
-    const reader = new SnapshotReader(query, signal, pageBytes, invocation, key);
-    onReader?.(reader, key);
-    activeSnapshotRoots.set(key, reader);
-    invocation?.roots.set(key, reader);
+    let finish;
+    let snapshot;
+    let part = 'root';
+    let started;
+    let outcome = 'fulfilled';
+    // Every optional tap is synchronous and nonthrowing, including creation and
+    // finish. An invalid clock discards this call's detail, never invents a zero
+    // duration or bypasses the original finally/cleanup/error precedence.
     try {
-        await reader.guard(baseDir);
-        const envelope = await reader.envelope(join(baseDir, 'genes.json'), beforeRecord, onRecord);
-        const jsonl = beforeRecord && onRecord
-            ? await reader.scanGeneJsonl(join(baseDir, 'genes.jsonl'), beforeRecord, onRecord)
-            : await reader.jsonl(join(baseDir, 'genes.jsonl'), (row) => assetRow(row, 'Gene'));
-        const cases = capsules ? await reader.jsonl(join(baseDir, 'capsules.jsonl'), (row) => assetRow(row, 'Capsule')) : [];
-        const provenance = await reader.jsonl(join(baseDir, 'provenance.jsonl'), parseProvenanceRecord, true);
-        const reviewed = await reader.jsonl(join(baseDir, 'review.jsonl'), parseReviewRecord, true);
-        const referenceRaw = await reader.read(join(baseDir, 'references', 'references.json'));
-        const ids = new Set();
-        if (referenceRaw !== null) {
-            // References are an independent fence, not an asset corpus. Bound this indivisible decoder call.
-            if (Buffer.byteLength(referenceRaw) > ROW_BYTES)
-                throw new Error('snapshot_reference_limit');
-            const parsed = JSON.parse(referenceRaw);
-            if (parsed?.version !== 1 || !Array.isArray(parsed.entries) || parsed.entries.length > 1000)
-                throw new Error('invalid_reference_snapshot');
-            for (const entry of parsed.entries) {
-                await reader.yield();
-                const pair = decodeReferencePair(entry);
-                for (const asset of [pair.gene, pair.capsule]) {
-                    ids.add(asset.asset_id);
-                    if (typeof asset['id'] === 'string')
-                        ids.add(asset['id']);
-                }
+        finish = startContextReadStage('snapshot_owned');
+        if (finish) {
+            started = performance.now();
+            if (Number.isFinite(started))
+                snapshot = { kind: capsules ? 'related' : 'gene' };
+        }
+    }
+    catch { /* Observation cannot prevent admission or original cleanup. */ }
+    const settle = snapshot ? (state) => {
+        try {
+            if (snapshot && part && started !== undefined) {
+                const elapsed = performance.now() - started;
+                if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= Number.MAX_SAFE_INTEGER)
+                    snapshot[part] = [Math.round(elapsed * 100) / 100, state];
+                else
+                    snapshot = undefined;
+            }
+            part = undefined;
+        }
+        catch {
+            snapshot = undefined;
+        }
+    } : undefined;
+    const start = snapshot ? (next) => {
+        try {
+            if (snapshot) {
+                part = next;
+                started = performance.now();
+                if (!Number.isFinite(started))
+                    snapshot = undefined;
             }
         }
-        const review = new Map();
-        let mapped = 0;
-        for (const row of reviewed) {
-            if (++mapped % 64 === 0)
-                await reader.yield();
-            const old = review.get(row.assetId);
-            // Exact ReviewLedger.keep precedence: human decisions beat subsequent auto quarantine.
-            if (!old || row.state !== 'quarantined' || old.state === 'quarantined')
-                review.set(row.assetId, row);
+        catch {
+            snapshot = undefined;
         }
-        const trust = new Map();
-        for (const row of provenance) {
-            if (++mapped % 64 === 0)
-                await reader.yield();
-            trust.set(row.assetId, row);
+    } : undefined;
+    try {
+        const absolute = resolve(baseDir);
+        const key = snapshotRootKey(absolute);
+        const retained = retainedSnapshotReaders.get(key);
+        if (retained)
+            await closeSnapshotOwner(key, retained.reader);
+        const invocation = snapshotInvocation.getStore();
+        const previous = activeSnapshotRoots.get(key);
+        if (previous && (!invocation || previous.invocation !== invocation || !previous.reusable))
+            throw new Error('snapshot_source_busy');
+        if (!previous && activeSnapshotRoots.size >= MAX_ACTIVE_SNAPSHOT_ROOTS)
+            throw new Error('snapshot_source_capacity');
+        const reader = new SnapshotReader(query, signal, pageBytes, invocation, key);
+        onReader?.(reader, key);
+        activeSnapshotRoots.set(key, reader);
+        invocation?.roots.set(key, reader);
+        try {
+            await reader.guard(baseDir);
+            settle?.('fulfilled');
+            start?.('assets');
+            const envelope = await reader.envelope(join(baseDir, 'genes.json'), beforeRecord, onRecord);
+            const jsonl = beforeRecord && onRecord
+                ? await reader.scanGeneJsonl(join(baseDir, 'genes.jsonl'), beforeRecord, onRecord)
+                : await reader.jsonl(join(baseDir, 'genes.jsonl'), (row) => assetRow(row, 'Gene'));
+            const cases = capsules ? await reader.jsonl(join(baseDir, 'capsules.jsonl'), (row) => assetRow(row, 'Capsule')) : [];
+            settle?.('fulfilled');
+            start?.('metadata');
+            const provenance = await reader.jsonl(join(baseDir, 'provenance.jsonl'), parseProvenanceRecord, true);
+            const reviewed = await reader.jsonl(join(baseDir, 'review.jsonl'), parseReviewRecord, true);
+            const referenceRaw = await reader.read(join(baseDir, 'references', 'references.json'));
+            const ids = new Set();
+            if (referenceRaw !== null) {
+                // References are an independent fence, not an asset corpus. Bound this indivisible decoder call.
+                if (Buffer.byteLength(referenceRaw) > ROW_BYTES)
+                    throw new Error('snapshot_reference_limit');
+                const parsed = JSON.parse(referenceRaw);
+                if (parsed?.version !== 1 || !Array.isArray(parsed.entries) || parsed.entries.length > 1000)
+                    throw new Error('invalid_reference_snapshot');
+                for (const entry of parsed.entries) {
+                    await reader.yield();
+                    const pair = decodeReferencePair(entry);
+                    for (const asset of [pair.gene, pair.capsule]) {
+                        ids.add(asset.asset_id);
+                        if (typeof asset['id'] === 'string')
+                            ids.add(asset['id']);
+                    }
+                }
+            }
+            const review = new Map();
+            let mapped = 0;
+            for (const row of reviewed) {
+                if (++mapped % 64 === 0)
+                    await reader.yield();
+                const old = review.get(row.assetId);
+                // Exact ReviewLedger.keep precedence: human decisions beat subsequent auto quarantine.
+                if (!old || row.state !== 'quarantined' || old.state === 'quarantined')
+                    review.set(row.assetId, row);
+            }
+            const trust = new Map();
+            for (const row of provenance) {
+                if (++mapped % 64 === 0)
+                    await reader.yield();
+                trust.set(row.assetId, row);
+            }
+            const referenceScope = { hasId: (id) => ids.has(id) };
+            settle?.('fulfilled');
+            start?.('verify');
+            await reader.verify();
+            settle?.('fulfilled');
+            return { genes: [...envelope, ...jsonl], capsules: cases, scanned: envelope.length + jsonl.length + cases.length,
+                bytes: reader.bytesRead,
+                provenance: trust, review, referenceScope, referenceIds: Object.freeze([...ids]) };
         }
-        const referenceScope = { hasId: (id) => ids.has(id) };
-        await reader.verify();
-        return { genes: [...envelope, ...jsonl], capsules: cases, scanned: envelope.length + jsonl.length + cases.length,
-            bytes: reader.bytesRead,
-            provenance: trust, review, referenceScope, referenceIds: Object.freeze([...ids]) };
+        finally {
+            // A still-active read segment reached finally by rejection. Final cleanup
+            // retains its original error precedence and must settle before owned does.
+            settle?.('rejected');
+            start?.('cleanup');
+            await closeSnapshotOwner(key, reader);
+            onClosed?.();
+            settle?.('fulfilled');
+        }
+    }
+    catch (error) {
+        outcome = 'rejected';
+        settle?.('rejected');
+        throw error;
     }
     finally {
-        await closeSnapshotOwner(key, reader);
-        onClosed?.();
+        try {
+            finish?.(outcome, undefined, undefined, snapshot);
+        }
+        catch { /* Even a failing observer cannot replace body/cleanup/onClosed errors. */ }
     }
 }
 export async function readLocalSnapshot(baseDir, query, capsules) {

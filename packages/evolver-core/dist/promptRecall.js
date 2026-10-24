@@ -8,6 +8,7 @@ export { assembleGeneContext } from './assetstore/geneContext.js';
 export { benchmarkContext, compactQualificationReceipts } from './assetstore/sourceQualification.js';
 export { assetsDir, assetCallLogPath, rootEventsPath } from './events/paths.js';
 export { Ingestor } from './events/ingest.js';
+export { DEFAULT_CONTEXT_PREPARATION_BUDGET_MS } from './events/boundedAudit.js';
 export { fitsRootEventLine } from './events/eventStore.js';
 export { AssetCallLog } from './hub/assetCallLog.js';
 export { redactString } from './hub/sanitize.js';

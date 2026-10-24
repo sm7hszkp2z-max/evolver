@@ -3,6 +3,7 @@ import { beginLocalGeneScanV1, readLocalGeneSnapshot } from './boundedSnapshot.j
 import { beginLocalContextReadV1 } from './contextReadOperationV1.js';
 import { assertExecutionEligible, isExecutionEligible } from '../reference/guard.js';
 import { loadReferenceFence } from '../reference/store.js';
+import { assertLocalContextBundle, isBoundLocalContext, mergeLocalProjectContexts, readLocalProjectContexts, validateLocalProjectContext, writeLocalProjectContexts } from './localProjectContext.js';
 import { unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireLock, releaseLock } from '../util/fileLock.js';
@@ -16,6 +17,7 @@ function resultLogicalId(logicalId) {
 }
 const BUNDLE_JOURNAL_FILE = '.assetstore-bundle.json';
 const BUNDLE_JOURNAL_SCHEMA = 'evolver.assetstore-bundle.v1';
+const CONTEXT_BUNDLE_JOURNAL_SCHEMA = 'evolver.assetstore-bundle.v2';
 const MAX_BUNDLE_ASSETS = 64;
 const MAX_BUNDLE_JOURNAL_BYTES = 4 * 1024 * 1024;
 /** Signal names a record advertises, across the four key spellings the pool uses. */
@@ -144,10 +146,11 @@ export class LocalJsonlProvider {
         }
         const journal = parsed;
         const assets = journal['assets'];
-        if (journal['schema'] !== BUNDLE_JOURNAL_SCHEMA || !Array.isArray(assets) || assets.length === 0 || assets.length > MAX_BUNDLE_ASSETS) {
+        const hasContext = journal['schema'] === CONTEXT_BUNDLE_JOURNAL_SCHEMA;
+        if ((!hasContext && journal['schema'] !== BUNDLE_JOURNAL_SCHEMA) || !Array.isArray(assets) || assets.length === 0 || assets.length > MAX_BUNDLE_ASSETS) {
             throw new Error('asset store bundle journal is invalid');
         }
-        return assets.map((asset) => {
+        const records = assets.map((asset) => {
             if (!asset || typeof asset !== 'object' || Array.isArray(asset))
                 throw new Error('asset store bundle journal is invalid');
             const record = asset;
@@ -157,13 +160,22 @@ export class LocalJsonlProvider {
             }
             return record;
         });
+        const rawContexts = journal['localContexts'];
+        if (hasContext ? !Array.isArray(rawContexts) || rawContexts.length === 0 || rawContexts.length > MAX_BUNDLE_ASSETS
+            : rawContexts !== undefined)
+            throw new Error('asset store bundle journal context is invalid');
+        const localContexts = hasContext ? rawContexts.map(validateLocalProjectContext) : [];
+        for (const context of localContexts)
+            assertLocalContextBundle(context, records);
+        return { assets: records, localContexts };
     }
     recoverPendingBundleUnderLock() {
         const pending = this.readPendingBundle();
         if (!pending)
             return;
         this.refreshUnderLock();
-        for (const pendingRecord of pending) {
+        const contextBody = pending.localContexts.length > 0 ? mergeLocalProjectContexts(this.baseDir, pending.localContexts) : undefined;
+        for (const pendingRecord of pending.assets) {
             const { record } = normalizeForPut(pendingRecord, this.referenceScope);
             if (record.asset_id !== pendingRecord.asset_id)
                 throw new Error('asset store bundle journal asset_id mismatch');
@@ -176,6 +188,8 @@ export class LocalJsonlProvider {
             appendUtf8Durable(join(this.baseDir, LOCAL_ASSET_FILES[record.type]), `${JSON.stringify(record)}\n`);
             this.index.set(record.asset_id, record);
         }
+        if (contextBody !== undefined)
+            writeLocalProjectContexts(this.baseDir, contextBody);
         unlinkSync(this.bundleJournalPath);
         fsyncDirectoryBestEffort(this.baseDir);
         this.updateFileStateAfterWrite();
@@ -272,11 +286,42 @@ export class LocalJsonlProvider {
         };
     }
     async putBundle(assets) {
+        return this.putBundleRecords(assets);
+    }
+    async putBundleWithLocalContextV1(assets, value) {
+        const context = validateLocalProjectContext(value);
+        if (assets.length === 0)
+            throw new Error('local_project_context_bundle_mismatch');
+        return this.putBundleRecords(assets, context);
+    }
+    async readLocalContextsV1(capsuleAssetIds) {
+        if (capsuleAssetIds.length > 20_000 || capsuleAssetIds.some((id) => !/^sha256:[a-f0-9]{64}$/.test(id))) {
+            throw new Error('local_project_context_query_invalid');
+        }
+        if (capsuleAssetIds.length === 0)
+            return [];
+        assertAssetStoreDirectory(this.baseDir);
+        assertOptionalRegularFile(this.lockPath, 'lock_file');
+        acquireLock(this.lockPath);
+        try {
+            this.recoverPendingBundleUnderLock();
+            this.refreshUnderLock();
+            const ids = new Set(capsuleAssetIds);
+            return readLocalProjectContexts(this.baseDir).filter((context) => ids.has(context.capsuleAssetId)
+                && isBoundLocalContext(context, [this.index.get(context.capsuleAssetId), this.index.get(context.geneAssetId)]));
+        }
+        finally {
+            releaseLock(this.lockPath);
+        }
+    }
+    async putBundleRecords(assets, context) {
         if (assets.length === 0)
             return [];
         if (assets.length > MAX_BUNDLE_ASSETS)
             throw new Error('asset store bundle is too large');
         const normalized = assets.map((asset) => normalizeForPut(asset, this.referenceScope));
+        if (context)
+            assertLocalContextBundle(context, normalized.map(({ record }) => record));
         const seen = new Map();
         for (const normalizedRecord of normalized) {
             const { record } = normalizedRecord;
@@ -304,9 +349,12 @@ export class LocalJsonlProvider {
                 pending.push(record);
                 results.push({ asset_id: record.asset_id, stored: true, verified });
             }
-            if (pending.length === 0)
+            if (pending.length === 0 && !context)
                 return results;
-            const journal = `${JSON.stringify({ schema: BUNDLE_JOURNAL_SCHEMA, assets: pending })}\n`;
+            const contextBody = context ? mergeLocalProjectContexts(this.baseDir, [context]) : undefined;
+            const journal = `${JSON.stringify(context
+                ? { schema: CONTEXT_BUNDLE_JOURNAL_SCHEMA, assets: normalized.map(({ record }) => record), localContexts: [context] }
+                : { schema: BUNDLE_JOURNAL_SCHEMA, assets: pending })}\n`;
             if (Buffer.byteLength(journal, 'utf8') > MAX_BUNDLE_JOURNAL_BYTES) {
                 throw new Error('asset store bundle is too large');
             }
@@ -315,6 +363,8 @@ export class LocalJsonlProvider {
                 appendUtf8Durable(join(this.baseDir, LOCAL_ASSET_FILES[record.type]), `${JSON.stringify(record)}\n`);
                 this.index.set(record.asset_id, record);
             }
+            if (contextBody !== undefined)
+                writeLocalProjectContexts(this.baseDir, contextBody);
             unlinkSync(this.bundleJournalPath);
             fsyncDirectoryBestEffort(this.baseDir);
             this.updateFileStateAfterWrite();

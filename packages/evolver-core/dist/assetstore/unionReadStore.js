@@ -629,6 +629,8 @@ export class UnionReadStore {
     // keeps the union exactly as capable as the pool it writes to.
     putConditional;
     putBundle;
+    putBundleWithLocalContextV1;
+    readLocalContextsV1;
     putFrozen;
     putFrozenConditional;
     // Conditional for the same reason, on the read side: cliContracts.findLogicalAsset and
@@ -680,9 +682,14 @@ export class UnionReadStore {
         if ([primary, ...readOnly].every((source) => source.findByLogicalId)) {
             this.findByLogicalId = (id, limit = DEFAULT_LIMIT, kind) => this.merged((source) => source.findByLogicalId(id, limit, kind), limit);
         }
-        const { putBundle, putConditional, putFrozen, putFrozenConditional } = primary;
+        const { putBundle, putConditional, putFrozen, putFrozenConditional, putBundleWithLocalContextV1, readLocalContextsV1 } = primary;
         if (putBundle)
             this.putBundle = (assets) => putBundle.call(primary, assets);
+        if (putBundleWithLocalContextV1)
+            this.putBundleWithLocalContextV1 = (assets, context) => putBundleWithLocalContextV1.call(primary, assets, context);
+        // Project context belongs to the writable local pool, never a foreign source.
+        if (readLocalContextsV1)
+            this.readLocalContextsV1 = (ids) => readLocalContextsV1.call(primary, ids);
         if (putConditional)
             this.putConditional = (asset, options) => putConditional.call(primary, asset, options);
         if (putFrozen)

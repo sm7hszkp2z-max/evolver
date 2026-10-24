@@ -19,6 +19,7 @@ export { assembleGeneContext, type AssembledGeneContext, type GeneContextContent
 export { benchmarkContext, compactQualificationReceipts, type BenchmarkContext, type SourceEligibilityReceipt } from './assetstore/sourceQualification.js';
 export { assetsDir, assetCallLogPath, rootEventsPath } from './events/paths.js';
 export { Ingestor } from './events/ingest.js';
+export { DEFAULT_CONTEXT_PREPARATION_BUDGET_MS } from './events/boundedAudit.js';
 export type { ContextDeliveryStatus, PreparedContextDelivery } from './ops/geneContextDeliveryJournal.js';
 export type { RawEvent } from './events/eventSchema.js';
 export { fitsRootEventLine } from './events/eventStore.js';

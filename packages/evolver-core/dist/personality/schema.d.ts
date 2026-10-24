@@ -33,21 +33,7 @@ export declare const personalityState: z.ZodObject<{
     verbosity: z.ZodDefault<z.ZodNumber>;
     risk_tolerance: z.ZodDefault<z.ZodNumber>;
     obedience: z.ZodDefault<z.ZodNumber>;
-}, "strip", z.ZodTypeAny, {
-    type: "PersonalityState";
-    rigor: number;
-    creativity: number;
-    verbosity: number;
-    risk_tolerance: number;
-    obedience: number;
-}, {
-    type?: "PersonalityState" | undefined;
-    rigor?: number | undefined;
-    creativity?: number | undefined;
-    verbosity?: number | undefined;
-    risk_tolerance?: number | undefined;
-    obedience?: number | undefined;
-}>;
+}, z.core.$strip>;
 export type PersonalityState = z.infer<typeof personalityState>;
 /**
  * 宽松输入形状: 允许省略 type、缺轴、越界值 —— 凡是会经 normalizePersonalityState 的公共入口都收这个,
@@ -60,23 +46,10 @@ export type PersonalityStateInput = Partial<Record<PersonalityAxis, number>> & {
 export declare const personalityStats: z.ZodObject<{
     success: z.ZodDefault<z.ZodNumber>;
     fail: z.ZodDefault<z.ZodNumber>;
-    /** 增量均值; n 为纳入均值的样本数. */
     avgScore: z.ZodDefault<z.ZodNumber>;
     n: z.ZodDefault<z.ZodNumber>;
     updatedAt: z.ZodDefault<z.ZodNullable<z.ZodString>>;
-}, "strip", z.ZodTypeAny, {
-    fail: number;
-    success: number;
-    n: number;
-    updatedAt: string | null;
-    avgScore: number;
-}, {
-    fail?: number | undefined;
-    success?: number | undefined;
-    n?: number | undefined;
-    updatedAt?: string | null | undefined;
-    avgScore?: number | undefined;
-}>;
+}, z.core.$strip>;
 export type PersonalityStats = z.infer<typeof personalityStats>;
 /** 单条人格变更历史 (可审计; 也镜像进事件流). */
 export declare const personalityHistoryEntry: z.ZodObject<{
@@ -85,19 +58,7 @@ export declare const personalityHistoryEntry: z.ZodObject<{
     outcome: z.ZodString;
     score: z.ZodDefault<z.ZodNullable<z.ZodNumber>>;
     notes: z.ZodDefault<z.ZodNullable<z.ZodString>>;
-}, "strip", z.ZodTypeAny, {
-    at: string;
-    score: number | null;
-    outcome: string;
-    key: string;
-    notes: string | null;
-}, {
-    at: string;
-    outcome: string;
-    key: string;
-    score?: number | null | undefined;
-    notes?: string | null | undefined;
-}>;
+}, z.core.$strip>;
 export type PersonalityHistoryEntry = z.infer<typeof personalityHistoryEntry>;
 /** 持久化模型: 当前人格 + 各键统计 + 变更历史 (v1 loadPersonalityModel 的 v2 形状). */
 export declare const personalityModel: z.ZodObject<{
@@ -109,133 +70,38 @@ export declare const personalityModel: z.ZodObject<{
         verbosity: z.ZodDefault<z.ZodNumber>;
         risk_tolerance: z.ZodDefault<z.ZodNumber>;
         obedience: z.ZodDefault<z.ZodNumber>;
-    }, "strip", z.ZodTypeAny, {
-        type: "PersonalityState";
-        rigor: number;
-        creativity: number;
-        verbosity: number;
-        risk_tolerance: number;
-        obedience: number;
-    }, {
-        type?: "PersonalityState" | undefined;
-        rigor?: number | undefined;
-        creativity?: number | undefined;
-        verbosity?: number | undefined;
-        risk_tolerance?: number | undefined;
-        obedience?: number | undefined;
-    }>>;
+    }, z.core.$strip>>;
     stats: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodObject<{
         success: z.ZodDefault<z.ZodNumber>;
         fail: z.ZodDefault<z.ZodNumber>;
-        /** 增量均值; n 为纳入均值的样本数. */
         avgScore: z.ZodDefault<z.ZodNumber>;
         n: z.ZodDefault<z.ZodNumber>;
         updatedAt: z.ZodDefault<z.ZodNullable<z.ZodString>>;
-    }, "strip", z.ZodTypeAny, {
-        fail: number;
-        success: number;
-        n: number;
-        updatedAt: string | null;
-        avgScore: number;
-    }, {
-        fail?: number | undefined;
-        success?: number | undefined;
-        n?: number | undefined;
-        updatedAt?: string | null | undefined;
-        avgScore?: number | undefined;
-    }>>>;
+    }, z.core.$strip>>>;
     history: z.ZodDefault<z.ZodArray<z.ZodObject<{
         at: z.ZodString;
         key: z.ZodString;
         outcome: z.ZodString;
         score: z.ZodDefault<z.ZodNullable<z.ZodNumber>>;
         notes: z.ZodDefault<z.ZodNullable<z.ZodString>>;
-    }, "strip", z.ZodTypeAny, {
-        at: string;
-        score: number | null;
-        outcome: string;
-        key: string;
-        notes: string | null;
-    }, {
-        at: string;
-        outcome: string;
-        key: string;
-        score?: number | null | undefined;
-        notes?: string | null | undefined;
-    }>, "many">>;
+    }, z.core.$strip>>>;
     updatedAt: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     extensions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    extensions: Record<string, unknown>;
-    stats: Record<string, {
-        fail: number;
-        success: number;
-        n: number;
-        updatedAt: string | null;
-        avgScore: number;
-    }>;
-    version: 1;
-    current: {
-        type: "PersonalityState";
-        rigor: number;
-        creativity: number;
-        verbosity: number;
-        risk_tolerance: number;
-        obedience: number;
-    };
-    updatedAt: string | null;
-    history: {
-        at: string;
-        score: number | null;
-        outcome: string;
-        key: string;
-        notes: string | null;
-    }[];
-}, {
-    extensions?: Record<string, unknown> | undefined;
-    stats?: Record<string, {
-        fail?: number | undefined;
-        success?: number | undefined;
-        n?: number | undefined;
-        updatedAt?: string | null | undefined;
-        avgScore?: number | undefined;
-    }> | undefined;
-    version?: 1 | undefined;
-    current?: {
-        type?: "PersonalityState" | undefined;
-        rigor?: number | undefined;
-        creativity?: number | undefined;
-        verbosity?: number | undefined;
-        risk_tolerance?: number | undefined;
-        obedience?: number | undefined;
-    } | undefined;
-    updatedAt?: string | null | undefined;
-    history?: {
-        at: string;
-        outcome: string;
-        key: string;
-        score?: number | null | undefined;
-        notes?: string | null | undefined;
-    }[] | undefined;
-}>;
+}, z.core.$strip>;
 export type PersonalityModel = z.infer<typeof personalityModel>;
 /** 单个变异提案 (作用于一个轴, delta 会被 applyMutations 夹取). */
 export declare const personalityMutation: z.ZodObject<{
     type: z.ZodDefault<z.ZodLiteral<"PersonalityMutation">>;
-    param: z.ZodEnum<["rigor", "creativity", "verbosity", "risk_tolerance", "obedience"]>;
+    param: z.ZodEnum<{
+        rigor: "rigor";
+        creativity: "creativity";
+        verbosity: "verbosity";
+        risk_tolerance: "risk_tolerance";
+        obedience: "obedience";
+    }>;
     delta: z.ZodNumber;
     reason: z.ZodDefault<z.ZodString>;
-}, "strip", z.ZodTypeAny, {
-    type: "PersonalityMutation";
-    delta: number;
-    reason: string;
-    param: "rigor" | "creativity" | "verbosity" | "risk_tolerance" | "obedience";
-}, {
-    delta: number;
-    param: "rigor" | "creativity" | "verbosity" | "risk_tolerance" | "obedience";
-    type?: "PersonalityMutation" | undefined;
-    reason?: string | undefined;
-}>;
+}, z.core.$strip>;
 export type PersonalityMutation = z.infer<typeof personalityMutation>;
 declare const clamp01: (x: unknown) => number;
 /**

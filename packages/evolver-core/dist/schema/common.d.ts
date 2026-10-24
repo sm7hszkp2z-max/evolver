@@ -11,18 +11,25 @@ export declare const artifactRef: z.ZodObject<{
     path: z.ZodString;
     sha256: z.ZodString;
     size: z.ZodNumber;
-}, "strip", z.ZodTypeAny, {
-    path: string;
-    sha256: string;
-    size: number;
-}, {
-    path: string;
-    sha256: string;
-    size: number;
-}>;
+}, z.core.$strip>;
 export type ArtifactRef = z.infer<typeof artifactRef>;
 /** runtime 来源 (D11). 'generic-chat' = 任何输出标准 OpenAI/Anthropic messages 的 AI(经 genericChatAdapter 接入). */
-export declare const sourceAgent: z.ZodEnum<["claude-code", "codex", "cursor", "gemini", "antigravity", "kimi", "kiro", "opencode", "generic-chat"]>;
+export declare const sourceAgent: z.ZodEnum<{
+    "claude-code": "claude-code";
+    codex: "codex";
+    cursor: "cursor";
+    gemini: "gemini";
+    antigravity: "antigravity";
+    kimi: "kimi";
+    kiro: "kiro";
+    opencode: "opencode";
+    "generic-chat": "generic-chat";
+}>;
 export type SourceAgent = z.infer<typeof sourceAgent>;
-export declare const blastRadius: z.ZodEnum<["file", "module", "package", "system"]>;
+export declare const blastRadius: z.ZodEnum<{
+    file: "file";
+    module: "module";
+    package: "package";
+    system: "system";
+}>;
 export type BlastRadius = z.infer<typeof blastRadius>;

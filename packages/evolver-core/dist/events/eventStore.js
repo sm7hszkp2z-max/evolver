@@ -72,7 +72,7 @@ function envelope(raw, identity) {
 }
 /** Size-only preflight using the writer's schema and the longest generated envelope. No I/O or IDs consumed. */
 export function fitsRootEventLine(raw) {
-    const value = envelope(raw, { seq: Number.MAX_VALUE, eventId: '0'.repeat(26), ts: '9999-12-31T23:59:59.999Z' });
+    const value = envelope(raw, { seq: Number.MAX_SAFE_INTEGER, eventId: '0'.repeat(26), ts: '9999-12-31T23:59:59.999Z' });
     return Buffer.byteLength(`${JSON.stringify(value)}\n`, 'utf8') <= MAX_LINE_BYTES;
 }
 export class LineTooLargeError extends Error {

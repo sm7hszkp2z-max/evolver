@@ -1232,8 +1232,6 @@ export async function connectHubRuntime(deps) {
     }
     const selection = resolvePublicNodeSecret(deps);
     const { nodeSecret, nodeSecretVersion } = selection;
-    if (!nodeSecret)
-        throw new Error('public legacy 模式需 EVOMAP_NODE_SECRET');
     persistSelectedPublicNodeSecret(deps.store, selection);
     const verifiedSender = createVerifiedPublicSender(selection.nodeId);
     const senderId = verifiedSender.senderId;

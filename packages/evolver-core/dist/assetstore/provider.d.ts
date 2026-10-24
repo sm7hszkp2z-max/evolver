@@ -73,6 +73,13 @@ export interface ContextLookupQueryV1 {
  * 可插拔资产库接口(D19/M3-1). 一份接口, 多实现: LocalJsonlProvider(本地) + Remote(hub).
  * core 可同时连多个 provider(本地 + 远程), 不造第四套契约.
  */
+export interface LocalProjectContextV1 {
+    readonly version: 1;
+    readonly capsuleAssetId: string;
+    readonly geneAssetId: string;
+    readonly notes: readonly string[];
+    readonly projectFingerprint?: string;
+}
 export interface AssetStoreProvider {
     readonly referenceScope?: ReferenceScope;
     /** Async read-only Gene + own qualification snapshot. Never loads optional Capsule/event pools.
@@ -98,6 +105,9 @@ export interface AssetStoreProvider {
      * 需要持久化相关资产组的调用方必须先确认此能力存在，不得退回顺序单条写入。
      * 返回结果按唯一 asset_id 各一条（同 bundle 内重复条目按幂等去重），调用方必须按 asset_id 键控消费结果，不得按索引与输入条目对齐。 */
     putBundle?(assets: readonly AssetRecord[]): Promise<PutResult[]>;
+    /** Atomic local context + asset transaction. Never emulate with two separate writes. */
+    putBundleWithLocalContextV1?(assets: readonly AssetRecord[], context: LocalProjectContextV1): Promise<PutResult[]>;
+    readLocalContextsV1?(capsuleAssetIds: readonly string[]): Promise<LocalProjectContextV1[]>;
     /** Optional atomic capability; use supportsAtomicConditionalPut() before calling through this interface. */
     putConditional?(asset: AssetRecord, options?: ConditionalPutOptions): Promise<ConditionalPutResult>;
     get(assetId: string): Promise<AssetRecord | null>;

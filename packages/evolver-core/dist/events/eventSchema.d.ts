@@ -1,6 +1,10 @@
 import { z } from 'zod';
 export declare const EVENT_SCHEMA_VERSION = "1.0.0";
-export declare const replayability: z.ZodEnum<["deterministic", "stochastic_recorded", "stochastic_unreproducible"]>;
+export declare const replayability: z.ZodEnum<{
+    deterministic: "deterministic";
+    stochastic_recorded: "stochastic_recorded";
+    stochastic_unreproducible: "stochastic_unreproducible";
+}>;
 export type Replayability = z.infer<typeof replayability>;
 /** 每事件自带叙述 (军杰 §9.2). title 必填. */
 export declare const humanNarrative: z.ZodObject<{
@@ -8,35 +12,23 @@ export declare const humanNarrative: z.ZodObject<{
     detail: z.ZodOptional<z.ZodString>;
     why: z.ZodOptional<z.ZodString>;
     next: z.ZodOptional<z.ZodString>;
-    severity: z.ZodDefault<z.ZodEnum<["info", "notice", "warn", "error"]>>;
+    severity: z.ZodDefault<z.ZodEnum<{
+        error: "error";
+        warn: "warn";
+        info: "info";
+        notice: "notice";
+    }>>;
     iconHint: z.ZodOptional<z.ZodString>;
-}, "strip", z.ZodTypeAny, {
-    severity: "warn" | "error" | "info" | "notice";
-    title: string;
-    detail?: string | undefined;
-    why?: string | undefined;
-    next?: string | undefined;
-    iconHint?: string | undefined;
-}, {
-    title: string;
-    severity?: "warn" | "error" | "info" | "notice" | undefined;
-    detail?: string | undefined;
-    why?: string | undefined;
-    next?: string | undefined;
-    iconHint?: string | undefined;
-}>;
+}, z.core.$strip>;
 export type HumanNarrative = z.infer<typeof humanNarrative>;
 /** 人/机操作审计 (军杰 §9.7). */
 export declare const actor: z.ZodObject<{
-    kind: z.ZodDefault<z.ZodEnum<["machine", "human"]>>;
+    kind: z.ZodDefault<z.ZodEnum<{
+        machine: "machine";
+        human: "human";
+    }>>;
     id: z.ZodOptional<z.ZodString>;
-}, "strip", z.ZodTypeAny, {
-    kind: "machine" | "human";
-    id?: string | undefined;
-}, {
-    kind?: "machine" | "human" | undefined;
-    id?: string | undefined;
-}>;
+}, z.core.$strip>;
 export type Actor = z.infer<typeof actor>;
 /** AE 事件信封 (军杰 §3.2). 内部类型 camelCase. */
 export declare const rootEvent: z.ZodObject<{
@@ -45,88 +37,35 @@ export declare const rootEvent: z.ZodObject<{
     ts: z.ZodString;
     type: z.ZodString;
     schemaVersion: z.ZodDefault<z.ZodString>;
-    replayability: z.ZodDefault<z.ZodEnum<["deterministic", "stochastic_recorded", "stochastic_unreproducible"]>>;
+    replayability: z.ZodDefault<z.ZodEnum<{
+        deterministic: "deterministic";
+        stochastic_recorded: "stochastic_recorded";
+        stochastic_unreproducible: "stochastic_unreproducible";
+    }>>;
     payload: z.ZodDefault<z.ZodUnknown>;
     human: z.ZodObject<{
         title: z.ZodString;
         detail: z.ZodOptional<z.ZodString>;
         why: z.ZodOptional<z.ZodString>;
         next: z.ZodOptional<z.ZodString>;
-        severity: z.ZodDefault<z.ZodEnum<["info", "notice", "warn", "error"]>>;
+        severity: z.ZodDefault<z.ZodEnum<{
+            error: "error";
+            warn: "warn";
+            info: "info";
+            notice: "notice";
+        }>>;
         iconHint: z.ZodOptional<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        severity: "warn" | "error" | "info" | "notice";
-        title: string;
-        detail?: string | undefined;
-        why?: string | undefined;
-        next?: string | undefined;
-        iconHint?: string | undefined;
-    }, {
-        title: string;
-        severity?: "warn" | "error" | "info" | "notice" | undefined;
-        detail?: string | undefined;
-        why?: string | undefined;
-        next?: string | undefined;
-        iconHint?: string | undefined;
-    }>;
+    }, z.core.$strip>;
     actor: z.ZodDefault<z.ZodObject<{
-        kind: z.ZodDefault<z.ZodEnum<["machine", "human"]>>;
+        kind: z.ZodDefault<z.ZodEnum<{
+            machine: "machine";
+            human: "human";
+        }>>;
         id: z.ZodOptional<z.ZodString>;
-    }, "strip", z.ZodTypeAny, {
-        kind: "machine" | "human";
-        id?: string | undefined;
-    }, {
-        kind?: "machine" | "human" | undefined;
-        id?: string | undefined;
-    }>>;
-    /** Protected-writer replay key, minted by the service and never by a caller. */
+    }, z.core.$strip>>;
     auditOperationId: z.ZodOptional<z.ZodString>;
     auditRequestHash: z.ZodOptional<z.ZodString>;
-}, "strip", z.ZodTypeAny, {
-    type: string;
-    actor: {
-        kind: "machine" | "human";
-        id?: string | undefined;
-    };
-    schemaVersion: string;
-    ts: string;
-    human: {
-        severity: "warn" | "error" | "info" | "notice";
-        title: string;
-        detail?: string | undefined;
-        why?: string | undefined;
-        next?: string | undefined;
-        iconHint?: string | undefined;
-    };
-    seq: number;
-    eventId: string;
-    replayability: "deterministic" | "stochastic_recorded" | "stochastic_unreproducible";
-    payload?: unknown;
-    auditOperationId?: string | undefined;
-    auditRequestHash?: string | undefined;
-}, {
-    type: string;
-    ts: string;
-    human: {
-        title: string;
-        severity?: "warn" | "error" | "info" | "notice" | undefined;
-        detail?: string | undefined;
-        why?: string | undefined;
-        next?: string | undefined;
-        iconHint?: string | undefined;
-    };
-    seq: number;
-    eventId: string;
-    payload?: unknown;
-    actor?: {
-        kind?: "machine" | "human" | undefined;
-        id?: string | undefined;
-    } | undefined;
-    schemaVersion?: string | undefined;
-    replayability?: "deterministic" | "stochastic_recorded" | "stochastic_unreproducible" | undefined;
-    auditOperationId?: string | undefined;
-    auditRequestHash?: string | undefined;
-}>;
+}, z.core.$strip>;
 export type RootEvent = z.infer<typeof rootEvent>;
 /** append 入参: seq/eventId/ts 由 store 生成. */
 export type RawEvent = {

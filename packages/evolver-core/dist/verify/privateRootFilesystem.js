@@ -69,7 +69,10 @@ export function privateRootFilesystemSetup(scratchBytes, trustedPath) {
         // are exactly why recursive inherited-root isolation can be unavailable.
         'for path in /usr/bin /bin /usr/sbin /sbin /usr/lib/*-linux-gnu /lib/*-linux-gnu /usr/lib64 /lib64 /usr/lib/cargo/bin/coreutils /usr/lib/python* /lib/python* /usr/libexec /usr/share/nodejs /usr/share/zoneinfo; do if [ -d "$path" ]; then mkdir -p "$jail$path" && mount --bind "$path" "$jail$path" && mount -o remount,bind,ro,nosuid,nodev "$jail$path" || exit 126; fi; done',
         // Flat musl/non-multiarch library layouts still need their loaders/libraries.
-        'for path in /usr/lib/*.so* /lib/*.so*; do if [ -f "$path" ]; then mkdir -p "$jail$(dirname "$path")" && : > "$jail$path" && mount --bind "$path" "$jail$path" && mount -o remount,bind,ro,nosuid,nodev "$jail$path" || exit 126; fi; done',
+        // Each fixed glob visits one lexical parent contiguously (even on usrmerge).
+        // Reset per setup; only cache a parent after its mkdir succeeds.
+        'flat_lib_parent=""',
+        'for path in /usr/lib/*.so* /lib/*.so*; do if [ -f "$path" ]; then if [ "$flat_lib_parent" != "${path%/*}" ]; then mkdir -p "$jail${path%/*}" || exit 126; flat_lib_parent="${path%/*}"; fi; : > "$jail$path" && mount --bind "$path" "$jail$path" && mount -o remount,bind,ro,nosuid,nodev "$jail$path" || exit 126; fi; done',
         'mkdir -p "$jail/tmp" "$jail/proc" "$jail/dev" || exit 126',
         `mount -t tmpfs -o mode=1777,size=${scratchBytes},nr_inodes=65536 none "$jail/tmp" || exit 126`,
         'mkdir -p "$jail/tmp/home" "$jail/tmp/.evolver-bin" "$jail$validation_root" || exit 126',

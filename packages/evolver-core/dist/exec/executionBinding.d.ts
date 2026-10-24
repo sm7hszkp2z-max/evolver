@@ -10,245 +10,55 @@ export declare const executionBindingInputSchema: z.ZodObject<{
     claim_identity: z.ZodObject<{
         claim_id: z.ZodString;
         claimant_id: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        claim_id: string;
-        claimant_id: string;
-    }, {
-        claim_id: string;
-        claimant_id: string;
-    }>;
+    }, z.core.$strict>;
     lease_identity: z.ZodObject<{
         lease_id: z.ZodString;
         lease_expires_at: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        lease_id: string;
-        lease_expires_at: string;
-    }, {
-        lease_id: string;
-        lease_expires_at: string;
-    }>;
+    }, z.core.$strict>;
     target_descriptor: z.ZodObject<{
         repo_id: z.ZodString;
         selector: z.ZodString;
         expected_effect: z.ZodString;
         base_revision: z.ZodNullable<z.ZodString>;
-    }, "strict", z.ZodTypeAny, {
-        repo_id: string;
-        selector: string;
-        expected_effect: string;
-        base_revision: string | null;
-    }, {
-        repo_id: string;
-        selector: string;
-        expected_effect: string;
-        base_revision: string | null;
-    }>;
+    }, z.core.$strict>;
     target_digest: z.ZodString;
     acceptance_spec: z.ZodObject<{
         spec_id: z.ZodString;
         version: z.ZodString;
         digest: z.ZodString;
         validation_plan_digest: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        digest: string;
-        version: string;
-        spec_id: string;
-        validation_plan_digest: string;
-    }, {
-        digest: string;
-        version: string;
-        spec_id: string;
-        validation_plan_digest: string;
-    }>;
+    }, z.core.$strict>;
     deadline: z.ZodString;
     budget: z.ZodObject<{
         max_credits: z.ZodNumber;
-    }, "strict", z.ZodTypeAny, {
-        max_credits: number;
-    }, {
-        max_credits: number;
-    }>;
+    }, z.core.$strict>;
     resource_grant: z.ZodObject<{
-        allowed_roots: z.ZodArray<z.ZodString, "many">;
+        allowed_roots: z.ZodArray<z.ZodString>;
         max_runtime_ms: z.ZodNumber;
         max_files: z.ZodNumber;
         max_lines: z.ZodNumber;
-        validation_commands: z.ZodArray<z.ZodString, "many">;
-    }, "strict", z.ZodTypeAny, {
-        max_files: number;
-        validation_commands: string[];
-        max_lines: number;
-        allowed_roots: string[];
-        max_runtime_ms: number;
-    }, {
-        max_files: number;
-        validation_commands: string[];
-        max_lines: number;
-        allowed_roots: string[];
-        max_runtime_ms: number;
-    }>;
+        validation_commands: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>;
     consent_grant: z.ZodObject<{
         grant_id: z.ZodString;
         subject: z.ZodString;
-        scopes: z.ZodArray<z.ZodString, "many">;
+        scopes: z.ZodArray<z.ZodString>;
         issued_at: z.ZodString;
         expires_at: z.ZodString;
         target_digest: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        expires_at: string;
-        scopes: string[];
-        grant_id: string;
-        subject: string;
-        issued_at: string;
-        target_digest: string;
-    }, {
-        expires_at: string;
-        scopes: string[];
-        grant_id: string;
-        subject: string;
-        issued_at: string;
-        target_digest: string;
-    }>;
+    }, z.core.$strict>;
     correlation: z.ZodObject<{
         run_id: z.ZodString;
         cycle_id: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        run_id: string;
-        cycle_id: string;
-    }, {
-        run_id: string;
-        cycle_id: string;
-    }>;
+    }, z.core.$strict>;
     selected_context: z.ZodObject<{
         gene_id: z.ZodNullable<z.ZodString>;
         gene_asset_id: z.ZodNullable<z.ZodString>;
         capsule_id: z.ZodNullable<z.ZodString>;
         capsule_asset_id: z.ZodNullable<z.ZodString>;
         context_digest: z.ZodString;
-    }, "strict", z.ZodTypeAny, {
-        capsule_id: string | null;
-        gene_id: string | null;
-        gene_asset_id: string | null;
-        capsule_asset_id: string | null;
-        context_digest: string;
-    }, {
-        capsule_id: string | null;
-        gene_id: string | null;
-        gene_asset_id: string | null;
-        capsule_asset_id: string | null;
-        context_digest: string;
-    }>;
-}, "strict", z.ZodTypeAny, {
-    schema_version: "execution-binding.v1";
-    selected_context: {
-        capsule_id: string | null;
-        gene_id: string | null;
-        gene_asset_id: string | null;
-        capsule_asset_id: string | null;
-        context_digest: string;
-    };
-    deadline: string;
-    budget: {
-        max_credits: number;
-    };
-    target_digest: string;
-    bounty_id: string | null;
-    task_id: string;
-    claim_identity: {
-        claim_id: string;
-        claimant_id: string;
-    };
-    lease_identity: {
-        lease_id: string;
-        lease_expires_at: string;
-    };
-    target_descriptor: {
-        repo_id: string;
-        selector: string;
-        expected_effect: string;
-        base_revision: string | null;
-    };
-    acceptance_spec: {
-        digest: string;
-        version: string;
-        spec_id: string;
-        validation_plan_digest: string;
-    };
-    resource_grant: {
-        max_files: number;
-        validation_commands: string[];
-        max_lines: number;
-        allowed_roots: string[];
-        max_runtime_ms: number;
-    };
-    consent_grant: {
-        expires_at: string;
-        scopes: string[];
-        grant_id: string;
-        subject: string;
-        issued_at: string;
-        target_digest: string;
-    };
-    correlation: {
-        run_id: string;
-        cycle_id: string;
-    };
-}, {
-    schema_version: "execution-binding.v1";
-    selected_context: {
-        capsule_id: string | null;
-        gene_id: string | null;
-        gene_asset_id: string | null;
-        capsule_asset_id: string | null;
-        context_digest: string;
-    };
-    deadline: string;
-    budget: {
-        max_credits: number;
-    };
-    target_digest: string;
-    bounty_id: string | null;
-    task_id: string;
-    claim_identity: {
-        claim_id: string;
-        claimant_id: string;
-    };
-    lease_identity: {
-        lease_id: string;
-        lease_expires_at: string;
-    };
-    target_descriptor: {
-        repo_id: string;
-        selector: string;
-        expected_effect: string;
-        base_revision: string | null;
-    };
-    acceptance_spec: {
-        digest: string;
-        version: string;
-        spec_id: string;
-        validation_plan_digest: string;
-    };
-    resource_grant: {
-        max_files: number;
-        validation_commands: string[];
-        max_lines: number;
-        allowed_roots: string[];
-        max_runtime_ms: number;
-    };
-    consent_grant: {
-        expires_at: string;
-        scopes: string[];
-        grant_id: string;
-        subject: string;
-        issued_at: string;
-        target_digest: string;
-    };
-    correlation: {
-        run_id: string;
-        cycle_id: string;
-    };
-}>;
+    }, z.core.$strict>;
+}, z.core.$strict>;
 export type ExecutionBindingInput = z.infer<typeof executionBindingInputSchema>;
 export type BindingDigest = `sha256:${string}`;
 export type FrozenExecutionBinding = Readonly<ExecutionBindingInput & {

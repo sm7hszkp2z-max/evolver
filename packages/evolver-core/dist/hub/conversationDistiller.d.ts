@@ -33,6 +33,11 @@ export interface ConversationDistillInput {
     min_score?: unknown;
     minScore?: unknown;
     persist?: unknown;
+    /** Facts that hold only in this project (files, fields, quirks). Kept on the local Capsule, never published. */
+    project_notes?: unknown;
+    /** The answer the conversation ended with: its values must not reach the reusable Gene. */
+    final_answer?: unknown;
+    cost_tokens?: unknown;
     [k: string]: unknown;
 }
 interface NormalizedExecution {
@@ -54,6 +59,9 @@ interface NormalizedExecution {
 interface NormalizedConversation {
     text: string;
     summary: string;
+    userPrompt: string;
+    projectNotes: string[];
+    answerValues: string[];
     signals: string[];
     preconditions: string[];
     strategy: string[];
@@ -134,6 +142,8 @@ export type ConversationDistillResult = {
 }));
 export declare function inferSignals(text: string, providedSignals?: unknown): string[];
 export declare function evaluateGate(input: ConversationDistillInput, normalized: NormalizedConversation): QualityGate;
+export declare function answerValues(finalAnswer: string, prompt: string): string[];
+export declare function projectSpecificTerms(texts: readonly string[], patterns?: RegExp[]): string[];
 export declare function normalizeConversationInput(input: ConversationDistillInput): NormalizedConversation;
 export declare function createConversationVerificationRequest(input: ConversationDistillInput, validation: readonly string[], runtime: string, nonce: string, policy?: ConversationGenePolicy): PublishVerificationRequest;
 export declare function distillConversation(input: ConversationDistillInput, opts?: ConversationDistillOptions): Promise<ConversationDistillResult>;

@@ -7,7 +7,7 @@ const MAX_STAGES = 16;
 const phases = new Set(['worker_first_ipc', 'worker_close', 'gene_snapshot',
     'related_snapshot', 'prompt_selection', 'prompt_assembly', 'delivery_prepare',
     'delivery_validate', 'delivery_journal_open', 'delivery_journal_transaction',
-    'delivery_journal_close', 'delivery_cleanup', 'worker_bootstrap', 'worker_native_ready', 'worker_lstat']);
+    'delivery_journal_close', 'delivery_cleanup', 'worker_bootstrap', 'worker_native_ready', 'worker_lstat', 'snapshot_owned']);
 const rejectionCodes = new Map([
     ['transport_timeout_unknown', 'transport_timeout_unknown'], ['transport_aborted_unknown', 'transport_aborted_unknown'],
     ['transport_closed_unknown', 'transport_closed_unknown'], ['admission_expired', 'admission_expired'],
@@ -17,6 +17,62 @@ const rejectionCodes = new Map([
 const preparationCodes = new Set(['prepared', 'rejected', 'invalid_capability', 'deadline', 'timeout', 'not_configured',
     ...rejectionCodes.values()]);
 const snapshotCodes = new Set(['snapshot_aborted', 'snapshot_rejected']);
+const transactionParts = ['begin', 'body', 'commit', 'rollback'];
+function safeTransactionTiming(value) {
+    try {
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+            || Object.keys(value).some(key => !transactionParts.includes(key)))
+            return undefined;
+        const result = {};
+        for (const part of transactionParts) {
+            const timing = value[part];
+            if (timing === undefined)
+                continue;
+            if (!Array.isArray(timing) || timing.length !== 2)
+                return undefined;
+            const durationMs = timing[0], outcome = timing[1];
+            if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0 || durationMs > Number.MAX_SAFE_INTEGER
+                || !['fulfilled', 'rejected'].includes(outcome))
+                return undefined;
+            result[part] = [durationMs, outcome];
+        }
+        return Object.keys(result).length ? result : undefined;
+    }
+    catch {
+        return undefined;
+    } // Untrusted diagnostic access cannot mask the original error.
+}
+const snapshotParts = ['root', 'assets', 'metadata', 'verify', 'cleanup'];
+/** Copy finite primitives once; optional diagnostic objects never reach serialization. */
+function safeSnapshotOwnedTiming(value) {
+    try {
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+            || Object.keys(value).some(key => key !== 'kind' && !snapshotParts.includes(key)))
+            return undefined;
+        const kind = Reflect.get(value, 'kind');
+        if (kind !== 'gene' && kind !== 'related')
+            return undefined;
+        const result = { kind };
+        let parts = 0;
+        for (const part of snapshotParts) {
+            const timing = Reflect.get(value, part);
+            if (timing === undefined)
+                continue;
+            if (!Array.isArray(timing) || timing.length !== 2)
+                return undefined;
+            const duration = timing[0], outcome = timing[1];
+            if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0 || duration > Number.MAX_SAFE_INTEGER
+                || (outcome !== 'fulfilled' && outcome !== 'rejected'))
+                return undefined;
+            result[part] = [duration, outcome];
+            parts++;
+        }
+        return parts ? result : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
 /** Classify only known typed failures; arbitrary service/error text never enters diagnostics. */
 export function contextDeliveryRejectionCode(error) {
     try {
@@ -43,6 +99,11 @@ function contextSnapshotRejectionCode(error) {
         return 'snapshot_rejected';
     }
 }
+/** Retain one actual settlement, never attach a later detail to an earlier outcome/duration. */
+function representativeStage(stages, phase) {
+    return (phase === 'delivery_journal_transaction' ? stages.find(stage => stage.phase === phase && stage.transaction) : undefined)
+        ?? stages.find(stage => stage.phase === phase);
+}
 /** Opt-in invocation diagnostics contain timings only, never records, paths or errors.
  * The observer runs after the operation and cannot spend its selection deadline. */
 export function withContextReadDiagnostics(enabled, run, report) {
@@ -55,8 +116,22 @@ export function withContextReadDiagnostics(enabled, run, report) {
         }
         finally {
             try {
-                void Promise.resolve(report({ schema: 'evolver.context-read-timing.v1',
-                    stages: collector.stages.map(stage => ({ ...stage })), truncated: collector.truncated, pendingStages: collector.pendingStages })).catch(() => undefined);
+                const value = { schema: 'evolver.context-read-timing.v1',
+                    stages: collector.stages.map(stage => ({ ...stage })), truncated: collector.truncated, pendingStages: collector.pendingStages };
+                // The stderr writer's existing 2048-byte limit drops an oversized line
+                // entirely. Compact duplicate settlements instead, after the operation,
+                // keeping every distinct phase and its first valid transaction settlement.
+                if (Buffer.byteLength(`context-read-stage-diagnostic ${JSON.stringify(value)}\n`) > 2048) {
+                    value.stages = value.stages.filter((stage, _index, stages) => representativeStage(stages, stage.phase) === stage);
+                    value.truncated = true;
+                }
+                // Keep the writer's prefix/newline within the same byte cap. Only the
+                // new optional detail may be sacrificed, never a legacy code/transaction.
+                if (Buffer.byteLength(`context-read-stage-diagnostic ${JSON.stringify(value)}\n`) > 2048) {
+                    value.stages = value.stages.map(({ snapshot: _snapshot, ...stage }) => stage);
+                    value.truncated = true;
+                }
+                void Promise.resolve(report(value)).catch(() => undefined);
             }
             catch { /* A diagnostic observer must not replace the operation's outcome. */ }
         }
@@ -66,22 +141,63 @@ export function startContextReadStage(phase) {
     const collector = diagnostic.getStore();
     if (!collector || !phases.has(phase))
         return undefined;
+    // Clock acquisition is observation, not operation admission. Do not leave a
+    // phantom pending stage if it fails before a finish callback exists.
+    let started;
+    try {
+        started = performance.now();
+        if (!Number.isFinite(started)) {
+            collector.truncated = true;
+            return undefined;
+        }
+    }
+    catch {
+        collector.truncated = true;
+        return undefined;
+    }
     collector.pendingStages++;
-    const started = performance.now();
     let recorded = false;
-    return (outcome, code) => {
+    return (outcome, code, transaction, snapshot) => {
         if (recorded)
             return;
         recorded = true;
         collector.pendingStages--;
-        if (collector.stages.length >= MAX_STAGES) {
-            collector.truncated = true;
-            return;
+        try {
+            const elapsed = performance.now() - started;
+            const durationMs = Math.round(elapsed * 100) / 100;
+            if (!Number.isFinite(durationMs) || elapsed < 0) {
+                collector.truncated = true;
+                return;
+            }
+            const detail = phase === 'delivery_journal_transaction' ? safeTransactionTiming(transaction) : undefined;
+            const owned = phase === 'snapshot_owned' ? safeSnapshotOwnedTiming(snapshot) : undefined;
+            if (collector.stages.length >= MAX_STAGES) {
+                collector.truncated = true;
+                const representative = representativeStage(collector.stages, phase);
+                if (representative) {
+                    if (representative.transaction || !detail)
+                        return;
+                    // The first valid transaction replaces an empty representative as a whole
+                    // stage. Append below to preserve the actual settlement order.
+                    collector.stages.splice(collector.stages.indexOf(representative), 1);
+                }
+                else {
+                    // Fewer distinct allowed phases than slots: admit a missing phase by
+                    // evicting only a duplicate, never its first valid transaction settlement.
+                    const duplicate = collector.stages.findIndex(stage => representativeStage(collector.stages, stage.phase) !== stage);
+                    if (duplicate < 0)
+                        return;
+                    collector.stages.splice(duplicate, 1);
+                }
+            }
+            const allowedCode = code && ((phase === 'delivery_prepare' && preparationCodes.has(code))
+                || ((phase === 'gene_snapshot' || phase === 'related_snapshot') && outcome === 'rejected' && snapshotCodes.has(code)));
+            collector.stages.push({ phase, durationMs, outcome,
+                ...(allowedCode ? { code } : {}), ...(detail ? { transaction: detail } : {}), ...(owned ? { snapshot: owned } : {}) });
         }
-        const allowedCode = code && ((phase === 'delivery_prepare' && preparationCodes.has(code))
-            || ((phase === 'gene_snapshot' || phase === 'related_snapshot') && outcome === 'rejected' && snapshotCodes.has(code)));
-        collector.stages.push({ phase, durationMs: Math.round(Math.max(0, performance.now() - started) * 100) / 100, outcome,
-            ...(allowedCode ? { code } : {}) });
+        catch {
+            collector.truncated = true;
+        } // Settlement must not replace the operation's result/error.
     };
 }
 export function measureContextReadStage(phase, run) {

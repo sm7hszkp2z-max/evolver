@@ -6,19 +6,7 @@ export declare const valueFactors: z.ZodObject<{
     strategicFit: z.ZodDefault<z.ZodNumber>;
     novelty: z.ZodDefault<z.ZodNumber>;
     costEst: z.ZodDefault<z.ZodNumber>;
-}, "strip", z.ZodTypeAny, {
-    severity: number;
-    reach: number;
-    strategicFit: number;
-    novelty: number;
-    costEst: number;
-}, {
-    severity?: number | undefined;
-    reach?: number | undefined;
-    strategicFit?: number | undefined;
-    novelty?: number | undefined;
-    costEst?: number | undefined;
-}>;
+}, z.core.$strip>;
 export type ValueFactors = z.infer<typeof valueFactors>;
 export declare const problemPattern: z.ZodObject<{
     id: z.ZodString;
@@ -27,72 +15,25 @@ export declare const problemPattern: z.ZodObject<{
     firstSeenAt: z.ZodString;
     lastSeenAt: z.ZodString;
     occurrences: z.ZodDefault<z.ZodNumber>;
-    linkedSignals: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    linkedSignals: z.ZodDefault<z.ZodArray<z.ZodString>>;
     resolvedBy: z.ZodDefault<z.ZodNullable<z.ZodString>>;
-    status: z.ZodDefault<z.ZodEnum<["open", "cooling", "resolved", "abandoned"]>>;
-    value: z.ZodDefault<z.ZodObject<{
+    status: z.ZodDefault<z.ZodEnum<{
+        open: "open";
+        cooling: "cooling";
+        resolved: "resolved";
+        abandoned: "abandoned";
+    }>>;
+    value: z.ZodPrefault<z.ZodObject<{
         severity: z.ZodDefault<z.ZodNumber>;
         reach: z.ZodDefault<z.ZodNumber>;
         strategicFit: z.ZodDefault<z.ZodNumber>;
         novelty: z.ZodDefault<z.ZodNumber>;
         costEst: z.ZodDefault<z.ZodNumber>;
-    }, "strip", z.ZodTypeAny, {
-        severity: number;
-        reach: number;
-        strategicFit: number;
-        novelty: number;
-        costEst: number;
-    }, {
-        severity?: number | undefined;
-        reach?: number | undefined;
-        strategicFit?: number | undefined;
-        novelty?: number | undefined;
-        costEst?: number | undefined;
-    }>>;
+    }, z.core.$strip>>;
     consecutiveFailures: z.ZodDefault<z.ZodNumber>;
     cooldownUntil: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     extensions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    value: {
-        severity: number;
-        reach: number;
-        strategicFit: number;
-        novelty: number;
-        costEst: number;
-    };
-    status: "open" | "cooling" | "resolved" | "abandoned";
-    extensions: Record<string, unknown>;
-    signatureV: number;
-    id: string;
-    signature: string;
-    firstSeenAt: string;
-    lastSeenAt: string;
-    occurrences: number;
-    linkedSignals: string[];
-    resolvedBy: string | null;
-    consecutiveFailures: number;
-    cooldownUntil: string | null;
-}, {
-    id: string;
-    signature: string;
-    firstSeenAt: string;
-    lastSeenAt: string;
-    value?: {
-        severity?: number | undefined;
-        reach?: number | undefined;
-        strategicFit?: number | undefined;
-        novelty?: number | undefined;
-        costEst?: number | undefined;
-    } | undefined;
-    status?: "open" | "cooling" | "resolved" | "abandoned" | undefined;
-    extensions?: Record<string, unknown> | undefined;
-    signatureV?: number | undefined;
-    occurrences?: number | undefined;
-    linkedSignals?: string[] | undefined;
-    resolvedBy?: string | null | undefined;
-    consecutiveFailures?: number | undefined;
-    cooldownUntil?: string | null | undefined;
-}>;
+}, z.core.$strip>;
 export type ProblemPattern = z.infer<typeof problemPattern>;
 export declare const problemInstance: z.ZodObject<{
     instanceId: z.ZodString;
@@ -101,60 +42,23 @@ export declare const problemInstance: z.ZodObject<{
     occurredAt: z.ZodString;
     linkedSignal: z.ZodOptional<z.ZodString>;
     extensions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    extensions: Record<string, unknown>;
-    signatureV: number;
-    signature: string;
-    instanceId: string;
-    occurredAt: string;
-    linkedSignal?: string | undefined;
-}, {
-    signature: string;
-    instanceId: string;
-    occurredAt: string;
-    extensions?: Record<string, unknown> | undefined;
-    signatureV?: number | undefined;
-    linkedSignal?: string | undefined;
-}>;
+}, z.core.$strip>;
 export type ProblemInstance = z.infer<typeof problemInstance>;
 /** 解法边界 = gene 唯一登场处 (军杰 §4.4). */
 export declare const resolutionScope: z.ZodObject<{
     scopeId: z.ZodString;
-    targetProblems: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    targetProblems: z.ZodDefault<z.ZodArray<z.ZodString>>;
     proposedByGene: z.ZodDefault<z.ZodNullable<z.ZodString>>;
     boundary: z.ZodObject<{
-        codePaths: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-        dataSurfaces: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
-        blastRadius: z.ZodDefault<z.ZodEnum<["file", "module", "package", "system"]>>;
-    }, "strip", z.ZodTypeAny, {
-        codePaths: string[];
-        dataSurfaces: string[];
-        blastRadius: "file" | "module" | "package" | "system";
-    }, {
-        codePaths?: string[] | undefined;
-        dataSurfaces?: string[] | undefined;
-        blastRadius?: "file" | "module" | "package" | "system" | undefined;
-    }>;
+        codePaths: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        dataSurfaces: z.ZodDefault<z.ZodArray<z.ZodString>>;
+        blastRadius: z.ZodDefault<z.ZodEnum<{
+            file: "file";
+            module: "module";
+            package: "package";
+            system: "system";
+        }>>;
+    }, z.core.$strip>;
     extensions: z.ZodDefault<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
-}, "strip", z.ZodTypeAny, {
-    extensions: Record<string, unknown>;
-    scopeId: string;
-    targetProblems: string[];
-    proposedByGene: string | null;
-    boundary: {
-        codePaths: string[];
-        dataSurfaces: string[];
-        blastRadius: "file" | "module" | "package" | "system";
-    };
-}, {
-    scopeId: string;
-    boundary: {
-        codePaths?: string[] | undefined;
-        dataSurfaces?: string[] | undefined;
-        blastRadius?: "file" | "module" | "package" | "system" | undefined;
-    };
-    extensions?: Record<string, unknown> | undefined;
-    targetProblems?: string[] | undefined;
-    proposedByGene?: string | null | undefined;
-}>;
+}, z.core.$strip>;
 export type ResolutionScope = z.infer<typeof resolutionScope>;

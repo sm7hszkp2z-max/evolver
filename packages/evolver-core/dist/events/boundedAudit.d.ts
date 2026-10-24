@@ -28,10 +28,12 @@ export declare class AuditWriteSkipped extends Error {
     readonly reason: string;
     constructor(reason: string);
 }
+/** Shared only by durable context preparation and its stdout admission callers. */
+export declare const DEFAULT_CONTEXT_PREPARATION_BUDGET_MS = 750;
 export declare class AuditBudget {
     private readonly options;
     private readonly deadline;
-    constructor(options?: AuditWriteOptions);
+    constructor(options?: AuditWriteOptions, phase?: 'audit' | 'context_preparation');
     check(): void;
     pause(): Promise<void>;
 }
