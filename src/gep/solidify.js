@@ -4,7 +4,7 @@ const { execSync } = require('child_process');
 const { loadGenes, upsertGene, appendEventJsonl, appendCapsule, upsertCapsule, getLastEventId, appendFailedCapsule } = require('./assetStore');
 const { computeSignalKey, memoryGraphPath } = require('./memoryGraph');
 const { computeCapsuleSuccessStreak, isBlastRadiusSafe } = require('./a2a');
-const { getRepoRoot, getMemoryDir, getEvolutionDir, getWorkspaceRoot } = require('./paths');
+const { getRepoRoot, getMemoryDir, getEvolutionDir, getWorkspaceRoot, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./paths');
 const { extractSignals } = require('./signals');
 const { selectGene } = require('./selector');
 const { isValidMutation, normalizeMutation, isHighRiskMutationAllowed, isHighRiskPersonality } = require('./mutation');
@@ -973,12 +973,16 @@ function ensureGene({ genes, selectedGene, signals, intent, dryRun }) {
 
 function readRecentSessionInputs() {
   const repoRoot = getRepoRoot();
-  const memoryDir = getMemoryDir();
-  const rootMemory = path.join(repoRoot, 'MEMORY.md');
-  const dirMemory = path.join(memoryDir, 'MEMORY.md');
-  const memoryFile = fs.existsSync(rootMemory) ? rootMemory : dirMemory;
-  const userFile = path.join(repoRoot, 'USER.md');
-  const todayLog = path.join(memoryDir, new Date().toISOString().split('T')[0] + '.md');
+  // Resolve MEMORY.md / USER.md / daily notes against the OpenClaw agent workspace,
+  // not the evolver repo root -- otherwise every run reports memory/user missing.
+  const workspaceRoot = getOpenclawWorkspaceRoot();
+  const workspaceMemoryDir = getOpenclawMemoryDir();
+  const rootMemory = path.join(workspaceRoot, 'MEMORY.md');
+  const dirMemory = path.join(workspaceMemoryDir, 'MEMORY.md');
+  const repoMemory = path.join(repoRoot, 'MEMORY.md');
+  const memoryFile = fs.existsSync(rootMemory) ? rootMemory : (fs.existsSync(dirMemory) ? dirMemory : repoMemory);
+  const userFile = path.join(workspaceRoot, 'USER.md');
+  const todayLog = path.join(workspaceMemoryDir, localDateStamp() + '.md');
   const todayLogContent = fs.existsSync(todayLog) ? fs.readFileSync(todayLog, 'utf8') : '';
   const memorySnippet = fs.existsSync(memoryFile) ? fs.readFileSync(memoryFile, 'utf8').slice(0, 50000) : '';
   const userSnippet = fs.existsSync(userFile) ? fs.readFileSync(userFile, 'utf8') : '';

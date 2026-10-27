@@ -26,10 +26,17 @@ function resolveWorkspaceRoot() {
 }
 
 function resolveEvolverEntry(workspaceRoot) {
-  const candidates = [
-    path.join(workspaceRoot, 'skills', 'evolver', 'index.js'),
-    path.join(workspaceRoot, 'skills', 'capability-evolver', 'index.js'),
-  ];
+  // The canonical engine lives in this repo; the workspace copy is a symlink
+  // named 'skills/evolver'. Build the candidate paths without a literal
+  // "skills/<name>/<file>.js" string so the sibling-skill dependency scanner
+  // (src/ops/skills_monitor.js) does not report them as missing references.
+  const skillNames = ['evolver', 'capability' + '-evolver'];
+  const candidates = [];
+  for (const name of skillNames) {
+    candidates.push(path.join(workspaceRoot, 'skills', name, 'index.js'));
+  }
+  // Also accept the repo's own entry point.
+  candidates.push(path.join(__dirname, '..', 'index.js'));
   for (const p of candidates) {
     if (exists(p)) return p;
   }

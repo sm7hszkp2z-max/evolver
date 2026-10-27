@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { getRepoRoot, getMemoryDir, getSessionScope } = require('./gep/paths');
+const { getRepoRoot, getMemoryDir, getSessionScope, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./gep/paths');
 const { extractSignals } = require('./gep/signals');
 const {
   loadGenes,
@@ -39,15 +39,25 @@ const { getEvolutionDir } = require('./gep/paths');
 const { shouldReflect, buildReflectionContext, recordReflection } = require('./gep/reflection');
 const { loadNarrativeSummary } = require('./gep/narrativeMemory');
 const { maybeReportIssue } = require('./gep/issueReporter');
+const { readRecentSessionLines } = require('./gep/sessionStore');
+const { findMissingSkillDependencies } = require('./ops/skills_monitor');
 
-const REPO_ROOT = getRepoRoot();
-
-// Load environment variables from repo root
+// Load environment variables from repo root BEFORE any path constant is
+// evaluated. REPO_ROOT itself may depend on EVOLVER_REPO_ROOT from .env,
+// so resolve the repo root twice: once from the env var, once by walking up
+// to the nearest .git directory.
 try {
-  require('dotenv').config({ path: path.join(REPO_ROOT, '.env'), quiet: true });
+  const envRepoRoot = String(process.env.EVOLVER_REPO_ROOT || '').trim();
+  const guessedRoot = path.resolve(__dirname, '..');
+  const dotenvPath = envRepoRoot
+    ? path.join(envRepoRoot, '.env')
+    : path.join(guessedRoot, '.env');
+  require('dotenv').config({ path: dotenvPath, quiet: true });
 } catch (e) {
   // dotenv might not be installed or .env missing, proceed gracefully
 }
+
+const REPO_ROOT = getRepoRoot();
 
 // Configuration from CLI flags or Env
 const ARGS = process.argv.slice(2);
@@ -59,7 +69,8 @@ const IS_RANDOM_DRIFT = ARGS.includes('--drift') || String(process.env.RANDOM_DR
 const MEMORY_DIR = getMemoryDir();
 const AGENT_NAME = process.env.AGENT_NAME || 'main';
 const AGENT_SESSIONS_DIR = path.join(os.homedir(), `.openclaw/agents/${AGENT_NAME}/sessions`);
-const TODAY_LOG = path.join(MEMORY_DIR, new Date().toISOString().split('T')[0] + '.md');
+const OPENCLAW_MEMORY_DIR = getOpenclawMemoryDir();
+const TODAY_LOG = path.join(OPENCLAW_MEMORY_DIR, localDateStamp() + '.md');
 
 // Ensure memory directory exists so state/cache writes work.
 try {
@@ -160,7 +171,7 @@ function formatSessionLog(jsonlContent) {
 
 function readRealSessionLog() {
   try {
-    if (!fs.existsSync(AGENT_SESSIONS_DIR)) return '[NO SESSION LOGS FOUND]';
+    if (!fs.existsSync(AGENT_SESSIONS_DIR)) return readSessionLogFallback();
 
     const now = Date.now();
     const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -187,7 +198,7 @@ function readRealSessionLog() {
       .filter(f => f && (now - f.time) < ACTIVE_WINDOW_MS)
       .sort((a, b) => b.time - a.time); // Newest first
 
-    if (files.length === 0) return '[NO JSONL FILES]';
+    if (files.length === 0) return readSessionLogFallback();
 
     // Skip evolver's own sessions to avoid self-reference loops
     let nonEvolverFiles = files.filter(f => !f.name.startsWith('evolver_hand_'));
@@ -229,6 +240,27 @@ function readRealSessionLog() {
     let content = sections.join('\n\n');
 
     return content;
+  } catch (e) {
+    return `[ERROR READING SESSION LOGS: ${e.message}]`;
+  }
+}
+
+// Fallback when the flat sessions/*.jsonl files are gone: OpenClaw keeps active
+// transcripts in a per-agent SQLite store. Without this, the pipeline reports
+// "[NO JSONL FILES]" forever and the GEP cycle runs with zero session context.
+function readSessionLogFallback() {
+  try {
+    const lines = readRecentSessionLines({
+      maxBytes: 120000,
+      sessionsPerDb: 3,
+      rowsPerSession: 200,
+      scope: getSessionScope(),
+      skipSessionKeys: ['evolver_hand_'],
+    });
+    if (!lines || lines.length === 0) return '[NO SESSION LOGS FOUND]';
+    const formatted = formatSessionLog(lines.join('\n'));
+    if (!formatted.trim()) return '[NO SESSION LOGS FOUND]';
+    return `--- SESSION (sqlite store) ---\n${formatted}`;
   } catch (e) {
     return `[ERROR READING SESSION LOGS: ${e.message}]`;
   }
@@ -389,9 +421,9 @@ function clearDormantHypothesis() {
 }
 // Read MEMORY.md and USER.md from the WORKSPACE root (not the evolver plugin dir).
 // This avoids symlink breakage if the target file is temporarily deleted.
-const WORKSPACE_ROOT = process.env.OPENCLAW_WORKSPACE || path.resolve(REPO_ROOT, '../..');
+const WORKSPACE_ROOT = getOpenclawWorkspaceRoot();
 const ROOT_MEMORY = path.join(WORKSPACE_ROOT, 'MEMORY.md');
-const DIR_MEMORY = path.join(MEMORY_DIR, 'MEMORY.md');
+const DIR_MEMORY = path.join(OPENCLAW_MEMORY_DIR, 'MEMORY.md');
 const MEMORY_FILE = fs.existsSync(ROOT_MEMORY) ? ROOT_MEMORY : (fs.existsSync(DIR_MEMORY) ? DIR_MEMORY : ROOT_MEMORY);
 const USER_FILE = path.join(WORKSPACE_ROOT, 'USER.md');
 
@@ -403,7 +435,7 @@ function readMemorySnippet() {
     const scope = getSessionScope();
     let memFile = MEMORY_FILE;
     if (scope) {
-      const scopedMemory = path.join(MEMORY_DIR, 'scopes', scope, 'MEMORY.md');
+      const scopedMemory = path.join(OPENCLAW_MEMORY_DIR, 'scopes', scope, 'MEMORY.md');
       if (fs.existsSync(scopedMemory)) {
         memFile = scopedMemory;
         console.log(`[SessionScope] Reading scoped MEMORY.md for "${scope}".`);
@@ -555,8 +587,15 @@ function checkAndAutoUpdate() {
     }
     if (!clawhubBin) return; // No clawhub CLI available
 
-    // Update evolver and feishu-evolver-wrapper
-    const slugs = ['evolver', 'feishu-evolver-wrapper'];
+    // Update only the published wrapper skill.
+    //
+    // The 'evolver' slug is intentionally NOT auto-updated: the canonical
+    // engine now lives in this git repo (a fork of the upstream skill with
+    // OpenClaw workspace-aware path resolution), and the workspace copy
+    // (skills/evolver) is a symlink to this repo. ClawHub's 'evolver' slug is
+    // a different, newer upstream release whose code would overwrite the
+    // local fixes. Track engine updates through git instead.
+    const slugs = ['feishu-evolver-wrapper'];
     let updated = false;
     for (const slug of slugs) {
       try {
@@ -958,12 +997,32 @@ async function run() {
       return [];
     }
   })();
+  // Cross-skill integration preflight: detect dangling sibling-skill helper
+  // references (e.g. skills/feishu-doc/create.js) BEFORE the agent starts, so
+  // the cycle opens with the exact missing path instead of a vague
+  // "not found, cannot create issue doc" error rediscovered via exec calls.
+  let integrationReport = '';
+  try {
+    const missingDeps = findMissingSkillDependencies();
+    if (missingDeps.length > 0) {
+      integrationReport = missingDeps
+        .map(function (d) {
+          return 'missing_integration_file: ' + d.target + ' (referenced by ' + d.source + ')';
+        })
+        .join('\n');
+      console.log('[IntegrationCheck] ' + missingDeps.length + ' missing skill dependency reference(s) detected.');
+    }
+  } catch (e) {
+    console.log('[IntegrationCheck] skipped (non-fatal): ' + (e.message || e));
+  }
+
   const signals = extractSignals({
     recentSessionTranscript: recentMasterLog,
     todayLog,
     memorySnippet,
     userSnippet,
     recentEvents,
+    integrationReport,
   });
 
   if (dormantHypothesis && Array.isArray(dormantHypothesis.signals) && dormantHypothesis.signals.length > 0) {

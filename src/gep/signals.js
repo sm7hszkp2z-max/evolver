@@ -134,13 +134,14 @@ function analyzeRecentHistory(recentEvents) {
   };
 }
 
-function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, userSnippet, recentEvents }) {
+function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, userSnippet, recentEvents, integrationReport }) {
   var signals = [];
   var corpus = [
     String(recentSessionTranscript || ''),
     String(todayLog || ''),
     String(memorySnippet || ''),
     String(userSnippet || ''),
+    String(integrationReport || ''),
   ].join('\n');
   var lower = corpus.toLowerCase();
 
@@ -174,6 +175,23 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   if (lower.includes('memory.md missing')) signals.push('memory_missing');
   if (lower.includes('user.md missing')) signals.push('user_missing');
   if (lower.includes('key missing')) signals.push('integration_key_missing');
+
+  // Missing cross-skill integration file (e.g. "skills/feishu-doc/create.js").
+  // The generic log_error tag hides WHICH file is missing, so the agent keeps
+  // rediscovering the same path with repeated exec calls. Emit the exact path.
+  var missingDepRe = /missing_integration_file:\s*([^\s)]+)/g;
+  var missingDepMatch;
+  var missingDeps = [];
+  while ((missingDepMatch = missingDepRe.exec(corpus)) !== null) {
+    var depPath = missingDepMatch[1];
+    if (depPath && missingDeps.indexOf(depPath) === -1) missingDeps.push(depPath);
+  }
+  if (missingDeps.length > 0) {
+    if (signals.indexOf('integration_key_missing') === -1) signals.push('integration_key_missing');
+    for (var md = 0; md < missingDeps.length; md++) {
+      signals.push('missing_integration_file:' + missingDeps[md]);
+    }
+  }
   if (lower.includes('no session logs found') || lower.includes('no jsonl files')) signals.push('session_logs_missing');
   // if (lower.includes('pgrep') || lower.includes('ps aux')) signals.push('windows_shell_incompatible');
   if (lower.includes('path.resolve(__dirname, \'../../../')) signals.push('path_outside_workspace');

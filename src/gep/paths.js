@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 function getRepoRoot() {
   if (process.env.EVOLVER_REPO_ROOT) {
@@ -18,6 +19,32 @@ function getRepoRoot() {
   return path.resolve(__dirname, '..', '..');
 }
 
+// Read the workspace candidates declared in the OpenClaw config.
+// Priority: explicit env var > repo-local "workspace/" dir > openclaw.json > repo root.
+// The old fallback was path.resolve(__dirname, '..', '..', '..', '..'), which for a
+// repo at /home/<user>/<repo> resolves to /home — that is how a stray /home/memory
+// state tree came into existence. Never resolve above the home directory.
+function getConfiguredWorkspaces() {
+  const candidates = [];
+  try {
+    const cfgPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      const agents = cfg && cfg.agents ? cfg.agents : null;
+      if (agents && agents.defaults && typeof agents.defaults.workspace === 'string') {
+        candidates.push(agents.defaults.workspace);
+      }
+      if (agents && agents.entries && typeof agents.entries === 'object') {
+        for (const key of Object.keys(agents.entries)) {
+          const e = agents.entries[key];
+          if (e && typeof e.workspace === 'string') candidates.push(e.workspace);
+        }
+      }
+    }
+  } catch (_) {}
+  return candidates;
+}
+
 function getWorkspaceRoot() {
   if (process.env.OPENCLAW_WORKSPACE) {
     return process.env.OPENCLAW_WORKSPACE;
@@ -29,7 +56,58 @@ function getWorkspaceRoot() {
     return workspaceDir;
   }
 
-  return path.resolve(__dirname, '..', '..', '..', '..');
+  for (const c of getConfiguredWorkspaces()) {
+    const ws = String(c).trim();
+    if (!ws) continue;
+    if (fs.existsSync(path.join(ws, 'MEMORY.md')) || fs.existsSync(path.join(ws, 'memory'))) {
+      return ws;
+    }
+  }
+
+  // Fall back to the repo root itself — never to a parent of the home directory.
+  return repoRoot;
+}
+
+// Resolve the OpenClaw agent workspace that actually owns MEMORY.md / USER.md
+// and the daily memory notes. The evolver repo usually lives outside that
+// workspace, so a repo-relative guess points at the wrong directory and the
+// GEP prompt is filled with "[MEMORY.md MISSING]" / "[USER.md MISSING]".
+// Priority: explicit env var > openclaw.json (agents.defaults.workspace) > repo guess.
+function getOpenclawWorkspaceRoot() {
+  const envWs = String(process.env.OPENCLAW_WORKSPACE || '').trim();
+  if (envWs) return envWs;
+
+  for (const c of getConfiguredWorkspaces()) {
+    const ws = String(c).trim();
+    if (!ws) continue;
+    if (fs.existsSync(path.join(ws, 'MEMORY.md')) || fs.existsSync(path.join(ws, 'memory'))) {
+      return ws;
+    }
+  }
+
+  return getWorkspaceRoot();
+}
+
+// Memory directory that holds daily notes (YYYY-MM-DD.md) for the OpenClaw
+// workspace. Falls back to the evolver memory dir when the workspace has none.
+function getOpenclawMemoryDir() {
+  const ws = getOpenclawWorkspaceRoot();
+  const wsMem = path.join(ws, 'memory');
+  try {
+    if (fs.existsSync(wsMem)) return wsMem;
+  } catch (_) {}
+  return getMemoryDir();
+}
+
+// Local-time date stamp (YYYY-MM-DD) for daily memory notes.
+// toISOString() returns UTC, so between 00:00 and 08:00 local time it yields
+// the previous day and the evolver looks for a daily note that does not exist.
+function localDateStamp(date) {
+  const d = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function getLogsDir() {
@@ -99,6 +177,9 @@ function getReflectionLogPath() {
 module.exports = {
   getRepoRoot,
   getWorkspaceRoot,
+  getOpenclawWorkspaceRoot,
+  getOpenclawMemoryDir,
+  localDateStamp,
   getLogsDir,
   getEvolverLogPath,
   getMemoryDir,

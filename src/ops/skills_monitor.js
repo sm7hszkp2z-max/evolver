@@ -4,8 +4,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execSync } = require('child_process');
-const { getSkillsDir, getWorkspaceRoot } = require('../gep/paths');
+const paths = require('../gep/paths');
+const { getSkillsDir, getWorkspaceRoot } = paths;
 
 const IGNORE_LIST = new Set([
     'common',
@@ -113,6 +115,124 @@ function autoHeal(skillName, issues) {
     return healed;
 }
 
+// --- Cross-skill integration dependency scan ---
+// Skills often call helper scripts that live inside a sibling skill
+// (e.g. feishu-evolver-wrapper -> skills/feishu-doc/create.js). When the
+// sibling skill is missing, the failure only surfaces deep inside a cycle
+// ("[IssueTracker] feishu-doc/create.js not found, cannot create issue doc")
+// and the agent burns exec calls rediscovering the same path every run.
+// Detect these dangling references up front so the cycle starts with the
+// exact missing path instead of a vague "not found" error.
+var MAX_SCAN_FILES_PER_SKILL = 200;
+var MAX_TOTAL_SCAN_FILES = 400;
+
+// Matches both 'skills/<name>/<file>.js' and
+// path.join(root, 'skills', '<name>', '<file>.js').
+var DEP_REF_PATTERNS = [
+  /skills\/([a-z0-9][a-z0-9._-]*)\/([a-z0-9._-]+\.js)/gi,
+  /['"]skills['"]\s*,\s*['"]([a-z0-9][a-z0-9._-]*)['"]\s*,\s*['"]([a-z0-9._-]+\.js)['"]/gi,
+];
+
+// Strip comments before matching dependency references. A path that only
+// appears inside a comment is documentation ("e.g. skills/feishu-doc/create.js"),
+// not a load-bearing reference, and reporting it sends the agent chasing a
+// file that was never required.
+function stripComments(content) {
+  return String(content)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+}
+
+function resolveWorkspaceRoot() {
+    try {
+        if (typeof paths.getOpenclawWorkspaceRoot === 'function') return paths.getOpenclawWorkspaceRoot();
+    } catch (e) {}
+    return getWorkspaceRoot();
+}
+
+function collectSkillJsFiles(skillsDir, skillName) {
+    var out = [];
+    var stack = [path.join(skillsDir, skillName)];
+    var guard = 0;
+    while (stack.length > 0 && out.length < MAX_SCAN_FILES_PER_SKILL && guard < 2000) {
+        guard++;
+        var current = stack.pop();
+        var entries;
+        try { entries = fs.readdirSync(current, { withFileTypes: true }); } catch (e) { continue; }
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            if (entry.name === 'node_modules' || entry.name.charAt(0) === '.') continue;
+            var full = path.join(current, entry.name);
+            if (entry.isDirectory()) { stack.push(full); continue; }
+            if (entry.isFile() && entry.name.slice(-3) === '.js') {
+                out.push(full);
+                if (out.length >= MAX_SCAN_FILES_PER_SKILL) break;
+            }
+        }
+    }
+    return out;
+}
+
+function resolveDepTarget(workspaceRoot, skillName, fileName) {
+    var candidates = [
+        path.join(workspaceRoot, 'skills', skillName, fileName),
+        path.join(workspaceRoot, 'skills', skillName, 'scripts', fileName),
+        path.join(workspaceRoot, '.openclaw', 'plugin-skills', skillName, fileName),
+        path.join(os.homedir(), '.openclaw', 'plugin-skills', skillName, fileName),
+    ];
+    for (var i = 0; i < candidates.length; i++) {
+        try { if (fs.existsSync(candidates[i])) return candidates[i]; } catch (e) {}
+    }
+    return null;
+}
+
+// Returns [{ target, source, skill }] for every referenced sibling-skill
+// helper script that does not exist on disk.
+function findMissingSkillDependencies(options) {
+    var opts = options || {};
+    var workspaceRoot = opts.workspaceRoot || resolveWorkspaceRoot();
+    var skillsDir = opts.skillsDir || path.join(workspaceRoot, 'skills');
+    var missing = [];
+    var seen = new Set();
+    var scanned = 0;
+    var skills = [];
+    try { skills = fs.readdirSync(skillsDir); } catch (e) { return missing; }
+
+    for (var i = 0; i < skills.length; i++) {
+        if (scanned >= MAX_TOTAL_SCAN_FILES) break;
+        var skillName = skills[i];
+        if (skillName.charAt(0) === '.') continue;
+        var skillPath = path.join(skillsDir, skillName);
+        try { if (!fs.statSync(skillPath).isDirectory()) continue; } catch (e) { continue; }
+
+        var files = collectSkillJsFiles(skillsDir, skillName);
+        scanned += files.length;
+        for (var f = 0; f < files.length; f++) {
+            var content;
+            try { content = stripComments(fs.readFileSync(files[f], 'utf8')); } catch (e) { continue; }
+            for (var p = 0; p < DEP_REF_PATTERNS.length; p++) {
+                var re = new RegExp(DEP_REF_PATTERNS[p].source, 'gi');
+                var m;
+                while ((m = re.exec(content)) !== null) {
+                    var depSkill = m[1];
+                    var depFile = m[2];
+                    if (depSkill === skillName) continue;
+                    var target = 'skills/' + depSkill + '/' + depFile;
+                    if (seen.has(target)) continue;
+                    if (resolveDepTarget(workspaceRoot, depSkill, depFile)) continue;
+                    seen.add(target);
+                    missing.push({
+                        target: target,
+                        source: path.relative(workspaceRoot, files[f]),
+                        skill: skillName,
+                    });
+                }
+            }
+        }
+    }
+    return missing;
+}
+
 function run(options) {
     var heal = (options && options.autoHeal) !== false;
     var SKILLS_DIR = getSkillsDir();
@@ -140,4 +260,4 @@ if (require.main === module) {
     process.exit(issues.length > 0 ? 1 : 0);
 }
 
-module.exports = { run, checkSkill, autoHeal };
+module.exports = { run, checkSkill, autoHeal, findMissingSkillDependencies };

@@ -12,3 +12,15 @@ test/tmp/
 # Local identity persistence (device + node)
 .evomap_device_id
 .evomap_node_id
+# Local secrets / backups
+.env.bak*
+.env.local
+
+# Runtime artifacts
+logs/
+evolver.pid
+.retired-*/
+evolution/
+package-lock.json
+assets/gep/failed_capsules.json
+assets/gep/genes.jsonl
