@@ -179,10 +179,16 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   // Missing cross-skill integration file (e.g. "skills/feishu-doc/create.js").
   // The generic log_error tag hides WHICH file is missing, so the agent keeps
   // rediscovering the same path with repeated exec calls. Emit the exact path.
+  //
+  // Scan ONLY the live integration report, never the whole corpus: the corpus
+  // contains earlier gep_prompt files and logs that quote previous cycles'
+  // signal strings, so a corpus-wide regex re-detects its own output forever
+  // and the same "missing" path echoes forever after it is fixed.
   var missingDepRe = /missing_integration_file:\s*([^\s)]+)/g;
   var missingDepMatch;
   var missingDeps = [];
-  while ((missingDepMatch = missingDepRe.exec(corpus)) !== null) {
+  var depCorpus = String(integrationReport || '');
+  while ((missingDepMatch = missingDepRe.exec(depCorpus)) !== null) {
     var depPath = missingDepMatch[1];
     if (depPath && missingDeps.indexOf(depPath) === -1) missingDeps.push(depPath);
   }
