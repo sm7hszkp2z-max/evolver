@@ -371,9 +371,9 @@ function prepareDistillation() {
   var analysis = analyzePatterns(data);
   console.log('[Distiller] Analysis: high_freq=' + analysis.high_frequency.length + ' drift=' + analysis.strategy_drift.length + ' gaps=' + analysis.coverage_gaps.length);
 
-  var assetsDir = paths.getGepAssetsDir();
-  var existingGenesJson = readJsonIfExists(path.join(assetsDir, 'genes.json'), { genes: [] });
-  var existingGenes = existingGenesJson.genes || [];
+  // Read through the shared store reader so both { version, genes: [...] } and
+  // legacy bare-array genes.json files resolve to the same gene list.
+  var existingGenes = require('./assetStore').readGenesStore();
 
   var prompt = buildDistillationPrompt(analysis, existingGenes, data.successCapsules);
 
@@ -427,9 +427,9 @@ function completeDistillation(responseText) {
     return { ok: false, reason: 'no_gene_in_response' };
   }
 
-  var assetsDir = paths.getGepAssetsDir();
-  var existingGenesJson = readJsonIfExists(path.join(assetsDir, 'genes.json'), { genes: [] });
-  var existingGenes = existingGenesJson.genes || [];
+  // Read through the shared store reader so both { version, genes: [...] } and
+  // legacy bare-array genes.json files resolve to the same gene list.
+  var existingGenes = require('./assetStore').readGenesStore();
 
   var validation = validateSynthesizedGene(rawGene, existingGenes);
 

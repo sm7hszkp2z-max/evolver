@@ -84,8 +84,19 @@ function candidatesPath() { return path.join(getGepAssetsDir(), 'candidates.json
 function externalCandidatesPath() { return path.join(getGepAssetsDir(), 'external_candidates.jsonl'); }
 function failedCapsulesPath() { return path.join(getGepAssetsDir(), 'failed_capsules.json'); }
 
+// Shared reader for the gene store.
+// Accepts both the canonical object form ({ version, genes: [...] }) and legacy
+// bare-array files, and always returns the gene array. Without this, a bare-array
+// genes.json silently yields zero genes, and upsertGene() can wipe the curated pool.
+function readGenesStore() {
+  const raw = readJsonIfExists(genesPath(), getDefaultGenes());
+  if (Array.isArray(raw)) return raw;
+  if (raw && Array.isArray(raw.genes)) return raw.genes;
+  return [];
+}
+
 function loadGenes() {
-  const jsonGenes = readJsonIfExists(genesPath(), getDefaultGenes()).genes || [];
+  const jsonGenes = readGenesStore();
   const jsonlGenes = [];
   try {
     const p = path.join(getGepAssetsDir(), 'genes.jsonl');
@@ -208,10 +219,11 @@ function ensureSchemaFields(obj) {
 function upsertGene(geneObj) {
   ensureSchemaFields(geneObj);
   const current = readJsonIfExists(genesPath(), getDefaultGenes());
-  const genes = Array.isArray(current.genes) ? current.genes : [];
+  const version = (current && !Array.isArray(current) && current.version) || 1;
+  const genes = readGenesStore().slice();
   const idx = genes.findIndex(g => g && g.id === geneObj.id);
   if (idx >= 0) genes[idx] = geneObj; else genes.push(geneObj);
-  writeJsonAtomic(genesPath(), { version: current.version || 1, genes });
+  writeJsonAtomic(genesPath(), { version, genes });
 }
 
 function appendCapsule(capsuleObj) {
@@ -291,6 +303,7 @@ module.exports = {
   appendEventJsonl, appendCandidateJsonl, appendExternalCandidateJsonl,
   readRecentCandidates, readRecentExternalCandidates,
   upsertGene, appendCapsule, upsertCapsule,
+  readGenesStore,
   appendFailedCapsule, readRecentFailedCapsules,
   genesPath, capsulesPath, eventsPath, candidatesPath, externalCandidatesPath, failedCapsulesPath,
   ensureAssetFiles, buildValidationCmd,

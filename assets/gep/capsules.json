@@ -193,6 +193,65 @@
         "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
       ],
       "asset_id": "sha256:9db4b98caf90bda80a80b08944c777b5b83063392147d451102b0e44cbe5700b"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1793207821559",
+      "trigger": [
+        "bounty_task",
+        "external_task",
+        "cualquiera",
+        "uno",
+        "hazme",
+        "ia.",
+        "ejemplo",
+        "protocol_drift",
+        "high_tool_usage:exec",
+        "repeated_tool_usage:exec"
+      ],
+      "gene": "gene_gep_optimize_prompt_and_assets",
+      "summary": "固化：gene_gep_optimize_prompt_and_assets 命中信号 bounty_task, external_task, cualquiera, uno, hazme, ia., ejemplo, protocol_drift, high_tool_usage:exec, repeated_tool_usage:exec，变更 2 文件 / 31 行。",
+      "confidence": 0.85,
+      "blast_radius": {
+        "files": 2,
+        "lines": 31
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.85
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_gep_optimize_prompt_and_assets (optimize) matched signals [bounty_task, external_task, cualquiera, uno]. Scope: 2 file(s), 31 line(s) changed. Outcome score: 0.85. Strategy applied: Extract signals and determine selection rationale via Selector JSON; Prefer reusing existing Gene/Capsule; only create if no match exists; Refactor prompt assembly to embed assets (genes, capsules, parent event).",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "reference",
+      "reused_asset_id": "sha256:82086b9e50150608b17e6b0a75618b09bdaeaecc5693c6ac0605c828014e9376",
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_gep_optimize_prompt_and_assets (optimize)\n\nSignals: bounty_task, external_task, cualquiera, uno, hazme, ia., ejemplo, protocol_drift\n\nStrategy:\n1. Extract signals and determine selection rationale via Selector JSON\n2. Prefer reusing existing Gene/Capsule; only create if no match exists\n3. Refactor prompt assembly to embed assets (genes, capsules, parent event)\n4. Reduce noise and ambiguity; enforce strict output schema\n5. Validate by running node index.js run and ensuring no runtime errors\n6. Solidify: record EvolutionEvent, update Gene definitions, create Capsule on success\n\nScope: 2 file(s), 31 line(s)\n\nChanged files:\nsrc/gep/assetStore.js\nsrc/gep/skillDistiller.js\n\nOutcome score: 0.85",
+      "diff": "diff --git a/assets/gep/genes.json b/assets/gep/genes.json\nindex 52b65f34..5d4bcfaf 100644\n--- a/assets/gep/genes.json\n+++ b/assets/gep/genes.json\n@@ -1,219 +1,222 @@\n-[\n-  {\n-    \"type\": \"Gene\",\n-    \"id\": \"gene_gep_repair_from_errors\",\n-    \"category\": \"repair\",\n-    \"signals_match\": [\n-      \"error\",\n-      \"exception\",\n-      \"failed\",\n-      \"unstable\"\n-    ],\n-    \"preconditions\": [\n-      \"signals contains error-related indicators\"\n-    ],\n-    \"strategy\": [\n-      \"Extract structured signals from logs and user instructions\",\n-      \"Select an existing Gene by signals match (no improvisation)\",\n-      \"Estimate blast radius (files, lines) before editing\",\n-      \"Apply smallest reversible patch\",\n-      \"Validate using declared validation steps; rollback on failure\",\n-      \"Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\"\n-    ],\n-    \"constraints\": {\n-      \"max_files\": 20,\n-      \"forbidden_paths\": [\n-        \".git\",\n-        \"node_modules\"\n-      ]\n-    },\n-    \"validation\": [\n-      \"node scripts/validate-modules.js ./src/evolve ./src/gep/solidify\",\n-      \"node scripts/validate-modules.js ./src/gep/selector ./src/gep/memoryGraph\"\n-    ],\n-    \"epigenetic_marks\": [\n-      {\n-        \"context\": \"linux/x64/v24.22.1\",\n-        \"boost\": 0.1,\n-        \"reason\": \"success_in_environment\",\n-        \"created_at\": \"2026-10-27T17:09:30.027Z\"\n-      }\n-    ],\n-    \"schema_version\": \"1.6.0\",\n-    \"asset_id\": \"sha256:8a125ce0b9087d12195d72eb5141f9adf8fdaa7035bc1eafeee0f1a2668b23c4\"\n-  },\n-  {\n-    \"type\": \"Gene\",\n-    \"id\": \"gene_gep_optimize_prompt_and_assets\",\n-    \"category\": \"optimize\",\n-    \"signals_match\": [\n-      \"protocol\",\n-      \"gep\",\n-      \"prompt\",\n-      \"audit\",\n-      \"reusable\"\n-    ],\n-    \"preconditions\": [\n-      \"need stricter, auditable evolution protocol outputs\"\n-    ],\n-    \"strategy\": [\n-      \"Extract signals and determine selection rationale via Selector JSON\",\n-      \"Prefer reusing existing Gene/Capsule; only create if no match exists\",\n-      \"Refactor prompt assembly to embed assets (genes, capsules, parent event)\",\n-      \"Reduce noise and ambiguity; enforce strict output schema\",\n-      \"Validate by running node index.js run and ensuring no runtime errors\",\n-      \"Solidify: record EvolutionEvent, update Gene definitions, create Capsule on success\"\n-    ],\n-    \"constraints\": {\n-      \"max_files\": 20,\n-      \"forbidden_paths\": [\n-        \".git\",\n-        \"node_modules\"\n-      ]\n+{\n+  \"version\": 1,\n+  \"genes\": [\n+    {\n+      \"type\": \"Gene\",\n+      \"id\": \"gene_gep_repair_from_errors\",\n+      \"category\": \"repair\",\n+      \"signals_match\": [\n+        \"error\",\n+        \"exception\",\n+        \"failed\",\n+        \"unstable\"\n+      ],\n+      \"preconditions\": [\n+        \"signals contains error-related indicators\"\n+      ],\n+      \"strategy\": [\n+        \"Extract structured signals from logs and user instructions\",\n+        \"Select an existing Gene by signals match (no improvisation)\",\n+        \"Estimate blast radius (files, lines) before editing\",\n+        \"Apply smallest reversible patch\",\n+        \"Validate using declared validation steps; rollback on failure\",\n+        \"Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\"\n+      ],\n+      \"constraints\": {\n+        \"max_files\": 20,\n+        \"forbidden_paths\": [\n+          \".git\",\n+          \"node_modules\"\n+        ]\n+      },\n+      \"validation\": [\n+        \"node scripts/validate-modules.js ./src/evolve ./src/gep/solidify\",\n+        \"node scripts/validate-modules.js ./src/gep/selector ./src/gep/memoryGraph\"\n+      ],\n+      \"epigenetic_marks\": [\n+        {\n+          \"context\": \"linux/x64/v24.22.1\",\n+          \"boost\": 0.1,\n+          \"reason\": \"success_in_environment\",\n+          \"created_at\": \"2026-10-27T17:09:30.027Z\"\n+        }\n+      ],\n+      \"schema_version\": \"1.6.0\",\n+      \"asset_id\": \"sha256:8a125ce0b9087d12195d72eb5141f9adf8fdaa7035bc1eafeee0f1a2668b23c4\"\n     },\n-    \"validation\": [\n-      \"node scripts/validate-modules.js ./src/evolve ./src/gep/prompt\"\n-    ]\n-  },\n-  {\n-    \"type\": \"Gene\",\n-    \"id\": \"gene_gep_innovate_from_opportunity\",\n-    \"category\": \"innovate\",\n-    \"signals_match\": [\n-      \"user_feature_request\",\n-      \"user_improvement_suggestion\",\n-      \"perf_bottleneck\",\n-      \"capability_gap\",\n-      \"stable_success_plateau\",\n-      \"external_opportunity\"\n-    ],\n-    \"preconditions\": [\n-      \"at least one opportunity signal is present\",\n-      \"no active log_error signals (stability first)\"\n-    ],\n-    \"strategy\": [\n-      \"Extract opportunity signals and identify the specific user need or system gap\",\n-      \"Search existing Genes and Capsules for partial matches (avoid reinventing)\",\n-      \"Design a minimal, testable implementation plan (prefer small increments)\",\n-      \"Estimate blast radius; innovate changes may touch more files but must stay within constraints\",\n-      \"Implement the change with clear validation criteria\",\n-      \"Validate using declared validation steps; rollback on failure\",\n-      \"Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\"\n-    ],\n-    \"constraints\": {\n-      \"max_files\": 25,\n-      \"forbidden_paths\": [\n-        \".git\",\n-        \"node_modules\"\n+    {\n+      \"type\": \"Gene\",\n+      \"id\": \"gene_gep_optimize_prompt_and_assets\",\n+      \"category\": \"optimize\",\n+      \"signals_match\": [\n+        \"protocol\",\n+        \"gep\",\n+        \"prompt\",\n+        \"audit\",\n+        \"reusable\"\n+      ],\n+      \"preconditions\": [\n+        \"need stricter, auditable evolution protocol outputs\"\n+      ],\n+      \"strategy\": [\n+        \"Extract signals and determine selection rationale via Selector JSON\",\n+        \"Prefer reusing existing Gene/Capsule; only create if no match exists\",\n+        \"Refactor prompt assembly to embed assets (genes, capsules, parent event)\",\n+        \"Reduce noise and ambiguity; enforce strict output schema\",\n+        \"Validate by running node index.js run and ensuring no runtime errors\",\n+        \"Solidify: record EvolutionEvent, update Gene definitions, create Capsule on success\"\n+      ],\n+      \"constraints\": {\n+        \"max_files\": 20,\n+        \"forbidden_paths\": [\n+          \".git\",\n+          \"node_modules\"\n+        ]\n+      },\n+      \"validation\": [\n+        \"node scripts/validate-modules.js ./src/evolve ./src/gep/prompt\"\n       ]\n     },\n-    \"validation\": [\n-      \"node scripts/validate-modules.js ./src/evolve ./src/gep/solidify\"\n-    ]\n-  },\n-  {\n-    \"type\": \"Gene\",\n-    \"schema_version\": \"1.6.0\",\n-    \"id\": \"gene_auto_6279e076\",\n-    \"category\": \"optimize\",\n-    \"signals_match\": [\n-      \"memory_missing\",\n-      \"session_logs_missing\"\n-    ],\n-    \"preconditions\": [\n-      \"signals_key == memory_missing|session_logs_missing\"\n-    ],\n-    \"strategy\": [\n-      \"Extract structured signals from logs and user instructions\",\n-      \"Select an existing Gene by signals match (no improvisation)\",\n-      \"Estimate blast radius (files, lines) before editing and record it\",\n-      \"Apply smallest reversible patch\",\n-      \"Validate using declared validation steps; rollback on failure\",\n-      \"Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\"\n-    ],\n-    \"constraints\": {\n-      \"max_files\": 12,\n-      \"forbidden_paths\": [\n-        \".git\",\n-        \"node_modules\",\n-        \"skills/feishu-evolver-wrapper\",\n-        \"skills/feishu-common\",\n-        \"skills/feishu-post\",\n-        \"skills/feishu-card\",\n-        \"skills/feishu-doc\",\n-        \"skills/skill-tools\",\n-        \"skills/clawhub\",\n-        \"skills/clawhub-batch-undelete\",\n-        \"skills/git-sync\"\n+    {\n+      \"type\": \"Gene\",\n+      \"id\": \"gene_gep_innovate_from_opportunity\",\n+      \"category\": \"innovate\",\n+      \"signals_match\": [\n+        \"user_feature_request\",\n+        \"user_improvement_suggestion\",\n+        \"perf_bottleneck\",\n+        \"capability_gap\",\n+        \"stable_success_plateau\",\n+        \"external_opportunity\"\n+      \n... [TRUNCATED]",
+      "strategy": [
+        "Extract signals and determine selection rationale via Selector JSON",
+        "Prefer reusing existing Gene/Capsule; only create if no match exists",
+        "Refactor prompt assembly to embed assets (genes, capsules, parent event)",
+        "Reduce noise and ambiguity; enforce strict output schema",
+        "Validate by running node index.js run and ensuring no runtime errors",
+        "Solidify: record EvolutionEvent, update Gene definitions, create Capsule on success"
+      ],
+      "asset_id": "sha256:985809164db7ccb7fc81aeb3a9e5af197ecc78827e0fc751df4a7ba8935f7d70"
     }
   ]
 }
