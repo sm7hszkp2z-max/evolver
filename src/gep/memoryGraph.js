@@ -3,6 +3,7 @@ const path = require('path');
 const { getMemoryDir } = require('./paths');
 const { normalizePersonalityState, isValidPersonalityState, personalityKey } = require('./personality');
 const { isValidMutation, normalizeMutation } = require('./mutation');
+const { stripVolatileRuntimeState } = require('./signals');
 
 function ensureDir(dir) {
   try {
@@ -28,7 +29,9 @@ function normalizeErrorSignature(text) {
   const s = String(text || '').trim();
   if (!s) return null;
   return (
-    s
+    // Drop volatile runtime state first (tool wrappers, counters, disk/uptime
+    // stats) so the same underlying failure yields the same hash every cycle.
+    stripVolatileRuntimeState(s)
       .toLowerCase()
       // normalize Windows paths
       .replace(/[a-z]:\\[^ \n\r\t]+/gi, '<path>')

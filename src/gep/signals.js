@@ -134,6 +134,87 @@ function analyzeRecentHistory(recentEvents) {
   };
 }
 
+// --- Error signature extraction helpers ---------------------------------------
+//
+// The signal corpus concatenates the session transcript, today's log, memory,
+// user notes and the integration report. A tool-result status summary such as
+//   "**TOOLRESULT**: count 9 | 连续错误: 1 !! news-collect-reuters err 1
+//    /dev/nvme0n1p2 116G 86G 25G 79% / 14:09:04 up 2 days, 12:48, 1 user,
+//    load average: 0.33, 0.29, 0.25"
+// used to win the find() race, because its only "error" token was a counter
+// field ("连续错误: 1"). Two consequences:
+//   1. a genuine error further down the corpus was masked;
+//   2. the captured line was emitted verbatim, injecting volatile machine state
+//      (disk %, uptime, load average, timestamps, the TOOLRESULT wrapper) into
+//      the GEP prompt and into the stored error signature. The raw string
+//      changed on every run, so the memory graph and the recurring-error
+//      detection never accumulated for the same underlying failure.
+// Fix: prefer a STRONG error token, fall back to a weak one, and strip the
+// volatile runtime state from whatever is emitted.
+
+// Strong, unambiguous error markers (a real failure statement).
+var STRONG_ERROR_RE = /\b(?:type|reference|syntax)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]|status\s+error/i;
+// Weak markers: usually a label field, very often a counter ("连续错误: 1").
+var WEAK_ERROR_RE = /错误\s*[：:]|异常\s*[：:]|报错\s*[：:]|失败\s*[：:]/;
+
+// Machine state, not failure description. Applied to the captured line.
+var VOLATILE_STATE_RULES = [
+  // tool-result wrapper: "**TOOLRESULT**:" / "[TOOLRESULT]"
+  { re: /\*+\s*TOOLRESULT\s*\*+\s*[:：]?/gi, rep: ' ' },
+  { re: /\[\s*TOOLRESULT\s*\]/gi, rep: ' ' },
+  // status prefix: "count 9 |"
+  { re: /\bcount\s*\d+\s*\|/gi, rep: ' ' },
+  // label-only counters: "连续错误: 1", "失败次数: 3"
+  { re: /(?:连续|累计)?\s*(?:错误|异常|报错|失败)\s*(?:次数|count)?\s*[：:]\s*\d+\b/g, rep: ' ' },
+  // disk usage: "/dev/nvme0n1p2 116G 86G 25G 79%"
+  { re: /\/dev\/\S+\s+[\d.]+[KMGT]?\s+[\d.]+[KMGT]?\s+[\d.]+[KMGT]?\s+\d+%/gi, rep: ' ' },
+  { re: /\/dev\/\S+\s+\d+(?:\.\d+)?%/gi, rep: ' ' },
+  // uptime block: "14:09:04 up 2 days, 12:48, 1 user"
+  { re: /(?:\b\d{1,2}:\d{2}(?::\d{2})?\b,?\s*)?\bup\s+\d+\s+days?(?:\s*,\s*\d{1,2}:\d{2}(?::\d{2})?)?(?:\s*,\s*\d+\s+users?)?/gi, rep: ' ' },
+  // load average: "load average: 0.33, 0.29, 0.25"
+  { re: /\bload\s+average\s*:\s*[\d.,\s]+/gi, rep: ' ' },
+];
+
+// Remove volatile runtime state (tool wrappers, counters, machine stats,
+// timestamps) from a captured line. Keeps the informative head intact.
+function stripVolatileRuntimeState(text) {
+  var s = String(text || '');
+  if (!s) return '';
+  for (var i = 0; i < VOLATILE_STATE_RULES.length; i++) {
+    try { s = s.replace(VOLATILE_STATE_RULES[i].re, VOLATILE_STATE_RULES[i].rep); } catch (e) {}
+  }
+  // Leading date / timestamp stamp.
+  s = s.replace(/^\s*\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\s*/, '');
+  // Collapse whitespace and drop separators left dangling by the stripping.
+  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(/\s+([,;|!])/g, '$1');
+  s = s.replace(/([,;|!])\s+/g, '$1 ');
+  s = s.replace(/^[\s|,;!:*]+/, '');
+  s = s.replace(/[\s|,;!:/\-]+$/, '');
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+// Pick the most informative error line: strong error tokens first, weak ones
+// as fallback. Returns the cleaned line (volatile state already stripped).
+function pickErrorSignatureLine(lines) {
+  var list = Array.isArray(lines) ? lines : [];
+  var strong = [];
+  var weak = [];
+  for (var i = 0; i < list.length; i++) {
+    var l = String(list[i] || '');
+    if (!l) continue;
+    if (STRONG_ERROR_RE.test(l)) { strong.push(l); continue; }
+    if (WEAK_ERROR_RE.test(l)) { weak.push(l); }
+  }
+  var candidates = strong.concat(weak);
+  for (var c = 0; c < candidates.length; c++) {
+    var cleaned = stripVolatileRuntimeState(candidates[c]);
+    // Require some informative content; a pure counter line carries no signal.
+    if (cleaned && cleaned.length >= 3) return cleaned;
+  }
+  return null;
+}
+
 function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, userSnippet, recentEvents, integrationReport }) {
   var signals = [];
   var corpus = [
@@ -162,9 +243,7 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
       .map(function (l) { return String(l || '').trim(); })
       .filter(Boolean);
 
-    var errLine =
-      lines.find(function (l) { return /\b(typeerror|referenceerror|syntaxerror)\b\s*:|error\s*:|exception\s*:|\[error|错误\s*[：:]|异常\s*[：:]|报错\s*[：:]|失败\s*[：:]/i.test(l); }) ||
-      null;
+    var errLine = pickErrorSignatureLine(lines);
 
     if (errLine) {
       var clipped = errLine.replace(/\s+/g, ' ').slice(0, 260);
@@ -438,4 +517,4 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   return Array.from(new Set(signals));
 }
 
-module.exports = { extractSignals, hasOpportunitySignal, analyzeRecentHistory, OPPORTUNITY_SIGNALS };
+module.exports = { extractSignals, hasOpportunitySignal, analyzeRecentHistory, OPPORTUNITY_SIGNALS, stripVolatileRuntimeState, pickErrorSignatureLine };
