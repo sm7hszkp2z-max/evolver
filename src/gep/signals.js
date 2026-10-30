@@ -154,8 +154,9 @@ function analyzeRecentHistory(recentEvents) {
 
 // Strong, unambiguous error markers (a real failure statement).
 var STRONG_ERROR_RE = /\b(?:type|reference|syntax)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]|status\s+error/i;
-// Weak markers: usually a label field, very often a counter ("连续错误: 1").
-var WEAK_ERROR_RE = /错误\s*[：:]|异常\s*[：:]|报错\s*[：:]|失败\s*[：:]/;
+// Weak markers, but NOT when negated - "无异常：9" / "没有错误：" are healthy
+// status lines, not failures.
+var WEAK_ERROR_RE = /(?<!(?:没有|无|未|没|非))(?<![有无未没非])(?:错误|异常|报错|失败)\s*[：:]/;
 
 // Machine state, not failure description. Applied to the captured line.
 var VOLATILE_STATE_RULES = [
@@ -196,6 +197,9 @@ function stripVolatileRuntimeState(text) {
 
 // Pick the most informative error line: strong error tokens first, weak ones
 // as fallback. Returns the cleaned line (volatile state already stripped).
+// A heartbeat reply ("HEARTBEAT_OK ...") is a status report, never a failure.
+var HEARTBEAT_STATUS_RE = /HEARTBEAT_OK/i;
+
 function pickErrorSignatureLine(lines) {
   var list = Array.isArray(lines) ? lines : [];
   var strong = [];
@@ -204,7 +208,11 @@ function pickErrorSignatureLine(lines) {
     var l = String(list[i] || '');
     if (!l) continue;
     if (STRONG_ERROR_RE.test(l)) { strong.push(l); continue; }
-    if (WEAK_ERROR_RE.test(l)) { weak.push(l); }
+    if (WEAK_ERROR_RE.test(l)) {
+      // A weak-only match on a heartbeat status line is noise, not a failure.
+      if (HEARTBEAT_STATUS_RE.test(l)) continue;
+      weak.push(l);
+    }
   }
   var candidates = strong.concat(weak);
   for (var c = 0; c < candidates.length; c++) {

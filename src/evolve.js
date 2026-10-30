@@ -121,8 +121,13 @@ function formatSessionLog(jsonlContent) {
           content = `[LLM ERROR] ${errMsg.replace(/\n+/g, ' ').slice(0, 300)}`;
         }
 
-        // Filter: Skip Heartbeats to save noise
-        if (content.trim() === 'HEARTBEAT_OK') continue;
+        // Filter: Skip Heartbeats to save noise.
+        // The heartbeat replies with "HEARTBEAT_OK" and often appends a status
+        // summary ("HEARTBEAT_OK  无异常：9 个 cron 全部 ok ..."). Such status
+        // wording contains markers like "异常：" that the error-signature picker
+        // mistakes for a failure, so a healthy heartbeat report was published as
+        // an errsig. Skip every heartbeat reply, not only the bare one.
+        if (content.trim().startsWith('HEARTBEAT_OK')) continue;
         if (content.includes('NO_REPLY') && !data.message.errorMessage) continue;
 
         // Clean up newlines for compact reading
