@@ -129,8 +129,8 @@ var MAX_TOTAL_SCAN_FILES = 400;
 // Matches both 'skills/<name>/<file>.js' and
 // path.join(root, 'skills', '<name>', '<file>.js').
 var DEP_REF_PATTERNS = [
-  /skills\/([a-z0-9][a-z0-9._-]*)\/([a-z0-9._-]+\.js)/gi,
-  /['"]skills['"]\s*,\s*['"]([a-z0-9][a-z0-9._-]*)['"]\s*,\s*['"]([a-z0-9._-]+\.js)['"]/gi,
+  /skills\/([a-z0-9_][a-z0-9._-]*)\/([a-z0-9._-]+\.js)/gi,
+  /['"]skills['"]\s*,\s*['"]([a-z0-9_][a-z0-9._-]*)['"]\s*,\s*['"]([a-z0-9._-]+\.js)['"]/gi,
 ];
 
 // Strip comments before matching dependency references. A path that only
@@ -186,6 +186,80 @@ function resolveDepTarget(workspaceRoot, skillName, fileName) {
     return null;
 }
 
+// --- Transient-write tolerance for the integration preflight ---
+// The evolver's own maintenance step runs `clawhub update <skill> --force`,
+// which REPLACES a skill directory in place. Sampling the filesystem while
+// that replacement is in flight reports files that do exist as "missing",
+// emits missing_integration_file:* signals and hijacks the cycle into a
+// phantom repair (cycle #0066 reported skills/feishu-evolver-wrapper/index.js
+// and lifecycle.js as missing while clawhub was rewriting that very
+// directory). The scan below therefore:
+//   (1) re-checks an absent target several times before declaring it missing,
+//   (2) skips targets whose skill directory is visibly in flux,
+//   (3) still reports references that are genuinely absent.
+var DEP_CHECK_ATTEMPTS = 3;
+var DEP_CHECK_DELAY_MS = 300;
+var DEP_FLUX_WINDOW_MS = 120000;      // dir touched in the last 2 min -> being rewritten
+var DEP_FLUX_SOFT_WINDOW_MS = 600000; // dir without SKILL.md and touched in the last 10 min
+
+// Blocking sleep: the preflight is synchronous, so Atomics.wait is used
+// instead of a busy loop or an async API.
+function sleepSync(ms) {
+    try {
+        var waiter = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.wait(waiter, 0, 0, ms);
+    } catch (e) { /* best effort */ }
+}
+
+// Newest mtime of a skill directory or of its direct entries, plus a rough
+// shape of the directory. Entries are inspected as well as the directory
+// itself because rewriting a file in place updates the file mtime, not the
+// directory mtime.
+function inspectSkillDir(dir) {
+    var info = { exists: false, newest: 0, fileCount: 0, hasSkillMd: false };
+    var st;
+    try { st = fs.statSync(dir); } catch (e) { return info; }
+    if (!st.isDirectory()) return info;
+    info.exists = true;
+    info.newest = st.mtimeMs;
+    var entries = [];
+    try { entries = fs.readdirSync(dir); } catch (e) { entries = []; }
+    info.fileCount = entries.length;
+    info.hasSkillMd = entries.indexOf('SKILL.md') !== -1;
+    for (var i = 0; i < entries.length; i++) {
+        try {
+            var est = fs.statSync(path.join(dir, entries[i]));
+            if (est.mtimeMs > info.newest) info.newest = est.mtimeMs;
+        } catch (e) {}
+    }
+    return info;
+}
+
+// True when the skill directory looks like it is being rewritten right now:
+// a directory that was just touched, or that holds files but no SKILL.md
+// (the classic half-written shape). A directory that does not exist at all
+// is NOT in flux - that is a genuinely missing skill.
+function isSkillDirInFlux(workspaceRoot, skillName) {
+    var info = inspectSkillDir(path.join(workspaceRoot, 'skills', skillName));
+    if (!info.exists) return false;
+    var age = Date.now() - info.newest;
+    if (age < DEP_FLUX_WINDOW_MS) return true;
+    if (info.fileCount > 0 && !info.hasSkillMd && age < DEP_FLUX_SOFT_WINDOW_MS) return true;
+    return false;
+}
+
+// Re-check an absent target a few times: a genuinely missing file stays
+// missing, a file that is momentarily absent (directory rewrite) reappears.
+// Returns true when the target is still absent after every attempt.
+function confirmDepTargetAbsent(workspaceRoot, skillName, fileName) {
+    for (var attempt = 0; attempt < DEP_CHECK_ATTEMPTS; attempt++) {
+        sleepSync(DEP_CHECK_DELAY_MS);
+        if (resolveDepTarget(workspaceRoot, skillName, fileName)) return false;
+    }
+    return true;
+}
+
+
 // Returns [{ target, source, skill }] for every referenced sibling-skill
 // helper script that does not exist on disk.
 function findMissingSkillDependencies(options) {
@@ -194,6 +268,7 @@ function findMissingSkillDependencies(options) {
     var skillsDir = opts.skillsDir || path.join(workspaceRoot, 'skills');
     var missing = [];
     var seen = new Set();
+    var transient = [];
     var scanned = 0;
     var skills = [];
     try { skills = fs.readdirSync(skillsDir); } catch (e) { return missing; }
@@ -220,6 +295,20 @@ function findMissingSkillDependencies(options) {
                     var target = 'skills/' + depSkill + '/' + depFile;
                     if (seen.has(target)) continue;
                     if (resolveDepTarget(workspaceRoot, depSkill, depFile)) continue;
+                    // Stability check: the target may be momentarily absent
+                    // because the skill directory is being rewritten right now.
+                    if (!confirmDepTargetAbsent(workspaceRoot, depSkill, depFile)) {
+                        seen.add(target);
+                        continue;
+                    }
+                    // Still absent. If the skill directory is in flux the
+                    // reference cannot be trusted yet -> skip as transient
+                    // instead of sending the agent after a file that exists.
+                    if (isSkillDirInFlux(workspaceRoot, depSkill)) {
+                        seen.add(target);
+                        transient.push(target);
+                        continue;
+                    }
                     seen.add(target);
                     missing.push({
                         target: target,
@@ -229,6 +318,9 @@ function findMissingSkillDependencies(options) {
                 }
             }
         }
+    }
+    if (transient.length > 0) {
+        console.log('[IntegrationCheck] skipped ' + transient.length + ' transient dependency reference(s) (skill dir in flux)');
     }
     return missing;
 }

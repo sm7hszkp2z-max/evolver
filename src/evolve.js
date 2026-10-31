@@ -821,6 +821,32 @@ async function run() {
     console.error(`[AssetInit] ensureAssetFiles failed (non-fatal): ${e.message}`);
   }
 
+  // Cross-skill integration preflight: detect dangling sibling-skill helper
+  // references (e.g. skills/feishu-doc/create.js) BEFORE the agent starts, so
+  // the cycle opens with the exact missing path instead of a vague
+  // "not found, cannot create issue doc" error rediscovered via exec calls.
+  //
+  // It runs BEFORE maintenance on purpose: maintenance performs
+  // `clawhub update <skill> --force`, which replaces a skill directory in
+  // place. Scanning a directory that the evolver itself is rewriting is a
+  // TOCTOU race, and it produced the phantom "missing_integration_file"
+  // signals of cycle #0066 (skills/feishu-evolver-wrapper/index.js and
+  // lifecycle.js were reported missing while clawhub was rewriting them).
+  let integrationReport = '';
+  try {
+    const missingDeps = findMissingSkillDependencies();
+    if (missingDeps.length > 0) {
+      integrationReport = missingDeps
+        .map(function (d) {
+          return 'missing_integration_file: ' + d.target + ' (referenced by ' + d.source + ')';
+        })
+        .join('\n');
+      console.log('[IntegrationCheck] ' + missingDeps.length + ' missing skill dependency reference(s) detected.');
+    }
+  } catch (e) {
+    console.log('[IntegrationCheck] skipped (non-fatal): ' + (e.message || e));
+  }
+
   // Maintenance: Clean up old logs to keep directory scan fast
   if (!IS_DRY_RUN) {
     performMaintenance();
@@ -1002,25 +1028,6 @@ async function run() {
       return [];
     }
   })();
-  // Cross-skill integration preflight: detect dangling sibling-skill helper
-  // references (e.g. skills/feishu-doc/create.js) BEFORE the agent starts, so
-  // the cycle opens with the exact missing path instead of a vague
-  // "not found, cannot create issue doc" error rediscovered via exec calls.
-  let integrationReport = '';
-  try {
-    const missingDeps = findMissingSkillDependencies();
-    if (missingDeps.length > 0) {
-      integrationReport = missingDeps
-        .map(function (d) {
-          return 'missing_integration_file: ' + d.target + ' (referenced by ' + d.source + ')';
-        })
-        .join('\n');
-      console.log('[IntegrationCheck] ' + missingDeps.length + ' missing skill dependency reference(s) detected.');
-    }
-  } catch (e) {
-    console.log('[IntegrationCheck] skipped (non-fatal): ' + (e.message || e));
-  }
-
   const signals = extractSignals({
     recentSessionTranscript: recentMasterLog,
     todayLog,
