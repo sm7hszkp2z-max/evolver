@@ -210,19 +210,19 @@
         "high_tool_usage:exec",
         "repeated_tool_usage:exec"
       ],
-      "gene": "gene_gep_repair_from_errors",
-      "summary": "固化：gene_gep_optimize_prompt_and_assets 命中信号 bounty_task, external_task, cualquiera, uno, hazme, ia., ejemplo, protocol_drift, high_tool_usage:exec, repeated_tool_usage:exec，变更 2 文件 / 31 行。",
+      "gene": "gene_gep_innovate_from_opportunity",
+      "summary": "signal-hygiene skill: sanitize Hub-derived signals so prose/tool-output fragments cannot enter the evolution cycle",
       "confidence": 0.85,
       "blast_radius": {
-        "files": 2,
-        "lines": 23
+        "files": 4,
+        "lines": 429
       },
       "outcome": {
         "status": "success",
         "score": 0.85
       },
-      "success_streak": 3,
-      "success_reason": "Gene gene_gep_repair_from_errors (repair) matched signals [bounty_task, external_task, environment:, agent]. Scope: 2 file(s), 23 line(s) changed. Outcome score: 0.85. Strategy applied: Extract structured signals from logs and user instructions; Select an existing Gene by signals match (no improvisation); Estimate blast radius (files, lines) before editing.",
+      "success_streak": 4,
+      "success_reason": "Gene gene_gep_innovate_from_opportunity (innovate) matched signals [bounty_task, external_task, self-wait, **toolresult**:]. Scope: 4 file(s), 429 line(s) changed. Outcome score: 0.85. Strategy applied: Extract opportunity signals and identify the specific user need or system gap; Search existing Genes and Capsules for partial matches (avoid reinventing); Design a minimal, testable implementation plan (prefer small increments).",
       "env_fingerprint": {
         "device_id": "c406356c3d798921841c5266a132e719",
         "node_version": "v24.22.1",
@@ -237,21 +237,22 @@
         "container": false
       },
       "source_type": "reference",
-      "reused_asset_id": "sha256:ad59c0f95c542338dd2c54a5154eec125dde106bfdba3966315b4d6f34f71d0c",
+      "reused_asset_id": "sha256:a949aaae9dbeda56afc610c92f0d92f496078e735d2a4fdda4e2a076c6bc84a2",
       "a2a": {
-        "eligible_to_broadcast": true
+        "eligible_to_broadcast": false
       },
-      "content": "Gene: gene_gep_repair_from_errors (repair)\n\nSignals: bounty_task, external_task, environment:, agent, detected, gap, capability, log_error\n\nStrategy:\n1. Extract structured signals from logs and user instructions\n2. Select an existing Gene by signals match (no improvisation)\n3. Estimate blast radius (files, lines) before editing\n4. Apply smallest reversible patch\n5. Validate using declared validation steps; rollback on failure\n6. Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\n\nScope: 2 file(s), 23 line(s)\n\nChanged files:\nsrc/evolve.js\nsrc/gep/signals.js\n\nOutcome score: 0.85",
-      "diff": "diff --git a/src/evolve.js b/src/evolve.js\nindex 26a48fbc..4bbc9273 100644\n--- a/src/evolve.js\n+++ b/src/evolve.js\n@@ -121,8 +121,13 @@ function formatSessionLog(jsonlContent) {\n           content = `[LLM ERROR] ${errMsg.replace(/\\n+/g, ' ').slice(0, 300)}`;\n         }\n \n-        // Filter: Skip Heartbeats to save noise\n-        if (content.trim() === 'HEARTBEAT_OK') continue;\n+        // Filter: Skip Heartbeats to save noise.\n+        // The heartbeat replies with \"HEARTBEAT_OK\" and often appends a status\n+        // summary (\"HEARTBEAT_OK  无异常：9 个 cron 全部 ok ...\"). Such status\n+        // wording contains markers like \"异常：\" that the error-signature picker\n+        // mistakes for a failure, so a healthy heartbeat report was published as\n+        // an errsig. Skip every heartbeat reply, not only the bare one.\n+        if (content.trim().startsWith('HEARTBEAT_OK')) continue;\n         if (content.includes('NO_REPLY') && !data.message.errorMessage) continue;\n \n         // Clean up newlines for compact reading\ndiff --git a/src/gep/signals.js b/src/gep/signals.js\nindex a19165c5..8ebc274f 100644\n--- a/src/gep/signals.js\n+++ b/src/gep/signals.js\n@@ -154,8 +154,9 @@ function analyzeRecentHistory(recentEvents) {\n \n // Strong, unambiguous error markers (a real failure statement).\n var STRONG_ERROR_RE = /\\b(?:type|reference|syntax)error\\b\\s*:|\\berror\\s*:|\\bexception\\s*:|\\[error\\b|\\[error\\]|status\\s+error/i;\n-// Weak markers: usually a label field, very often a counter (\"连续错误: 1\").\n-var WEAK_ERROR_RE = /错误\\s*[：:]|异常\\s*[：:]|报错\\s*[：:]|失败\\s*[：:]/;\n+// Weak markers, but NOT when negated - \"无异常：9\" / \"没有错误：\" are healthy\n+// status lines, not failures.\n+var WEAK_ERROR_RE = /(?<!(?:没有|无|未|没|非))(?<![有无未没非])(?:错误|异常|报错|失败)\\s*[：:]/;\n \n // Machine state, not failure description. Applied to the captured line.\n var VOLATILE_STATE_RULES = [\n@@ -196,6 +197,9 @@ function stripVolatileRuntimeState(text) {\n \n // Pick the most informative error line: strong error tokens first, weak ones\n // as fallback. Returns the cleaned line (volatile state already stripped).\n+// A heartbeat reply (\"HEARTBEAT_OK ...\") is a status report, never a failure.\n+var HEARTBEAT_STATUS_RE = /HEARTBEAT_OK/i;\n+\n function pickErrorSignatureLine(lines) {\n   var list = Array.isArray(lines) ? lines : [];\n   var strong = [];\n@@ -204,7 +208,11 @@ function pickErrorSignatureLine(lines) {\n     var l = String(list[i] || '');\n     if (!l) continue;\n     if (STRONG_ERROR_RE.test(l)) { strong.push(l); continue; }\n-    if (WEAK_ERROR_RE.test(l)) { weak.push(l); }\n+    if (WEAK_ERROR_RE.test(l)) {\n+      // A weak-only match on a heartbeat status line is noise, not a failure.\n+      if (HEARTBEAT_STATUS_RE.test(l)) continue;\n+      weak.push(l);\n+    }\n   }\n   var candidates = strong.concat(weak);\n   for (var c = 0; c < candidates.length; c++) {\n",
+      "content": "Intent: innovate\n\nGene: gene_gep_innovate_from_opportunity (innovate)\n\nSignals: bounty_task, external_task, self-wait, **toolresult**:, detected:, bottleneck, performance, evolution_stagnation_detected\n\nStrategy:\n1. Extract opportunity signals and identify the specific user need or system gap\n2. Search existing Genes and Capsules for partial matches (avoid reinventing)\n3. Design a minimal, testable implementation plan (prefer small increments)\n4. Estimate blast radius; innovate changes may touch more files but must stay within constraints\n5. Implement the change with clear validation criteria\n6. Validate using declared validation steps; rollback on failure\n7. Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\n\nScope: 4 file(s), 429 line(s)\n\nChanged files:\nsrc/gep/taskReceiver.js\nskills/signal-hygiene/index.js\nskills/signal-hygiene/package.json\nskills/signal-hygiene/scripts/selftest.js\n\nOutcome score: 0.85",
+      "diff": "diff --git a/src/gep/taskReceiver.js b/src/gep/taskReceiver.js\nindex 8da4c06d..e34d88ce 100644\n--- a/src/gep/taskReceiver.js\n+++ b/src/gep/taskReceiver.js\n@@ -8,6 +8,9 @@\n \n const { getNodeId, buildHubHeaders } = require('./a2aProtocol');\n \n+// Signal hygiene: decides which raw task tokens are real evolution signals.\n+var hygiene = require('../../skills/signal-hygiene');\n+\n const HUB_URL = process.env.A2A_HUB_URL || process.env.EVOMAP_HUB_URL || 'https://evomap.ai';\n \n function buildAuthHeaders() {\n@@ -404,6 +407,12 @@ async function completeTask(taskId, assetId) {\n \n /**\n  * Extract signals from a task to inject into evolution cycle.\n+ *\n+ * Hub tasks carry a free-form `signals` string and a free-form `title`.\n+ * Both are sanitized with the signal-hygiene skill before they enter the\n+ * cycle, so prose fragments (\"self-wait\") and tool-output wrappers\n+ * (\"**toolresult**:\", \"detected:\") cannot masquerade as actionable signals.\n+ *\n  * @param {object} task\n  * @returns {string[]} signals array\n  */\n@@ -412,17 +421,15 @@ function taskToSignals(task) {\n   const signals = [];\n   if (task.signals) {\n     const parts = String(task.signals).split(',').map(s => s.trim()).filter(Boolean);\n-    signals.push(...parts);\n+    signals.push(...hygiene.sanitizeSignals(parts));\n   }\n   if (task.title) {\n     const words = String(task.title).toLowerCase().split(/\\s+/).filter(w => w.length >= 3);\n-    for (const w of words.slice(0, 5)) {\n-      if (!signals.includes(w)) signals.push(w);\n-    }\n+    signals.push(...hygiene.sanitizeSignals(words.slice(0, 5)));\n   }\n   signals.push('external_task');\n   if (task.bounty_id) signals.push('bounty_task');\n-  return signals;\n+  return Array.from(new Set(signals));\n }\n \n // ---------------------------------------------------------------------------\n",
       "strategy": [
-        "Extract structured signals from logs and user instructions",
-        "Select an existing Gene by signals match (no improvisation)",
-        "Estimate blast radius (files, lines) before editing",
-        "Apply smallest reversible patch",
+        "Extract opportunity signals and identify the specific user need or system gap",
+        "Search existing Genes and Capsules for partial matches (avoid reinventing)",
+        "Design a minimal, testable implementation plan (prefer small increments)",
+        "Estimate blast radius; innovate changes may touch more files but must stay within constraints",
+        "Implement the change with clear validation criteria",
         "Validate using declared validation steps; rollback on failure",
-        "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
+        "Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success"
       ],
-      "asset_id": "sha256:e7ae7bd783d27693300120bf968dd81e1b2f750db88ada09b6cb8e360212c6ac"
+      "asset_id": "sha256:35c706b48470d113dc5a766df0424ece8e2e0e062226f6df10c7ae8e4f4d3718"
     }
   ]
 }

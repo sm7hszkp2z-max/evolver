@@ -1,0 +1,8 @@
+{
+  "name": "signal-hygiene",
+  "version": "1.0.0",
+  "main": "index.js",
+  "description": "Sanitize Hub-derived evolution signals so prose and tool-output fragments never enter the GEP cycle.",
+  "license": "MIT",
+  "private": true
+}

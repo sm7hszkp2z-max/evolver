@@ -8,6 +8,9 @@
 
 const { getNodeId, buildHubHeaders } = require('./a2aProtocol');
 
+// Signal hygiene: decides which raw task tokens are real evolution signals.
+var hygiene = require('../../skills/signal-hygiene');
+
 const HUB_URL = process.env.A2A_HUB_URL || process.env.EVOMAP_HUB_URL || 'https://evomap.ai';
 
 function buildAuthHeaders() {
@@ -404,6 +407,12 @@ async function completeTask(taskId, assetId) {
 
 /**
  * Extract signals from a task to inject into evolution cycle.
+ *
+ * Hub tasks carry a free-form `signals` string and a free-form `title`.
+ * Both are sanitized with the signal-hygiene skill before they enter the
+ * cycle, so prose fragments ("self-wait") and tool-output wrappers
+ * ("**toolresult**:", "detected:") cannot masquerade as actionable signals.
+ *
  * @param {object} task
  * @returns {string[]} signals array
  */
@@ -412,17 +421,15 @@ function taskToSignals(task) {
   const signals = [];
   if (task.signals) {
     const parts = String(task.signals).split(',').map(s => s.trim()).filter(Boolean);
-    signals.push(...parts);
+    signals.push(...hygiene.sanitizeSignals(parts));
   }
   if (task.title) {
     const words = String(task.title).toLowerCase().split(/\s+/).filter(w => w.length >= 3);
-    for (const w of words.slice(0, 5)) {
-      if (!signals.includes(w)) signals.push(w);
-    }
+    signals.push(...hygiene.sanitizeSignals(words.slice(0, 5)));
   }
   signals.push('external_task');
   if (task.bounty_id) signals.push('bounty_task');
-  return signals;
+  return Array.from(new Set(signals));
 }
 
 // ---------------------------------------------------------------------------
