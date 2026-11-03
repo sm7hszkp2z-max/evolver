@@ -215,14 +215,14 @@
       "confidence": 0.85,
       "blast_radius": {
         "files": 4,
-        "lines": 429
+        "lines": 957
       },
       "outcome": {
         "status": "success",
         "score": 0.85
       },
-      "success_streak": 4,
-      "success_reason": "Gene gene_gep_innovate_from_opportunity (innovate) matched signals [bounty_task, external_task, self-wait, **toolresult**:]. Scope: 4 file(s), 429 line(s) changed. Outcome score: 0.85. Strategy applied: Extract opportunity signals and identify the specific user need or system gap; Search existing Genes and Capsules for partial matches (avoid reinventing); Design a minimal, testable implementation plan (prefer small increments).",
+      "success_streak": 5,
+      "success_reason": "Gene gene_gep_innovate_from_opportunity (innovate) matched signals [external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。]. Scope: 4 file(s), 957 line(s) changed. Outcome score: 0.85. Strategy applied: Extract opportunity signals and identify the specific user need or system gap; Search existing Genes and Capsules for partial matches (avoid reinventing); Design a minimal, testable implementation plan (prefer small increments).",
       "env_fingerprint": {
         "device_id": "c406356c3d798921841c5266a132e719",
         "node_version": "v24.22.1",
@@ -237,12 +237,11 @@
         "container": false
       },
       "source_type": "reference",
-      "reused_asset_id": "sha256:a949aaae9dbeda56afc610c92f0d92f496078e735d2a4fdda4e2a076c6bc84a2",
+      "reused_asset_id": "sha256:81500e6e810a0c8dcbec5fc14cfe956c0ac7f86fc4fcd609db561e892fb5a21e",
       "a2a": {
         "eligible_to_broadcast": false
       },
-      "content": "Intent: innovate\n\nGene: gene_gep_innovate_from_opportunity (innovate)\n\nSignals: bounty_task, external_task, self-wait, **toolresult**:, detected:, bottleneck, performance, evolution_stagnation_detected\n\nStrategy:\n1. Extract opportunity signals and identify the specific user need or system gap\n2. Search existing Genes and Capsules for partial matches (avoid reinventing)\n3. Design a minimal, testable implementation plan (prefer small increments)\n4. Estimate blast radius; innovate changes may touch more files but must stay within constraints\n5. Implement the change with clear validation criteria\n6. Validate using declared validation steps; rollback on failure\n7. Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\n\nScope: 4 file(s), 429 line(s)\n\nChanged files:\nsrc/gep/taskReceiver.js\nskills/signal-hygiene/index.js\nskills/signal-hygiene/package.json\nskills/signal-hygiene/scripts/selftest.js\n\nOutcome score: 0.85",
-      "diff": "diff --git a/src/gep/taskReceiver.js b/src/gep/taskReceiver.js\nindex 8da4c06d..e34d88ce 100644\n--- a/src/gep/taskReceiver.js\n+++ b/src/gep/taskReceiver.js\n@@ -8,6 +8,9 @@\n \n const { getNodeId, buildHubHeaders } = require('./a2aProtocol');\n \n+// Signal hygiene: decides which raw task tokens are real evolution signals.\n+var hygiene = require('../../skills/signal-hygiene');\n+\n const HUB_URL = process.env.A2A_HUB_URL || process.env.EVOMAP_HUB_URL || 'https://evomap.ai';\n \n function buildAuthHeaders() {\n@@ -404,6 +407,12 @@ async function completeTask(taskId, assetId) {\n \n /**\n  * Extract signals from a task to inject into evolution cycle.\n+ *\n+ * Hub tasks carry a free-form `signals` string and a free-form `title`.\n+ * Both are sanitized with the signal-hygiene skill before they enter the\n+ * cycle, so prose fragments (\"self-wait\") and tool-output wrappers\n+ * (\"**toolresult**:\", \"detected:\") cannot masquerade as actionable signals.\n+ *\n  * @param {object} task\n  * @returns {string[]} signals array\n  */\n@@ -412,17 +421,15 @@ function taskToSignals(task) {\n   const signals = [];\n   if (task.signals) {\n     const parts = String(task.signals).split(',').map(s => s.trim()).filter(Boolean);\n-    signals.push(...parts);\n+    signals.push(...hygiene.sanitizeSignals(parts));\n   }\n   if (task.title) {\n     const words = String(task.title).toLowerCase().split(/\\s+/).filter(w => w.length >= 3);\n-    for (const w of words.slice(0, 5)) {\n-      if (!signals.includes(w)) signals.push(w);\n-    }\n+    signals.push(...hygiene.sanitizeSignals(words.slice(0, 5)));\n   }\n   signals.push('external_task');\n   if (task.bounty_id) signals.push('bounty_task');\n-  return signals;\n+  return Array.from(new Set(signals));\n }\n \n // ---------------------------------------------------------------------------\n",
+      "content": "Gene: gene_gep_innovate_from_opportunity (innovate)\n\nSignals: external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。\n\nStrategy:\n1. Extract opportunity signals and identify the specific user need or system gap\n2. Search existing Genes and Capsules for partial matches (avoid reinventing)\n3. Design a minimal, testable implementation plan (prefer small increments)\n4. Estimate blast radius; innovate changes may touch more files but must stay within constraints\n5. Implement the change with clear validation criteria\n6. Validate using declared validation steps; rollback on failure\n7. Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\n\nScope: 4 file(s), 957 line(s)\n\nChanged files:\nskills/long-file-writer/index.js\nskills/long-file-writer/package.json\nskills/long-file-writer/scripts/selftest.js\nskills/long-file-writer/scripts/write-long-file.js\n\nOutcome score: 0.85",
       "strategy": [
         "Extract opportunity signals and identify the specific user need or system gap",
         "Search existing Genes and Capsules for partial matches (avoid reinventing)",
@@ -252,7 +251,7 @@
         "Validate using declared validation steps; rollback on failure",
         "Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success"
       ],
-      "asset_id": "sha256:35c706b48470d113dc5a766df0424ece8e2e0e062226f6df10c7ae8e4f4d3718"
+      "asset_id": "sha256:ee301b2636ed754125d7a8dd55ec61e077faee23c24f8356826b65f97b0927b4"
     }
   ]
 }

@@ -1,0 +1,8 @@
+{
+  "name": "long-file-writer",
+  "version": "1.0.0",
+  "main": "index.js",
+  "description": "Write long files in verifiable segments: split at natural boundaries, append, read back and verify every seam.",
+  "license": "MIT",
+  "private": true
+}

@@ -125,9 +125,9 @@
       "epigenetic_marks": [
         {
           "context": "linux/x64/v24.22.1",
-          "boost": 0.1,
-          "reason": "success_in_environment",
-          "created_at": "2026-11-02T17:39:18.279Z"
+          "boost": 0.15000000000000002,
+          "reason": "reinforced_by_success",
+          "created_at": "2026-11-03T17:13:46.867Z"
         }
       ],
       "schema_version": "1.6.0",
