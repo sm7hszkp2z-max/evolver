@@ -46,6 +46,10 @@ node skills/long-file-writer/scripts/write-long-file.js \
 # continue a file whose write was cut off
 node skills/long-file-writer/scripts/write-long-file.js \
   --out docs/guide.md --in docs/guide.src.md --resume
+
+# preserve an existing target unless every segment and verification succeeds
+node skills/long-file-writer/scripts/write-long-file.js \
+  --out docs/guide.md --in docs/guide.src.md --atomic
 ```
 
 The command prints a JSON report and exits non-zero when the verification
@@ -120,6 +124,7 @@ and checks:
 | `maxChars` | `12000` | Hard character limit per part. |
 | `minLines` | `30` | A natural boundary closer than this is ignored in favour of a bigger part. |
 | `resume` | `false` | Continue from the last successfully written boundary instead of starting over. |
+| `atomic` | `false` | Write and verify a sibling temporary file, then rename it over the target; cannot be combined with `resume`. |
 | `verify` | `true` | Run the read-back verification. |
 | `onPart` | -- | Callback fired after each part is written; use it to drive one tool call per part. |
 

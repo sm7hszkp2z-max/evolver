@@ -334,46 +334,59 @@ function resumeBoundary(filePath, parts) {
 function writeLongFile(filePath, content, opts) {
   opts = opts || {};
   var target = String(filePath);
+  var writeTarget = target;
+  var atomic = opts.atomic === true;
+  if (atomic && opts.verify === false) {
+    throw new Error('atomic mode requires verification');
+  }
   var raw = content === null || content === undefined ? '' : String(content);
   var parts = splitIntoParts(raw, opts);
 
   var dir = path.dirname(target);
   if (dir && dir !== '.' && !fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (atomic) writeTarget = target + '.segmented-' + process.pid + '-' + Date.now() + '.tmp';
 
   var startIndex = 0;
   var resumed = false;
   if (opts.resume) {
+    if (atomic) throw new Error('atomic and resume modes cannot be combined');
     var boundary = resumeBoundary(target, parts);
     startIndex = boundary.nextPartIndex;
     resumed = boundary.resumed;
   }
 
   var writes = [];
-  if (parts.length === 0) fs.writeFileSync(target, '', 'utf8');
-  for (var i = startIndex; i < parts.length; i++) {
-    var payload = (i === 0 ? '' : '\n') + parts[i].text;
-    if (i === 0) fs.writeFileSync(target, payload, 'utf8');
-    else fs.appendFileSync(target, payload, 'utf8');
-    writes.push({
-      part: i,
-      mode: i === 0 ? 'write' : 'append',
-      lines: parts[i].lineCount,
-      bytes: Buffer.byteLength(payload, 'utf8')
-    });
-    if (typeof opts.onPart === 'function') {
-      opts.onPart({
+  try {
+    if (parts.length === 0) fs.writeFileSync(writeTarget, '', 'utf8');
+    for (var i = startIndex; i < parts.length; i++) {
+      var payload = (i === 0 ? '' : '\n') + parts[i].text;
+      if (i === 0) fs.writeFileSync(writeTarget, payload, 'utf8');
+      else fs.appendFileSync(writeTarget, payload, 'utf8');
+      writes.push({
         part: i,
-        total: parts.length,
         mode: i === 0 ? 'write' : 'append',
-        payload: payload,
-        bytes: writes[writes.length - 1].bytes
+        lines: parts[i].lineCount,
+        bytes: Buffer.byteLength(payload, 'utf8')
       });
+      if (typeof opts.onPart === 'function') {
+        opts.onPart({
+          part: i,
+          total: parts.length,
+          mode: i === 0 ? 'write' : 'append',
+          payload: payload,
+          bytes: writes[writes.length - 1].bytes
+        });
+      }
     }
+  } catch (err) {
+    if (atomic && fs.existsSync(writeTarget)) fs.unlinkSync(writeTarget);
+    throw err;
   }
 
   var report = {
     ok: false,
     path: target,
+    atomic: atomic,
     partCount: parts.length,
     resumed: resumed,
     resumedFromPart: startIndex,
@@ -397,10 +410,14 @@ function writeLongFile(filePath, content, opts) {
     return report;
   }
 
-  var verification = verifyReadBack(target, raw, { parts: parts });
+  var verification = verifyReadBack(writeTarget, raw, { parts: parts });
   report.verification = verification;
   report.errors = verification.errors;
   report.ok = verification.ok;
+  if (atomic) {
+    if (report.ok) fs.renameSync(writeTarget, target);
+    else if (fs.existsSync(writeTarget)) fs.unlinkSync(writeTarget);
+  }
   return report;
 }
 

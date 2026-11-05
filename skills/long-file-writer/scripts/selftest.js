@@ -100,6 +100,27 @@ function run() {
   assert.ok(resumed.ok, 'the resumed write must verify: ' + JSON.stringify(resumed.errors));
   assert.strictEqual(fs.readFileSync(partial, 'utf8'), sample, 'the resumed file must equal the original');
 
+  // --- atomic mode preserves the old target if a segmented write aborts -----
+  var atomicTarget = path.join(dir, 'atomic.md');
+  fs.writeFileSync(atomicTarget, 'known-good', 'utf8');
+  assert.throws(function () {
+    skill.writeLongFile(atomicTarget, sample, {
+      atomic: true,
+      onPart: function (part) {
+        if (part.part === 1) throw new Error('simulated interrupted append');
+      }
+    });
+  }, /simulated interrupted append/);
+  assert.strictEqual(fs.readFileSync(atomicTarget, 'utf8'), 'known-good',
+    'atomic failure must preserve the previous target');
+  assert.strictEqual(fs.readdirSync(dir).filter(function (name) {
+    return name.indexOf('atomic.md.segmented-') === 0;
+  }).length, 0, 'atomic failure must remove its temporary file');
+  var atomic = skill.writeLongFile(atomicTarget, sample, { atomic: true });
+  assert.ok(atomic.ok && atomic.atomic, 'atomic write must verify before replacement');
+  assert.strictEqual(fs.readFileSync(atomicTarget, 'utf8'), sample,
+    'atomic success must replace the target with the verified content');
+
   // --- edge cases round trip exactly ----------------------------------------
   var edges = [
     '',

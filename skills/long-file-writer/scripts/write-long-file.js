@@ -5,7 +5,7 @@
 //
 //   node scripts/write-long-file.js --out <file> [--in <src> | --stdin]
 //                                       [--max-lines N] [--max-chars N]
-//                                       [--resume] [--dry-run]
+//                                       [--resume | --atomic] [--dry-run]
 
 // The command writes the file in segments (write part 1, append the rest),
 // reads it back from disk and verifies every seam. It prints a JSON report.
@@ -15,7 +15,7 @@ var skill = require('../index.js');
 
 var USAGE = [
   'usage: node write-long-file.js --out <file> [--in <src> | --stdin]',
-  '                           [--max-lines N] [--max-chars N] [--resume]',
+  '                           [--max-lines N] [--max-chars N] [--resume | --atomic]',
   '                           [--dry-run]',
   '',
   'Writes a long file in verifiable segments: split at natural boundaries,',
@@ -23,6 +23,7 @@ var USAGE = [
   '',
   '  --dry-run   print the plan only, do not touch the filesystem',
   '  --resume    continue from the last successfully written boundary',
+  '  --atomic    build and verify a temporary file before replacing --out',
   '',
   'safety: ' + skill.RECOVERY_RULE,
   ''
@@ -36,6 +37,7 @@ function parseArgs(argv) {
     maxLines: skill.DEFAULTS.maxLines,
     maxChars: skill.DEFAULTS.maxChars,
     resume: false,
+    atomic: false,
     dryRun: false,
     help: false
   };
@@ -47,6 +49,7 @@ function parseArgs(argv) {
     else if (arg === '--max-lines') opts.maxLines = parseInt(argv[++i], 10);
     else if (arg === '--max-chars') opts.maxChars = parseInt(argv[++i], 10);
     else if (arg === '--resume') opts.resume = true;
+    else if (arg === '--atomic') opts.atomic = true;
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else if (!opts.out) opts.out = arg;
@@ -72,6 +75,10 @@ function run(argv) {
     console.error(USAGE);
     return 2;
   }
+  if (opts.resume && opts.atomic) {
+    console.error('long-file-writer: --resume and --atomic cannot be combined.');
+    return 2;
+  }
 
   var content = '';
   if (opts.stdin) {
@@ -86,7 +93,8 @@ function run(argv) {
   var writeOpts = {
     maxLines: opts.maxLines,
     maxChars: opts.maxChars,
-    resume: opts.resume
+    resume: opts.resume,
+    atomic: opts.atomic
   };
 
   if (opts.dryRun) {
