@@ -8,6 +8,7 @@
 //   Phase 2: POST /a2a/fetch with asset_ids=[selected] (pays for 1 asset only)
 
 const { getNodeId, buildFetch, getHubNodeSecret } = require('./a2aProtocol');
+const { fetchWithRetry } = require('./retry');
 const { logAssetCall } = require('./assetCallLog');
 
 const DEFAULT_MIN_REUSE_SCORE = 0.72;
@@ -97,9 +98,6 @@ async function hubSearch(signals, opts) {
     const searchMsg = buildFetch({ signals: signalList, searchOnly: true });
     const endpoint = hubUrl + '/a2a/fetch';
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(TIMEOUT_REASON), timeout);
-
     const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
     const secret = getHubNodeSecret();
     if (secret) {
@@ -109,13 +107,11 @@ async function hubSearch(signals, opts) {
       if (token) headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const res = await fetch(endpoint, {
+    const res = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(searchMsg),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    }, { timeoutMs: timeout, timeoutReason: TIMEOUT_REASON, label: 'hub_search' });
 
     if (!res.ok) {
       logAssetCall({
@@ -162,16 +158,11 @@ async function hubSearch(signals, opts) {
     if (selectedAssetId) {
       try {
         const fetchMsg = buildFetch({ assetIds: [selectedAssetId] });
-        const controller2 = new AbortController();
-        const timer2 = setTimeout(() => controller2.abort(TIMEOUT_REASON), timeout);
-
-        const res2 = await fetch(endpoint, {
+        const res2 = await fetchWithRetry(endpoint, {
           method: 'POST',
           headers,
           body: JSON.stringify(fetchMsg),
-          signal: controller2.signal,
-        });
-        clearTimeout(timer2);
+        }, { timeoutMs: timeout, timeoutReason: TIMEOUT_REASON, label: 'hub_asset_fetch' });
 
         if (res2.ok) {
           const data2 = await res2.json();
@@ -212,9 +203,10 @@ async function hubSearch(signals, opts) {
       chain_id: pick.match.chain_id || null,
     };
   } catch (err) {
-    const isTimeout = err.name === 'AbortError' || (err.cause && err.cause === TIMEOUT_REASON);
-    const reason = isTimeout ? 'timeout' : 'fetch_error';
-    console.log(`[HubSearch] Failed (non-fatal, ${reason}): ${err.message}`);
+    const isTimeout = typeof err === 'string' ? /timeout/i.test(err)
+      : (err.name === 'AbortError' || err.name === 'TimeoutError' || (err.cause && err.cause === TIMEOUT_REASON));
+    const reason = (err && err.status) ? `hub_http_${err.status}` : (isTimeout ? 'timeout' : 'fetch_error');
+    console.log(`[HubSearch] Failed (non-fatal, ${reason}): ${(err && err.message) || err}`);
     logAssetCall({
       run_id: (opts && opts.run_id) || null,
       action: 'hub_search_miss',

@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 const { getNodeId, buildHubHeaders } = require('./a2aProtocol');
+const { fetchWithRetry } = require('./retry');
 
 // Signal hygiene: decides which raw task tokens are real evolution signals.
 var hygiene = require('../../skills/signal-hygiene');
@@ -61,16 +62,11 @@ async function fetchTasks(opts) {
     };
 
     const url = `${HUB_URL.replace(/\/+$/, '')}/a2a/fetch`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify(msg),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    }, { timeoutMs: 8000, label: 'hub_fetch' });
 
     if (!res.ok) return { tasks: [] };
 
@@ -354,21 +350,16 @@ async function claimTask(taskId, opts) {
 
   try {
     const url = `${HUB_URL.replace(/\/+$/, '')}/a2a/task/claim`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
     const body = { task_id: taskId, node_id: nodeId };
     if (opts && opts.commitment_deadline) {
       body.commitment_deadline = opts.commitment_deadline;
     }
 
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    }, { timeoutMs: 5000, label: 'hub_claim' });
 
     return res.ok;
   } catch {
@@ -388,16 +379,11 @@ async function completeTask(taskId, assetId) {
 
   try {
     const url = `${HUB_URL.replace(/\/+$/, '')}/a2a/task/complete`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({ task_id: taskId, asset_id: assetId, node_id: nodeId }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    }, { timeoutMs: 5000, label: 'hub_complete' });
 
     return res.ok;
   } catch {
@@ -443,16 +429,11 @@ async function claimWorkerTask(taskId) {
 
   try {
     const url = `${HUB_URL.replace(/\/+$/, '')}/a2a/work/claim`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({ task_id: taskId, node_id: nodeId }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    }, { timeoutMs: 5000, label: 'hub_work_claim' });
 
     if (!res.ok) return null;
     return await res.json();
@@ -467,16 +448,11 @@ async function completeWorkerTask(assignmentId, resultAssetId) {
 
   try {
     const url = `${HUB_URL.replace(/\/+$/, '')}/a2a/work/complete`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    const res = await fetch(url, {
+    const res = await fetchWithRetry(url, {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({ assignment_id: assignmentId, node_id: nodeId, result_asset_id: resultAssetId }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
+    }, { timeoutMs: 5000, label: 'hub_work_complete' });
 
     return res.ok;
   } catch {
