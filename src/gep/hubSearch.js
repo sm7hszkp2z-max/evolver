@@ -10,6 +10,7 @@
 const { getNodeId, buildFetch, getHubNodeSecret } = require('./a2aProtocol');
 const { fetchWithRetry } = require('./retry');
 const { logAssetCall } = require('./assetCallLog');
+const resultCache = require('./resultCache');
 
 const DEFAULT_MIN_REUSE_SCORE = 0.72;
 const DEFAULT_REUSE_MODE = 'reference'; // 'direct' | 'reference'
@@ -81,6 +82,10 @@ function pickBestMatch(results, threshold) {
  * Falls back to single-call fetch (old behavior) if search_only is not supported.
  * Returns { hit: true, match, score, mode } or { hit: false }.
  */
+// TTL result cache around the Hub lookup: a repeated search for the same
+// signals inside the window is served from the cache, so a rate-limited or
+// timing-out Hub is not hammered again on every cycle
+// (signals: repeated_tool_usage:exec, log_error).
 async function hubSearch(signals, opts) {
   const hubUrl = getHubUrl();
   if (!hubUrl) return { hit: false, reason: 'no_hub_url' };
@@ -90,6 +95,18 @@ async function hubSearch(signals, opts) {
     : [];
   if (signalList.length === 0) return { hit: false, reason: 'no_signals' };
 
+  const cacheKey = 'hub_search:' + signalList.slice().sort().join('|');
+  const cachedResult = resultCache.cached(cacheKey, resultCache.ttlFor('completion'));
+  if (cachedResult !== undefined) {
+    return Object.assign({}, cachedResult, { cached: true });
+  }
+
+  const result = await hubSearchUncached(signalList, opts, hubUrl);
+  resultCache.store(cacheKey, result, resultCache.ttlFor('completion'));
+  return result;
+}
+
+async function hubSearchUncached(signalList, opts, hubUrl) {
   const threshold = (opts && Number.isFinite(opts.threshold)) ? opts.threshold : getMinReuseScore();
   const timeout = (opts && Number.isFinite(opts.timeoutMs)) ? opts.timeoutMs : 8000;
 

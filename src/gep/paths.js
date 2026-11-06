@@ -114,6 +114,13 @@ function getLogsDir() {
   return process.env.EVOLVER_LOGS_DIR || path.join(getWorkspaceRoot(), 'logs');
 }
 
+// Cache directory for the evolver's own runtime caches (TTL result cache,
+// skills list cache, ...). Mirrors getLogsDir(): an explicit env var wins,
+// otherwise the cache lives under the resolved workspace root.
+function getCacheDir() {
+  return process.env.EVOLVER_CACHE_DIR || path.join(getWorkspaceRoot(), 'cache');
+}
+
 function getEvolverLogPath() {
   return path.join(getLogsDir(), 'evolver_loop.log');
 }
@@ -181,6 +188,7 @@ module.exports = {
   getOpenclawMemoryDir,
   localDateStamp,
   getLogsDir,
+  getCacheDir,
   getEvolverLogPath,
   getMemoryDir,
   getEvolutionDir,

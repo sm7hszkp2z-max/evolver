@@ -8,6 +8,7 @@ const os = require('os');
 const { execSync } = require('child_process');
 const paths = require('../gep/paths');
 const { getSkillsDir, getWorkspaceRoot } = paths;
+const resultCache = require('../gep/resultCache');
 
 const IGNORE_LIST = new Set([
     'common',
@@ -325,9 +326,22 @@ function findMissingSkillDependencies(options) {
     return missing;
 }
 
+// The skills inventory scan is a hot path: every cycle re-walks the skills
+// directory even when nothing changed (signal: repeated_tool_usage:exec).
+// The report is cached for the heartbeat TTL, so a repeated scan inside the
+// window is served from the cache instead of hitting the filesystem again.
 function run(options) {
     var heal = (options && options.autoHeal) !== false;
     var SKILLS_DIR = getSkillsDir();
+    var key = 'skills_monitor:inventory:' + SKILLS_DIR + ':' + (heal ? 'heal' : 'noheal');
+    var report = resultCache.memoize(key, resultCache.ttlFor('heartbeat'), function () {
+        return scanSkills(SKILLS_DIR, heal);
+    });
+    // Hand out a copy so a caller cannot mutate the cached array.
+    return Array.isArray(report) ? report.slice() : report;
+}
+
+function scanSkills(SKILLS_DIR, heal) {
     var skills = fs.readdirSync(SKILLS_DIR);
     var report = [];
 
