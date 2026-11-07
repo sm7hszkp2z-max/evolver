@@ -77,8 +77,28 @@ Use this as your primary approach if applicable. Adapt to local context.
  */
 function truncateContext(text, maxLength = 20000) {
   if (!text || text.length <= maxLength) return text || '';
-  return text.slice(0, maxLength) + '\n...[TRUNCATED_EXECUTION_CONTEXT]...';
+  const marker = '\n...[TRUNCATED_EXECUTION_CONTEXT]...\n';
+  // Keep BOTH ends: the head carries runtime state / notes / evolution
+  // history, the tail carries the mutation directive. A head-only clip
+  // would silently drop the directive the Hand needs.
+  // The head gets 60% because its structured sections (runtime state, notes,
+  // recent evolution history) are denser in planning value per char than the
+  // raw session transcript at the tail.
+  const keep = Math.max(0, maxLength - marker.length);
+  const headLen = Math.ceil(keep * 0.6);
+  const tailLen = keep - headLen;
+  const s = String(text);
+  const head = s.slice(0, headLen);
+  const tail = tailLen > 0 ? s.slice(s.length - tailLen) : '';
+  return head + marker + tail;
 }
+
+/**
+ * Execution context budget (chars) for the GEP prompt.
+ * Keeps the total GEP prompt well under the GEP_PROMPT_MAX_CHARS safety cap
+ * without touching the protocol/schema sections.
+ */
+const EXEC_CONTEXT_BUDGET = 4500;
 
 /**
  * Strict schema definitions for the prompt to reduce drift.
@@ -289,7 +309,11 @@ ACTIVE STRATEGY (Generic):
   }
   
   // Use intelligent truncation
-  const executionContext = truncateContext(context, 20000);
+  // Execution context budget (chars). The context is the elastic section of
+  // the GEP prompt: runtime state + notes + evolution history at the head,
+  // mutation directive at the tail. Bounding it keeps the whole prompt small
+  // enough to process cheaply, without dropping the mandatory tail.
+  const executionContext = truncateContext(context, EXEC_CONTEXT_BUDGET);
   
   // Strict Schema Injection
   const schemaSection = SCHEMA_DEFINITIONS.replace('<parent_evt_id|null>', parentValue);

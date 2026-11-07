@@ -17,6 +17,7 @@ const {
 } = require('./gep/assetStore');
 const { selectGeneAndCapsule, matchPatternToSignals } = require('./gep/selector');
 const { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock } = require('./gep/prompt');
+const { projectCapsuleForPrompt, projectGeneForPrompt, projectAssetsForPrompt } = require('./gep/assets');
 const { hubSearch } = require('./gep/hubSearch');
 const { logAssetCall } = require('./gep/assetCallLog');
 const { extractCapabilityCandidates, renderCandidatesPreview } = require('./gep/candidates');
@@ -1578,8 +1579,13 @@ async function run() {
     console.error(`[SolidifyState] Write failed: ${e.message}`);
   }
 
-  const genesPreview = `\`\`\`json\n${JSON.stringify(genes.slice(0, 6), null, 2)}\n\`\`\``;
-  const capsulesPreview = `\`\`\`json\n${JSON.stringify(capsules.slice(-3), null, 2)}\n\`\`\``;
+  // [GEP-0073] Prompt previews are whitelist-projected.
+  // The stored assets (assets/gep/genes.json, assets/gep/capsules.json) keep the
+  // full audit trail (diff/content/success_reason/env_fingerprint); the planning
+  // prompt only carries planning-relevant summary fields, so historical diffs no
+  // longer travel into every GEP prompt.
+  const genesPreview = `\`\`\`json\n${JSON.stringify(projectAssetsForPrompt(genes.slice(0, 6), projectGeneForPrompt), null, 2)}\n\`\`\``;
+  const capsulesPreview = `\`\`\`json\n${JSON.stringify(projectAssetsForPrompt(capsules.slice(-3), projectCapsuleForPrompt), null, 2)}\n\`\`\``;
 
   const reviewNote = IS_REVIEW_MODE
     ? 'Review mode: before significant edits, pause and ask the user for confirmation.'
