@@ -304,6 +304,11 @@ module.exports = {
   readRecentCandidates, readRecentExternalCandidates,
   upsertGene, appendCapsule, upsertCapsule,
   readGenesStore,
+  // ensureSchemaFields fills a MISSING schema_version (and a missing asset_id
+  // content hash) without touching any value that is already present.
+  // Exported so guarded repair tooling (skills/protocol-drift-monitor) can
+  // reuse the store's own canonical rule instead of re-implementing it.
+  ensureSchemaFields,
   appendFailedCapsule, readRecentFailedCapsules,
   genesPath, capsulesPath, eventsPath, candidatesPath, externalCandidatesPath, failedCapsulesPath,
   ensureAssetFiles, buildValidationCmd,

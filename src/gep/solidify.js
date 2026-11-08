@@ -1242,7 +1242,7 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
       id: capsuleId,
       trigger: prevCapsule && Array.isArray(prevCapsule.trigger) && prevCapsule.trigger.length ? prevCapsule.trigger : signals,
       gene: geneUsed && geneUsed.id ? geneUsed.id : prevCapsule && prevCapsule.gene ? prevCapsule.gene : null,
-      summary: s || (prevCapsule && prevCapsule.summary ? String(prevCapsule.summary) : autoSummary),
+      summary: s || autoSummary || (prevCapsule && prevCapsule.summary ? String(prevCapsule.summary) : ''),
       confidence: clamp01(score),
       blast_radius: { files: blast.files, lines: blast.lines },
       outcome: { status: 'success', score },
