@@ -40,7 +40,7 @@ const { getEvolutionDir } = require('./gep/paths');
 const { shouldReflect, buildReflectionContext, recordReflection } = require('./gep/reflection');
 const { loadNarrativeSummary } = require('./gep/narrativeMemory');
 const { maybeReportIssue } = require('./gep/issueReporter');
-const { readRecentSessionLines } = require('./gep/sessionStore');
+const { readRecentSessionLines, getEvolverOwnSessionMarkers } = require('./gep/sessionStore');
 const { findMissingSkillDependencies } = require('./ops/skills_monitor');
 
 // Load environment variables from repo root BEFORE any path constant is
@@ -78,6 +78,55 @@ try {
   if (!fs.existsSync(MEMORY_DIR)) fs.mkdirSync(MEMORY_DIR, { recursive: true });
 } catch (e) {}
 
+// Compact signature of an exec tool call. The signal extractor needs the
+// command text to tell "the same command ran again" from "many different
+// commands ran" - without it every exec call looks identical and a signal
+// literally named "repeated" cannot measure repetition.
+//
+// The exec tool is invoked in several shapes:
+//   { command: "..." }                        shell form
+//   { code: "... exec({command:'...'})" }     code mode
+//   { input: "... exec_command({cmd:'...'})" } legacy code mode
+// so read the direct argument first, then dig the command out of the nested
+// source, and finally fall back to the human readable title.
+function extractExecCommandSignature(args) {
+  if (!args || typeof args !== 'object') return '';
+  let raw = '';
+  const directKeys = ['command', 'cmd', 'shell', 'script'];
+  for (const key of directKeys) {
+    if (typeof args[key] === 'string' && args[key].trim()) { raw = args[key]; break; }
+  }
+  if (!raw) {
+    const sourceKeys = ['code', 'input'];
+    for (const key of sourceKeys) {
+      const source = typeof args[key] === 'string' ? args[key] : '';
+      if (!source) continue;
+      const m = source.match(/\b(?:command|cmd)\s*:\s*/);
+      if (!m) continue;
+      const start = m.index + m[0].length;
+      const quote = source.charAt(start);
+      if (quote !== '"' && quote !== "'" && quote.charCodeAt(0) !== 96) continue;
+      let chunk = source.slice(start + 1, start + 401);
+      const last = chunk.lastIndexOf(quote);
+      if (last > 0) chunk = chunk.slice(0, last);
+      raw = chunk.replace(/\\(["'])/g, '$1').replace(/\\n/g, ' ').replace(/\\t/g, ' ');
+      break;
+    }
+  }
+  if (!raw && typeof args.title === 'string') raw = args.title;
+  return String(raw).replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+// Render a tool call as a compact marker. For exec calls the marker also
+// carries the command signature: [TOOL: exec] [CMD: <signature>].
+function renderToolCallMarker(call) {
+  const name = String((call && call.name) || 'tool');
+  const base = '[TOOL: ' + name + ']';
+  if (name !== 'exec') return base;
+  const signature = extractExecCommandSignature(call && call.arguments);
+  return signature ? base + ' [CMD: ' + signature + ']' : base;
+}
+
 function formatSessionLog(jsonlContent) {
   const result = [];
   const lines = jsonlContent.split('\n');
@@ -100,11 +149,16 @@ function formatSessionLog(jsonlContent) {
       if (data.type === 'message' && data.message) {
         const role = (data.message.role || 'unknown').toUpperCase();
         let content = '';
+        const toolMarkers = [];
         if (Array.isArray(data.message.content)) {
           content = data.message.content
             .map(c => {
               if (c.type === 'text') return c.text;
-              if (c.type === 'toolCall') return `[TOOL: ${c.name}]`;
+              if (c.type === 'toolCall') {
+                const marker = renderToolCallMarker(c);
+                toolMarkers.push(marker);
+                return '';
+              }
               return '';
             })
             .join(' ');
@@ -133,6 +187,11 @@ function formatSessionLog(jsonlContent) {
 
         // Clean up newlines for compact reading
         content = content.replace(/\n+/g, ' ').slice(0, 300);
+        // Tool markers are appended AFTER the prose truncation. Before, the
+        // marker was part of the truncated text, so any assistant message
+        // longer than 300 characters hid its own tool calls and the
+        // signal extractor under-counted them.
+        if (toolMarkers.length > 0) content = content + ' ' + toolMarkers.join(' ');
         entry = `**${role}**: ${content}`;
       } else if (data.type === 'tool_result' || (data.message && data.message.role === 'toolResult')) {
         // Filter: Skip generic success results or short uninformative ones
@@ -207,7 +266,12 @@ function readRealSessionLog() {
     if (files.length === 0) return readSessionLogFallback();
 
     // Skip evolver's own sessions to avoid self-reference loops
-    let nonEvolverFiles = files.filter(f => !f.name.startsWith('evolver_hand_'));
+    // Skip the evolver's own sessions to avoid self-reference loops: its cron
+    // session and the Hand session it spawns are orchestration traffic, not
+    // agent behaviour. Measuring them made the evolver count its own tool
+    // calls as agent behaviour every cycle.
+    const ownSessionMarkers = getEvolverOwnSessionMarkers();
+    let nonEvolverFiles = files.filter(f => !ownSessionMarkers.some(m => f.name.includes(m)));
 
     // Session scope filter: when scope is active, only include sessions
     // whose filename contains the scope string (e.g., channel_123456.jsonl).

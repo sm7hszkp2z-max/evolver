@@ -223,6 +223,61 @@ function pickErrorSignatureLine(lines) {
   return null;
 }
 
+// --- Tool usage: repetition vs. volume -------------------------------------
+// A tool-usage signal must be able to tell "the same command ran again" from
+// "many different commands ran". Only the command text can do that, so the
+// transcript carries a command signature next to every exec marker:
+//   **ASSISTANT**: <prose> [TOOL: exec] [CMD: <signature>]
+// Without it every exec call looks identical and a signal literally named
+// "repeated" could never measure repetition.
+var HIGH_TOOL_USAGE_THRESHOLD = 10; // calls of one tool (tools without a command text)
+// Distinct commands of ONE tool. A session that runs 10+ different one-shot
+// commands is normal engineering work, so the threshold sits clearly above
+// that: the signal marks a genuine outlier instead of being always on.
+var HIGH_DISTINCT_COMMAND_THRESHOLD = 15;
+var REPEATED_COMMAND_THRESHOLD = 3; // identical normalized command occurrences
+
+// A performance incident needs an incident context. Bare words such as
+// "timeout" are configuration noise (timeout=1800, --timeout-seconds 1800,
+// timeoutSeconds, lastErrorReason=timeout) and must not fire the signal.
+var PERF_INCIDENT_RE = /\b(?:timed[\s-]?out|time[\s-]out|timeout\s+exceed(?:ed|ing)?|exceeded\s+(?:[a-z0-9_.]+\s+){0,3}timeout|oom[\s-]?kill(?:ed)?|out\s+of\s+memory|memory\s+limit\s+exceeded|high\s+cpu|cpu\s+spike|cpu\s+usage\s+above|took\s+too\s+long|latency\s+spike|high\s+latency|slow\s+response|slow\s+query|performance\s+issue|high\s+memory)\b/i;
+
+// Normalize a command so volatile parts (numbers, temp paths, timestamps,
+// durations, uuids) do not make two runs of the same command look different.
+function normalizeCommand(command) {
+  var s = String(command || '');
+  if (!s.trim()) return '';
+  s = s.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>');
+  s = s.replace(/\b\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\b/g, '<ts>');
+  s = s.replace(/\b\d+(?:\.\d+)?\s*(?:ms|msec|milliseconds|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|s|m|h)\b/gi, '<dur>');
+  // mktemp-style random names (/tmp/tmpA1b2C3d4) are volatile. Keep the rest
+  // of the path: "/tmp/dir0" and "/tmp/dir1" are DIFFERENT targets.
+  s = s.replace(/\/tmp\/[^\s"']*tmp[A-Za-z0-9]{6,}/g, '/tmp/<tmp>');
+  s = s.replace(/\btmp[A-Za-z0-9]{8,}\b/g, '<tmp>');
+  s = s.replace(/\b\d+(?:\.\d+)?\b/g, '#');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  // The length is part of the key: two commands that share a long prefix but
+  // differ later must not collapse into a single "repeated" command.
+  return s.slice(0, 160) + '|' + s.length;
+}
+
+// Extract the exec command signatures carried by the transcript.
+function extractExecCommands(corpus) {
+  var text = String(corpus || '');
+  var out = [];
+  var re = /\[CMD:\s*([^\]]{1,400})\]/gi;
+  var m;
+  while ((m = re.exec(text)) !== null) {
+    var parts = String(m[1]).split(' ;; ');
+    for (var i = 0; i < parts.length; i++) {
+      var cmd = parts[i].trim();
+      if (cmd) out.push(cmd);
+    }
+  }
+  return out;
+}
+
 function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, userSnippet, recentEvents, integrationReport }) {
   var signals = [];
   var corpus = [
@@ -232,7 +287,11 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
     String(userSnippet || ''),
     String(integrationReport || ''),
   ].join('\n');
-  var lower = corpus.toLowerCase();
+  // Command signatures are metadata, not prose. Strip them before the
+  // semantic scans: otherwise a shell command can fake a feature request
+  // ("write ..."), an error or a performance incident.
+  var proseCorpus = corpus.replace(/\[CMD:\s*[^\]]{0,400}\]/g, ' ');
+  var lower = proseCorpus.toLowerCase();
 
   // Analyze recent evolution history for de-duplication
   var history = analyzeRecentHistory(recentEvents || []);
@@ -296,7 +355,7 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   // Count repeated identical errors -- these indicate systemic issues that need automated fixes
   try {
     var errorCounts = {};
-    var errPatterns = corpus.match(/(?:LLM error|"error"|"status":\s*"error")[^}]{0,200}/gi) || [];
+    var errPatterns = proseCorpus.match(/(?:LLM error|"error"|"status":\s*"error")[^}]{0,200}/gi) || [];
     for (var ep = 0; ep < errPatterns.length; ep++) {
       // Normalize to a short key
       var key = errPatterns[ep].replace(/\s+/g, ' ').slice(0, 100);
@@ -320,66 +379,73 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   // Support 4 languages: EN, ZH-CN, ZH-TW, JA. Attach snippet for selector/prompt use.
 
   var featureRequestSnippet = '';
-  var featEn = corpus.match(/\b(add|implement|create|build|make|develop|write|design)\b[^.?!\n]{3,120}\b(feature|function|module|capability|tool|support|endpoint|command|option|mode)\b/i);
+  var featEn = proseCorpus.match(/\b(add|implement|create|build|make|develop|write|design)\b[^.?!\n]{3,120}\b(feature|function|module|capability|tool|support|endpoint|command|option|mode)\b/i);
   if (featEn) featureRequestSnippet = featEn[0].replace(/\s+/g, ' ').trim().slice(0, 200);
   if (!featureRequestSnippet && /\b(i want|i need|we need|please add|can you add|could you add|let'?s add)\b/i.test(lower)) {
-    var featWant = corpus.match(/.{0,80}\b(i want|i need|we need|please add|can you add|could you add|let'?s add)\b.{0,80}/i);
+    var featWant = proseCorpus.match(/.{0,80}\b(i want|i need|we need|please add|can you add|could you add|let'?s add)\b.{0,80}/i);
     featureRequestSnippet = featWant ? featWant[0].replace(/\s+/g, ' ').trim().slice(0, 200) : 'feature request';
   }
-  if (!featureRequestSnippet && /加个|实现一下|做个|想要\s*一个|需要\s*一个|帮我加|帮我开发|加一下|新增一个|加个功能|做个功能|我想/.test(corpus)) {
-    var featZh = corpus.match(/.{0,100}(加个|实现一下|做个|想要\s*一个|需要\s*一个|帮我加|帮我开发|加一下|新增一个|加个功能|做个功能).{0,100}/);
+  if (!featureRequestSnippet && /加个|实现一下|做个|想要\s*一个|需要\s*一个|帮我加|帮我开发|加一下|新增一个|加个功能|做个功能|我想/.test(proseCorpus)) {
+    var featZh = proseCorpus.match(/.{0,100}(加个|实现一下|做个|想要\s*一个|需要\s*一个|帮我加|帮我开发|加一下|新增一个|加个功能|做个功能).{0,100}/);
     if (featZh) featureRequestSnippet = featZh[0].replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (!featureRequestSnippet && /我想/.test(corpus)) {
-      var featWantZh = corpus.match(/我想\s*[，,\.。、\s]*([\s\S]{0,400})/);
+    if (!featureRequestSnippet && /我想/.test(proseCorpus)) {
+      var featWantZh = proseCorpus.match(/我想\s*[，,\.。、\s]*([\s\S]{0,400})/);
       featureRequestSnippet = featWantZh ? (featWantZh[1].replace(/\s+/g, ' ').trim().slice(0, 200) || '功能需求') : '功能需求';
     }
     if (!featureRequestSnippet) featureRequestSnippet = '功能需求';
   }
-  if (!featureRequestSnippet && /加個|實現一下|做個|想要一個|請加|新增一個|加個功能|做個功能|幫我加/.test(corpus)) {
-    var featTw = corpus.match(/.{0,100}(加個|實現一下|做個|想要一個|請加|新增一個|加個功能|做個功能|幫我加).{0,100}/);
+  if (!featureRequestSnippet && /加個|實現一下|做個|想要一個|請加|新增一個|加個功能|做個功能|幫我加/.test(proseCorpus)) {
+    var featTw = proseCorpus.match(/.{0,100}(加個|實現一下|做個|想要一個|請加|新增一個|加個功能|做個功能|幫我加).{0,100}/);
     featureRequestSnippet = featTw ? featTw[0].replace(/\s+/g, ' ').trim().slice(0, 200) : '功能需求';
   }
-  if (!featureRequestSnippet && /追加|実装|作って|機能を|追加して|が欲しい|を追加|してほしい/.test(corpus)) {
-    var featJa = corpus.match(/.{0,100}(追加|実装|作って|機能を|追加して|が欲しい|を追加|してほしい).{0,100}/);
+  if (!featureRequestSnippet && /追加|実装|作って|機能を|追加して|が欲しい|を追加|してほしい/.test(proseCorpus)) {
+    var featJa = proseCorpus.match(/.{0,100}(追加|実装|作って|機能を|追加して|が欲しい|を追加|してほしい).{0,100}/);
     featureRequestSnippet = featJa ? featJa[0].replace(/\s+/g, ' ').trim().slice(0, 200) : '機能要望';
   }
-  if (featureRequestSnippet || /\b(add|implement|create|build|make|develop|write|design)\b[^.?!\n]{3,60}\b(feature|function|module|capability|tool|support|endpoint|command|option|mode)\b/i.test(corpus) ||
+  if (featureRequestSnippet || /\b(add|implement|create|build|make|develop|write|design)\b[^.?!\n]{3,60}\b(feature|function|module|capability|tool|support|endpoint|command|option|mode)\b/i.test(proseCorpus) ||
       /\b(i want|i need|we need|please add|can you add|could you add|let'?s add)\b/i.test(lower) ||
-      /加个|实现一下|做个|想要\s*一个|需要\s*一个|帮我加|帮我开发|加一下|新增一个|加个功能|做个功能|我想/.test(corpus) ||
-      /加個|實現一下|做個|想要一個|請加|新增一個|加個功能|做個功能|幫我加/.test(corpus) ||
-      /追加|実装|作って|機能を|追加して|が欲しい|を追加|してほしい/.test(corpus)) {
+      /加个|实现一下|做个|想要\s*一个|需要\s*一个|帮我加|帮我开发|加一下|新增一个|加个功能|做个功能|我想/.test(proseCorpus) ||
+      /加個|實現一下|做個|想要一個|請加|新增一個|加個功能|做個功能|幫我加/.test(proseCorpus) ||
+      /追加|実装|作って|機能を|追加して|が欲しい|を追加|してほしい/.test(proseCorpus)) {
     signals.push('user_feature_request:' + (featureRequestSnippet || ''));
   }
 
   // user_improvement_suggestion: 4 languages + snippet
   var improvementSnippet = '';
   if (!errorHit) {
-    var impEn = corpus.match(/.{0,80}\b(should be|could be better|improve|enhance|upgrade|refactor|clean up|simplify|streamline)\b.{0,80}/i);
+    var impEn = proseCorpus.match(/.{0,80}\b(should be|could be better|improve|enhance|upgrade|refactor|clean up|simplify|streamline)\b.{0,80}/i);
     if (impEn) improvementSnippet = impEn[0].replace(/\s+/g, ' ').trim().slice(0, 200);
-    if (!improvementSnippet && /改进一下|优化一下|简化|重构|整理一下|弄得更好/.test(corpus)) {
-      var impZh = corpus.match(/.{0,100}(改进一下|优化一下|简化|重构|整理一下|弄得更好).{0,100}/);
+    if (!improvementSnippet && /改进一下|优化一下|简化|重构|整理一下|弄得更好/.test(proseCorpus)) {
+      var impZh = proseCorpus.match(/.{0,100}(改进一下|优化一下|简化|重构|整理一下|弄得更好).{0,100}/);
       improvementSnippet = impZh ? impZh[0].replace(/\s+/g, ' ').trim().slice(0, 200) : '改进建议';
     }
-    if (!improvementSnippet && /改進一下|優化一下|簡化|重構|整理一下|弄得更好/.test(corpus)) {
-      var impTw = corpus.match(/.{0,100}(改進一下|優化一下|簡化|重構|整理一下|弄得更好).{0,100}/);
+    if (!improvementSnippet && /改進一下|優化一下|簡化|重構|整理一下|弄得更好/.test(proseCorpus)) {
+      var impTw = proseCorpus.match(/.{0,100}(改進一下|優化一下|簡化|重構|整理一下|弄得更好).{0,100}/);
       improvementSnippet = impTw ? impTw[0].replace(/\s+/g, ' ').trim().slice(0, 200) : '改進建議';
     }
-    if (!improvementSnippet && /改善|最適化|簡素化|リファクタ|良くして|改良/.test(corpus)) {
-      var impJa = corpus.match(/.{0,100}(改善|最適化|簡素化|リファクタ|良くして|改良).{0,100}/);
+    if (!improvementSnippet && /改善|最適化|簡素化|リファクタ|良くして|改良/.test(proseCorpus)) {
+      var impJa = proseCorpus.match(/.{0,100}(改善|最適化|簡素化|リファクタ|良くして|改良).{0,100}/);
       improvementSnippet = impJa ? impJa[0].replace(/\s+/g, ' ').trim().slice(0, 200) : '改善要望';
     }
     var hasImprovement = improvementSnippet ||
       /\b(should be|could be better|improve|enhance|upgrade|refactor|clean up|simplify|streamline)\b/i.test(lower) ||
-      /改进一下|优化一下|简化|重构|整理一下|弄得更好/.test(corpus) ||
-      /改進一下|優化一下|簡化|重構|整理一下|弄得更好/.test(corpus) ||
-      /改善|最適化|簡素化|リファクタ|良くして|改良/.test(corpus);
+      /改进一下|优化一下|简化|重构|整理一下|弄得更好/.test(proseCorpus) ||
+      /改進一下|優化一下|簡化|重構|整理一下|弄得更好/.test(proseCorpus) ||
+      /改善|最適化|簡素化|リファクタ|良くして|改良/.test(proseCorpus);
     if (hasImprovement) {
       signals.push('user_improvement_suggestion:' + (improvementSnippet || ''));
     }
   }
 
-  // perf_bottleneck: performance issues detected
-  if (/\b(slow|timeout|timed?\s*out|latency|bottleneck|took too long|performance issue|high cpu|high memory|oom|out of memory)\b/i.test(lower)) {
+  // perf_bottleneck: performance INCIDENTS only.
+  // The old regex matched the bare words timeout / slow / latency / oom
+  // anywhere in the corpus, so configuration values ("timeout=1800",
+  // "--timeout-seconds 1800") and JSON field names
+  // ("lastErrorReason=timeout") kept the signal permanently on even when
+  // nothing was slow. Require an incident context: the phrase has to
+  // describe something that actually timed out, ran out of memory or became
+  // slow. Genuine incidents ("cron: job execution timed out") still match.
+  if (PERF_INCIDENT_RE.test(proseCorpus)) {
     signals.push('perf_bottleneck');
   }
 
@@ -392,33 +458,70 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   }
 
   // --- Tool Usage Analytics ---
+  // Tool-usage signals must measure REPETITION, not volume. The old code
+  // counted total calls: a session running 30 DIFFERENT one-shot commands
+  // scored exactly like one session repeating a SINGLE command 30 times, so
+  // "repeated_tool_usage" could never clear itself.
   var toolUsage = {};
   var toolMatches = corpus.match(/\[TOOL:\s*([\w-]+)\]/g) || [];
-  
-  // Extract exec commands to identify benign loops (like watchdog checks)
-  var execCommands = corpus.match(/exec: (node\s+[\w\/\.-]+\.js\s+ensure)/g) || [];
-  var benignExecCount = execCommands.length;
 
   for (var i = 0; i < toolMatches.length; i++) {
     var toolName = toolMatches[i].match(/\[TOOL:\s*([\w-]+)\]/)[1];
     toolUsage[toolName] = (toolUsage[toolName] || 0) + 1;
   }
-  
-  // Adjust exec count by subtracting benign commands
-  if (toolUsage['exec']) {
-    toolUsage['exec'] = Math.max(0, toolUsage['exec'] - benignExecCount);
+
+  // Repetition profile of the exec commands: how many DIFFERENT commands were
+  // run, and whether one command was executed again and again.
+  var execCommands = extractExecCommands(corpus);
+  var commandCounts = {};
+  for (var ec = 0; ec < execCommands.length; ec++) {
+    // Benign watchdog loop (node <file>.js ensure) - never a real repetition.
+    if (/node\s+[\w\/\.-]+\.js\s+ensure/.test(execCommands[ec])) continue;
+    var rawKey = execCommands[ec];
+    var normKey = normalizeCommand(rawKey);
+    if (!normKey) continue;
+    var bucket = commandCounts[normKey];
+    if (!bucket) { bucket = { total: 0, raws: {} }; commandCounts[normKey] = bucket; }
+    bucket.total += 1;
+    bucket.raws[rawKey] = (bucket.raws[rawKey] || 0) + 1;
   }
-  
-  Object.keys(toolUsage).forEach(function(tool) {
-    if (toolUsage[tool] >= 10) { // Bumped threshold from 5 to 10
-      signals.push('high_tool_usage:' + tool);
+
+  var distinctCommands = Object.keys(commandCounts).length;
+  var repeatedCommand = false;
+  for (var ck in commandCounts) {
+    var group = commandCounts[ck];
+    var rawKeys = Object.keys(group.raws);
+    var rawMax = 0;
+    for (var rk = 0; rk < rawKeys.length; rk++) {
+      if (group.raws[rawKeys[rk]] > rawMax) rawMax = group.raws[rawKeys[rk]];
     }
-    // Detect repeated exec usage (often a sign of manual loops or inefficient automation)
-    if (tool === 'exec' && toolUsage[tool] >= 5) { // Bumped threshold from 3 to 5
-      signals.push('repeated_tool_usage:exec');
+    // The very same command ran again and again.
+    if (rawMax >= REPEATED_COMMAND_THRESHOLD) { repeatedCommand = true; break; }
+    // The same command with a volatile part varying (a number, a temp id).
+    // A normalized group made of many DIFFERENT raw commands is an
+    // enumeration (sleep 5 / sleep 10 / sleep 15), not a repetition.
+    if (group.total >= REPEATED_COMMAND_THRESHOLD && rawKeys.length <= 2) { repeatedCommand = true; break; }
+  }
+
+  Object.keys(toolUsage).forEach(function(tool) {
+    if (tool === 'exec') {
+      // For exec the meaningful number is how many DIFFERENT commands were
+      // run: many distinct commands is a different problem than one command
+      // executed over and over.
+      if (distinctCommands >= HIGH_DISTINCT_COMMAND_THRESHOLD) {
+        signals.push('high_tool_usage:exec');
+      }
+      return;
+    }
+    if (toolUsage[tool] >= HIGH_TOOL_USAGE_THRESHOLD) {
+      signals.push('high_tool_usage:' + tool);
     }
   });
 
+  // Repeated exec usage: the SAME command executed again and again.
+  if (repeatedCommand) {
+    signals.push('repeated_tool_usage:exec');
+  }
   // --- Signal prioritization ---
   // Remove cosmetic signals when actionable signals exist
   var actionable = signals.filter(function (s) {
@@ -525,4 +628,4 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
   return Array.from(new Set(signals));
 }
 
-module.exports = { extractSignals, hasOpportunitySignal, analyzeRecentHistory, OPPORTUNITY_SIGNALS, stripVolatileRuntimeState, pickErrorSignatureLine };
+module.exports = { extractSignals, hasOpportunitySignal, analyzeRecentHistory, OPPORTUNITY_SIGNALS, stripVolatileRuntimeState, pickErrorSignatureLine, normalizeCommand, extractExecCommands, PERF_INCIDENT_RE };

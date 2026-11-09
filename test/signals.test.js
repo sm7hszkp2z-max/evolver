@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { extractSignals } = require('../src/gep/signals');
+const { extractSignals, normalizeCommand } = require('../src/gep/signals');
 
 const emptyInput = {
   recentSessionTranscript: '',
@@ -213,5 +213,134 @@ describe('extractSignals -- edge cases (snippet length, empty, punctuation)', ()
     assert.ok(hasSignal(r, 'user_improvement_suggestion'));
     assert.ok(getSignalExtra(r, 'user_feature_request'));
     assert.ok(getSignalExtra(r, 'user_improvement_suggestion'));
+  });
+});
+
+describe('extractSignals -- tool usage measures repetition, not volume', () => {
+  function transcriptOf(commands) {
+    return commands
+      .map(c => '**ASSISTANT**: working [TOOL: exec] [CMD: ' + c + ']')
+      .join('\n');
+  }
+
+  it('N distinct exec calls do not produce repeated_tool_usage:exec', () => {
+    const commands = [
+      'ls -la /home/ralf618/evolver',
+      'git status --short',
+      'cat package.json',
+      'df -h /tmp',
+      'free -m',
+      'ps aux --sort=-rss',
+      'uptime',
+      'who -a',
+      'dmesg | tail -20',
+      'journalctl -n 50 --no-pager',
+      'systemctl --user list-units',
+      'lsblk -f',
+    ];
+    const r = extractSignals({ ...emptyInput, recentSessionTranscript: transcriptOf(commands) });
+    assert.ok(
+      !hasSignal(r, 'repeated_tool_usage:exec'),
+      'distinct commands must not look like repetition: ' + JSON.stringify(r)
+    );
+  });
+
+  it('the same exec command repeated 3 times produces repeated_tool_usage:exec', () => {
+    const commands = ['cat /tmp/scratch.json', 'cat /tmp/scratch.json', 'cat /tmp/scratch.json'];
+    const r = extractSignals({ ...emptyInput, recentSessionTranscript: transcriptOf(commands) });
+    assert.ok(
+      hasSignal(r, 'repeated_tool_usage:exec'),
+      'expected repeated_tool_usage:exec in ' + JSON.stringify(r)
+    );
+  });
+
+  it('two repetitions of the same command are not enough', () => {
+    const commands = ['cat /tmp/scratch.json', 'cat /tmp/scratch.json'];
+    const r = extractSignals({ ...emptyInput, recentSessionTranscript: transcriptOf(commands) });
+    assert.ok(
+      !hasSignal(r, 'repeated_tool_usage:exec'),
+      'expected no repeated_tool_usage:exec in ' + JSON.stringify(r)
+    );
+  });
+
+  it('volatile parts are normalized before commands are compared', () => {
+    assert.equal(
+      normalizeCommand('tail -n 100 /var/log/x.log'),
+      normalizeCommand('tail -n 200 /var/log/x.log')
+    );
+    assert.notEqual(
+      normalizeCommand('cat /tmp/dir0'),
+      normalizeCommand('cat /tmp/dir1')
+    );
+  });
+
+  it('an enumeration of different targets is not a repetition', () => {
+    const commands = ['sleep 5', 'sleep 10', 'sleep 15'];
+    const r = extractSignals({ ...emptyInput, recentSessionTranscript: transcriptOf(commands) });
+    assert.ok(
+      !hasSignal(r, 'repeated_tool_usage:exec'),
+      'expected no repeated_tool_usage:exec in ' + JSON.stringify(r)
+    );
+  });
+});
+
+describe('extractSignals -- perf_bottleneck needs an incident, not a config value', () => {
+  it('a timeout configuration value alone does not produce perf_bottleneck', () => {
+    const r = extractSignals({
+      ...emptyInput,
+      todayLog: 'DB 回读确认：enabled=1、model/timeout=1800/message 均未受影响。',
+    });
+    assert.ok(
+      !hasSignal(r, 'perf_bottleneck'),
+      'config timeout must not fire perf_bottleneck: ' + JSON.stringify(r)
+    );
+  });
+
+  it('--timeout-seconds alone does not produce perf_bottleneck', () => {
+    const r = extractSignals({
+      ...emptyInput,
+      todayLog: 'widen it: openclaw cron edit <jobId> --timeout-seconds 1800',
+    });
+    assert.ok(
+      !hasSignal(r, 'perf_bottleneck'),
+      'config timeout must not fire perf_bottleneck: ' + JSON.stringify(r)
+    );
+  });
+
+  it('a field name that merely mentions timeout does not produce perf_bottleneck', () => {
+    const r = extractSignals({
+      ...emptyInput,
+      todayLog: 'lastErrorReason=timeout timeoutSeconds=1800',
+    });
+    assert.ok(
+      !hasSignal(r, 'perf_bottleneck'),
+      'field names must not fire perf_bottleneck: ' + JSON.stringify(r)
+    );
+  });
+
+  it('a real timeout incident still produces perf_bottleneck', () => {
+    const r = extractSignals({
+      ...emptyInput,
+      todayLog:
+        'lastErrorReason=timeout lastDiagnostics.summary="cron: job execution timed out (last phase: model-call-started)"',
+    });
+    assert.ok(
+      hasSignal(r, 'perf_bottleneck'),
+      'expected perf_bottleneck in ' + JSON.stringify(r)
+    );
+  });
+
+  it('other incident phrasings still produce perf_bottleneck', () => {
+    const phrases = [
+      'the worker was OOM killed',
+      'the process ran out of memory',
+      'the query took too long',
+      'CPU usage above 95 percent',
+      'latency spike on the api',
+    ];
+    for (const phrase of phrases) {
+      const r = extractSignals({ ...emptyInput, todayLog: phrase });
+      assert.ok(hasSignal(r, 'perf_bottleneck'), 'expected perf_bottleneck for: ' + phrase);
+    }
   });
 });
