@@ -122,3 +122,100 @@ describe('selectGeneAndCapsule', () => {
     assert.ok(Array.isArray(result.selector.reason));
   });
 });
+
+
+describe('repetition gate', () => {
+  const REPEAT_HISTORY = [
+    { type: 'EvolutionEvent', id: 'evt_r1', intent: 'repair', signals: ['error', 'protocol'], genes_used: ['gene_repair'], outcome: { status: 'success', score: 0.85 } },
+    { type: 'EvolutionEvent', id: 'evt_r2', intent: 'repair', signals: ['error', 'protocol'], genes_used: ['gene_repair'], outcome: { status: 'success', score: 0.85 } },
+    { type: 'EvolutionEvent', id: 'evt_r3', intent: 'repair', signals: ['error', 'protocol'], genes_used: ['gene_repair'], outcome: { status: 'success', score: 0.85 } },
+  ];
+
+  it('demotes a gene repeated 3 times with the same intent and picks a non-repeating alternative', () => {
+    const result = selectGeneAndCapsule({
+      genes: GENES,
+      capsules: CAPSULES,
+      signals: ['error', 'protocol'],
+      memoryAdvice: {
+        preferredGeneId: 'gene_repair',
+        bannedGeneIds: new Set(),
+        explanation: ['memory_prefer:gene_repair'],
+      },
+      driftEnabled: false,
+      history: REPEAT_HISTORY,
+    });
+    assert.ok(result.selectedGene);
+    assert.equal(result.selectedGene.id, 'gene_optimize', 'repeated gene must be demoted');
+    const reasons = result.selector.reason.join(' | ');
+    assert.ok(reasons.indexOf('repeat_suppression') >= 0, 'reason must mention the suppression: ' + reasons);
+    assert.ok(reasons.indexOf('gene_repair') >= 0, 'reason must name the suppressed gene: ' + reasons);
+    assert.ok(reasons.indexOf('intent=repair') >= 0, 'reason must mention the repeated intent: ' + reasons);
+  });
+
+  it('keeps the memory-graph preferred gene when there is no repeating history', () => {
+    const result = selectGeneAndCapsule({
+      genes: GENES,
+      capsules: CAPSULES,
+      signals: ['error', 'protocol'],
+      memoryAdvice: {
+        preferredGeneId: 'gene_repair',
+        bannedGeneIds: new Set(),
+        explanation: ['memory_prefer:gene_repair'],
+      },
+      driftEnabled: false,
+    });
+    assert.ok(result.selectedGene);
+    assert.equal(result.selectedGene.id, 'gene_repair', 'no history means no behaviour change');
+    assert.equal(result.selector.reason.join(' ').indexOf('repeat_suppression'), -1);
+  });
+
+  it('leaves selection unchanged with an empty history', () => {
+    const result = selectGeneAndCapsule({
+      genes: GENES,
+      capsules: CAPSULES,
+      signals: ['error', 'exception', 'failed'],
+      memoryAdvice: null,
+      driftEnabled: false,
+      history: [],
+    });
+    assert.ok(result.selectedGene);
+    assert.equal(result.selectedGene.id, 'gene_repair');
+    assert.equal(result.selector.reason.join(' ').indexOf('repeat_suppression'), -1);
+  });
+
+  it('still selects a gene when every candidate repeats (no empty selection)', () => {
+    const allRepeat = [
+      { type: 'EvolutionEvent', id: 'evt_a1', intent: 'repair', signals: ['error', 'protocol'], genes_used: ['gene_repair'], outcome: { status: 'success', score: 0.85 } },
+      { type: 'EvolutionEvent', id: 'evt_a2', intent: 'repair', signals: ['error', 'protocol'], genes_used: ['gene_repair'], outcome: { status: 'success', score: 0.85 } },
+      { type: 'EvolutionEvent', id: 'evt_a3', intent: 'repair', signals: ['error', 'protocol'], genes_used: ['gene_repair'], outcome: { status: 'success', score: 0.85 } },
+      { type: 'EvolutionEvent', id: 'evt_b1', intent: 'optimize', signals: ['error', 'protocol'], genes_used: ['gene_optimize'], outcome: { status: 'success', score: 0.85 } },
+      { type: 'EvolutionEvent', id: 'evt_b2', intent: 'optimize', signals: ['error', 'protocol'], genes_used: ['gene_optimize'], outcome: { status: 'success', score: 0.85 } },
+      { type: 'EvolutionEvent', id: 'evt_b3', intent: 'optimize', signals: ['error', 'protocol'], genes_used: ['gene_optimize'], outcome: { status: 'success', score: 0.85 } },
+    ];
+    const result = selectGeneAndCapsule({
+      genes: GENES,
+      capsules: CAPSULES,
+      signals: ['error', 'protocol'],
+      memoryAdvice: null,
+      driftEnabled: false,
+      history: allRepeat,
+    });
+    assert.ok(result.selectedGene, 'a gene must still be selected when all candidates repeat');
+    assert.ok(['gene_repair', 'gene_optimize'].indexOf(result.selectedGene.id) >= 0);
+  });
+
+  it('computeRepeatCounts counts same-gene + same-intent cycles only', () => {
+    const { computeRepeatCounts } = require('../src/gep/selector');
+    const history = [
+      { intent: 'repair', signals: ['error'], genes_used: ['gene_repair'] },
+      { intent: 'repair', signals: ['error'], genes_used: ['gene_repair'] },
+      { intent: 'optimize', signals: ['error'], genes_used: ['gene_repair'] },
+      { intent: 'repair', signals: ['totally', 'different'], genes_used: ['gene_repair'] },
+    ];
+    const counts = computeRepeatCounts(history, ['error'], {});
+    const rec = counts.get('gene_repair');
+    assert.ok(rec);
+    assert.equal(rec.by_intent.repair, 2, 'only overlapping same-intent cycles count');
+    assert.equal(rec.by_intent.optimize, 1);
+  });
+});

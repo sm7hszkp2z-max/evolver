@@ -1438,6 +1438,9 @@ async function run() {
     memoryAdvice,
     driftEnabled: IS_RANDOM_DRIFT,
     failedCapsules: recentFailedCapsules,
+    // Repetition gate input: recent evolution events let the selector enforce
+    // the "do not repeat the same intent+signal+gene" rule in code.
+    history: recentEvents,
   });
 
   const selectedBy = memoryAdvice && memoryAdvice.preferredGeneId ? 'memory_graph+selector' : 'selector';
