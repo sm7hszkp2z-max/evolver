@@ -282,6 +282,30 @@ function planParts(text, opts) {
 }
 
 function planWrite(filePath, text, opts) {
+  opts = opts || {};
+  if (opts.transport === 'exec') {
+    var plan = planExecAppend(filePath, text, opts);
+    return {
+      path: plan.path,
+      partCount: plan.segmentCount,
+      transport: 'exec',
+      calls: plan.segments.map(function (seg) {
+        return {
+          part: seg.index,
+          mode: seg.mode,
+          tool: seg.tool,
+          encoding: seg.encoding,
+          payload: seg.payload,
+          lines: seg.lines,
+          chars: seg.chars,
+          boundary: seg.mode === 'write' ? 'exec-write' : 'exec-append'
+        };
+      }),
+      payloads: plan.payloads,
+      segments: plan.segments,
+      recovery: RECOVERY_RULE
+    };
+  }
   var parts = splitIntoParts(text, opts);
   var calls = parts.map(function (part, index) {
     return {
@@ -386,6 +410,7 @@ function writeLongFile(filePath, content, opts) {
   var report = {
     ok: false,
     path: target,
+    execPlan: opts.transport === 'exec' ? planExecAppend(target, raw, opts) : null,
     atomic: atomic,
     partCount: parts.length,
     resumed: resumed,
@@ -683,6 +708,433 @@ function verifyReadBack(filePath, intended, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Code-mode exec safety
+//
+// In OpenClaw code mode a payload is embedded in a JavaScript cell. Two
+// failure modes bite there:
+//
+//   (a) an unescaped backtick or dollar-brace pair inside a template
+//       literal ends the literal early -> SyntaxError ... Unexpected token,
+//       and the WHOLE cell never runs: nothing partial happens and there
+//       is nothing to resume;
+//   (b) a payload larger than the reply cap is truncated mid-statement.
+//
+// escapeTemplateLiteral() fixes (a) for text that has to live inside a
+// template literal. planExecAppend() fixes both: the payload travels as
+// base64 through a python one-liner, so no byte of it can be
+// reinterpreted by the JavaScript parser, the shell or the template
+// literal. scanTemplateLiterals() is the guard that catches the problem
+// before the cell is sent.
+//
+// The backtick and the dollar sign are spelled out as escapes so that this
+// file itself holds no character that would break a template literal when
+// this file is pasted into one.
+// ---------------------------------------------------------------------------
+
+var TICK = '\x60';
+var DOLLAR = '\x24';
+var DOLLAR_BRACE = '\x24{';
+
+// The python one-liner that appends one base64 chunk. The shell quotes are
+// single and the python string quotes are double, so the finished command
+// holds no backtick, no dollar sign and no backslash: it can be dropped
+// into a JavaScript template literal unchanged.
+var PY_APPEND_SNIPPET = 'import base64,sys;open(sys.argv[1],"ab").write(base64.b64decode(sys.argv[2]))';
+
+// escapeTemplateLiteral -- make arbitrary text safe inside a JS template
+// literal. Round-trip safe: evaluating the escaped text as a template
+// literal yields the original string byte for byte.
+function escapeTemplateLiteral(text) {
+  var src = text === null || text === undefined ? '' : String(text);
+  var out = '';
+  for (var i = 0; i < src.length; i++) {
+    var ch = src.charAt(i);
+    var code = src.charCodeAt(i);
+    if (ch === '\\') out += '\\\\';
+    else if (ch === TICK) out += '\\' + TICK;
+    else if (ch === '\r') out += '\\r';
+    else if (code === 0x2028) out += '\\u2028';
+    else if (code === 0x2029) out += '\\u2029';
+    else if (ch === DOLLAR && src.charAt(i + 1) === '{') { out += '\\' + DOLLAR_BRACE; i++; }
+    else out += ch;
+  }
+  return out;
+}
+
+// unescapeTemplateLiteral -- the inverse of escapeTemplateLiteral.
+function unescapeTemplateLiteral(text) {
+  var src = text === null || text === undefined ? '' : String(text);
+  var out = '';
+  for (var i = 0; i < src.length; i++) {
+    var ch = src.charAt(i);
+    if (ch !== '\\') { out += ch; continue; }
+    var next = src.charAt(i + 1);
+    if (next === '\\') { out += '\\'; i++; }
+    else if (next === TICK) { out += TICK; i++; }
+    else if (next === DOLLAR) { out += DOLLAR; i++; }
+    else if (next === 'r') { out += '\r'; i++; }
+    else if (next === 'u') {
+      var hex = src.substr(i + 2, 4);
+      if (/^[0-9a-fA-F]{4}$/.test(hex)) { out += String.fromCharCode(parseInt(hex, 16)); i += 5; }
+      else out += ch;
+    }
+    else out += ch;
+  }
+  return out;
+}
+
+// isTemplateSafe -- can this text be dropped into a template literal
+// unchanged? No backtick, no backslash, no dollar-brace pair.
+function isTemplateSafe(text) {
+  var src = text === null || text === undefined ? '' : String(text);
+  for (var i = 0; i < src.length; i++) {
+    var ch = src.charAt(i);
+    if (ch === '\\' || ch === TICK) return false;
+    if (ch === DOLLAR && src.charAt(i + 1) === '{') return false;
+  }
+  return true;
+}
+
+// shellQuotePath -- quote a path for the shell when it is not already safe.
+function shellQuotePath(value) {
+  var p = String(value);
+  if (/^[A-Za-z0-9._\-\/]+$/.test(p)) return p;
+  return "'" + p.replace(/'/g, "'\\''") + "'";
+}
+
+// splitForExec -- cut text into chunks that fit the byte and the line
+// budget. The chunks concatenate back to the input byte for byte: no
+// separator is inserted, so the append path cannot corrupt the file.
+function splitForExec(text, maxLines, maxBytes) {
+  var src = text === null || text === undefined ? '' : String(text);
+  var n = src.length;
+  var chunks = [];
+  var start = 0;
+  var pos = 0;
+  var lines = 0;
+  var bytes = 0;
+  var lastBreak = -1;
+
+  while (pos < n) {
+    var cp = src.codePointAt(pos);
+    var unit = cp > 0xFFFF ? 2 : 1;
+    var cpBytes = cp <= 0x7F ? 1 : (cp <= 0x7FF ? 2 : (cp <= 0xFFFF ? 3 : 4));
+    var overBytes = bytes + cpBytes > maxBytes;
+    var overLines = lines >= maxLines;
+    if ((overBytes || overLines) && pos > start) {
+      var cut = (lastBreak > start) ? lastBreak : pos;
+      chunks.push(src.slice(start, cut));
+      start = cut;
+      bytes = 0;
+      lines = 0;
+      lastBreak = -1;
+      pos = cut;
+      continue;
+    }
+    bytes += cpBytes;
+    if (cp === 10) { lines++; lastBreak = pos + unit; }
+    pos += unit;
+  }
+  if (start < n) chunks.push(src.slice(start));
+  return chunks;
+}
+
+// planExecAppend -- the exec-safe write path.
+//
+// Segment 1 is the content for the write tool. Every later segment is a
+// complete shell command that appends one base64 chunk to the file. The
+// base64 payload travels through the shell unchanged, so no escaping
+// decision is left to the caller and the command can be embedded in a
+// JavaScript template literal as it is.
+function planExecAppend(filePath, text, opts) {
+  opts = opts || {};
+  var target = String(filePath);
+  var maxLines = positiveInt(opts.maxLines, DEFAULT_MAX_LINES);
+  var maxChars = positiveInt(opts.maxChars, DEFAULT_MAX_CHARS);
+  var python = (typeof opts.python === 'string' && opts.python.trim()) ? opts.python.trim() : PY_APPEND_SNIPPET;
+  var pythonArg = "'" + python.replace(/'/g, "'\\''") + "'";
+  var pathArg = shellQuotePath(target);
+  var prefix = 'python3 -c ' + pythonArg + ' ' + pathArg + ' ';
+  // base64 costs 4 characters per 3 source bytes.
+  var budget = Math.max(1, Math.floor((maxChars - prefix.length) / 4) * 3);
+  var raw = text === null || text === undefined ? '' : String(text);
+  var chunks = splitForExec(raw, maxLines, budget);
+
+  var segments = [];
+  for (var i = 0; i < chunks.length; i++) {
+    var chunk = chunks[i];
+    if (i === 0) {
+      segments.push({
+        index: 0,
+        mode: 'write',
+        tool: 'write',
+        encoding: 'raw',
+        payload: chunk,
+        text: chunk,
+        escaped: escapeTemplateLiteral(chunk),
+        json: JSON.stringify(chunk),
+        lines: chunk.split('\n').length,
+        chars: chunk.length,
+        bytes: Buffer.byteLength(chunk, 'utf8'),
+        templateSafe: isTemplateSafe(escapeTemplateLiteral(chunk))
+      });
+      continue;
+    }
+    var encoded = Buffer.from(chunk, 'utf8').toString('base64');
+    var command = prefix + encoded;
+    segments.push({
+      index: i,
+      mode: 'append',
+      tool: 'exec',
+      encoding: 'base64',
+      payload: command,
+      command: command,
+      text: chunk,
+      encoded: encoded,
+      lines: chunk.split('\n').length,
+      chars: chunk.length,
+      bytes: Buffer.byteLength(chunk, 'utf8'),
+      templateSafe: isTemplateSafe(command)
+    });
+  }
+
+  return {
+    path: target,
+    strategy: 'write-then-base64-append',
+    segmentCount: segments.length,
+    payloads: segments.map(function (s) { return s.payload; }),
+    segments: segments,
+    python: python,
+    maxChars: maxChars,
+    maxLines: maxLines,
+    recovery: RECOVERY_RULE
+  };
+}
+
+// scanTemplateLiterals -- the guard.
+//
+// Scans a code-mode payload and reports every template literal that is
+// unsafe to send: too big for the reply cap, carrying an unescaped
+// backtick, carrying a dollar-brace interpolation, or never closed.
+function scanTemplateLiterals(code, opts) {
+  opts = opts || {};
+  var src = code === null || code === undefined ? '' : String(code);
+  var n = src.length;
+  var maxChars = positiveInt(opts.maxChars, DEFAULT_MAX_CHARS);
+  var maxLines = positiveInt(opts.maxLines, DEFAULT_MAX_LINES);
+  var strict = opts.strict !== false;
+
+  var REGEX_KEYWORDS = ['return', 'typeof', 'case', 'in', 'of', 'new', 'delete',
+    'void', 'do', 'else', 'yield', 'await', 'throw', 'instanceof'];
+
+  var literals = [];
+  var issues = [];
+  var literalSeq = 0;
+
+  function skipLineComment(j) {
+    while (j < n && src.charAt(j) !== '\n') j++;
+    return j;
+  }
+
+  function skipBlockComment(j) {
+    j += 2;
+    while (j < n) {
+      if (src.charAt(j) === '*' && src.charAt(j + 1) === '/') return j + 2;
+      j++;
+    }
+    return n;
+  }
+
+  function skipQuoted(j, quote) {
+    j++;
+    while (j < n) {
+      var c = src.charAt(j);
+      if (c === '\\') { j += 2; continue; }
+      if (c === quote) return j + 1;
+      if (c === '\n') return j;
+      j++;
+    }
+    return n;
+  }
+
+  function skipRegex(j) {
+    j++;
+    var inClass = false;
+    while (j < n) {
+      var c = src.charAt(j);
+      if (c === '\\') { j += 2; continue; }
+      if (c === '[') inClass = true;
+      else if (c === ']') inClass = false;
+      else if (c === '/' && !inClass) { j++; break; }
+      else if (c === '\n') break;
+      j++;
+    }
+    while (j < n && /[a-z]/.test(src.charAt(j))) j++;
+    return j;
+  }
+
+  // A slash starts a regex when the previous significant token asks for
+  // one; otherwise it is a division.
+  function regexAllowed(j) {
+    var k = j - 1;
+    while (k >= 0) {
+      var c = src.charAt(k);
+      if (c === ' ' || c === '\t' || c === '\n' || c === '\r') { k--; continue; }
+      if (c === ')' || c === ']') return false;
+      if (/[A-Za-z0-9_$]/.test(c)) {
+        var end = k + 1;
+        var start = k;
+        while (start >= 0 && /[A-Za-z0-9_$]/.test(src.charAt(start))) start--;
+        return REGEX_KEYWORDS.indexOf(src.slice(start + 1, end)) >= 0;
+      }
+      return true;
+    }
+    return true;
+  }
+
+  function countUnescapedTicks(body) {
+    var count = 0;
+    var slashes = 0;
+    for (var k = 0; k < body.length; k++) {
+      var c = body.charAt(k);
+      if (c === '\\') { slashes++; continue; }
+      if (c === TICK) { if (slashes % 2 === 0) count++; slashes = 0; continue; }
+      slashes = 0;
+    }
+    return count;
+  }
+
+  function recordLiteral(lit) {
+    var uid = literalSeq++;
+    var body = lit.body;
+    var entry = {
+      uid: uid,
+      index: uid,
+      start: lit.start,
+      end: lit.end,
+      chars: body.length,
+      lines: body.split('\n').length,
+      unescapedBackticks: countUnescapedTicks(body),
+      interpolations: lit.interpolations,
+      unterminated: lit.unterminated,
+      types: []
+    };
+    if (opts.includeBody) entry.body = body;
+    else entry.preview = body.slice(0, 120);
+    literals.push(entry);
+
+    function add(type, severity, message) {
+      entry.types.push(type);
+      issues.push({
+        type: type,
+        severity: severity,
+        literal: uid,
+        start: lit.start,
+        end: lit.end,
+        message: message
+      });
+    }
+
+    if (entry.chars > maxChars) {
+      add('oversize-chars', 'error', 'template literal is ' + entry.chars + ' characters, the safe limit is ' + maxChars);
+    }
+    if (entry.lines > maxLines) {
+      add('oversize-lines', 'error', 'template literal is ' + entry.lines + ' lines, the safe limit is ' + maxLines);
+    }
+    if (entry.unescapedBackticks > 0) {
+      add('unescaped-backtick', 'error', 'template literal carries ' + entry.unescapedBackticks + ' unescaped backtick(s)');
+    }
+    if (entry.interpolations > 0) {
+      add('interpolation', strict ? 'error' : 'warn', 'template literal carries ' + entry.interpolations + ' interpolation(s)');
+    }
+    if (entry.unterminated) {
+      add('unterminated', 'error', 'template literal is never closed');
+    }
+    return entry;
+  }
+
+  function scanTemplate(start) {
+    var j = start + 1;
+    var bodyStart = j;
+    var interpolations = 0;
+    while (j < n) {
+      var c = src.charAt(j);
+      if (c === '\\') { j += 2; continue; }
+      if (c === TICK) {
+        return { start: start, end: j, body: src.slice(bodyStart, j), interpolations: interpolations, unterminated: false };
+      }
+      if (c === DOLLAR && src.charAt(j + 1) === '{') {
+        interpolations++;
+        j = scanExpression(j + 2);
+        continue;
+      }
+      j++;
+    }
+    return { start: start, end: n, body: src.slice(bodyStart, n), interpolations: interpolations, unterminated: true };
+  }
+
+  function scanExpression(j) {
+    var depth = 1;
+    while (j < n) {
+      var c = src.charAt(j);
+      if (c === '{') { depth++; j++; continue; }
+      if (c === '}') { depth--; j++; if (depth === 0) return j; continue; }
+      if (c === '"' || c === "'") { j = skipQuoted(j, c); continue; }
+      if (c === TICK) { var nested = scanTemplate(j); recordLiteral(nested); j = nested.end + 1; continue; }
+      if (c === '/' && src.charAt(j + 1) === '/') { j = skipLineComment(j); continue; }
+      if (c === '/' && src.charAt(j + 1) === '*') { j = skipBlockComment(j); continue; }
+      if (c === '/' && regexAllowed(j)) { j = skipRegex(j); continue; }
+      j++;
+    }
+    return j;
+  }
+
+  var i = 0;
+  while (i < n) {
+    var c = src.charAt(i);
+    if (c === '/' && src.charAt(i + 1) === '/') { i = skipLineComment(i); continue; }
+    if (c === '/' && src.charAt(i + 1) === '*') { i = skipBlockComment(i); continue; }
+    if (c === '"' || c === "'") { i = skipQuoted(i, c); continue; }
+    if (c === TICK) { var lit = scanTemplate(i); recordLiteral(lit); i = lit.end + 1; continue; }
+    if (c === '/' && regexAllowed(i)) { i = skipRegex(i); continue; }
+    i++;
+  }
+
+  literals.sort(function (a, b) { return a.start - b.start; });
+  var remap = {};
+  literals.forEach(function (l, idx) { l.index = idx; remap[l.uid] = idx; });
+  issues.forEach(function (iss) { iss.literal = remap[iss.literal]; });
+
+  if (src.length > maxChars) {
+    issues.push({
+      type: 'payload-oversize',
+      severity: 'error',
+      literal: -1,
+      start: 0,
+      end: src.length,
+      message: 'the payload itself is ' + src.length + ' characters, the safe limit is ' + maxChars
+    });
+  }
+
+  var errors = issues.filter(function (x) { return x.severity === 'error'; });
+  var ok = errors.length === 0;
+  return {
+    ok: ok,
+    chars: src.length,
+    lines: src.split('\n').length,
+    literalCount: literals.length,
+    literals: literals,
+    issues: issues,
+    errors: errors,
+    maxChars: maxChars,
+    maxLines: maxLines,
+    strict: strict,
+    summary: literals.length + ' template literal(s), ' + issues.length + ' issue(s)'
+      + (ok ? '' : ', ' + errors.length + ' blocking')
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI entry point
 // ---------------------------------------------------------------------------
 
@@ -718,6 +1170,11 @@ module.exports = {
   findUndefinedReferences: findUndefinedReferences,
   analyzeSource: analyzeSource,
   analyzeText: analyzeText,
+  escapeTemplateLiteral: escapeTemplateLiteral,
+  unescapeTemplateLiteral: unescapeTemplateLiteral,
+  isTemplateSafe: isTemplateSafe,
+  planExecAppend: planExecAppend,
+  scanTemplateLiterals: scanTemplateLiterals,
   main: main
 };
 

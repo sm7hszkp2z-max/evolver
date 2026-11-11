@@ -15,6 +15,7 @@ var fs = require('fs');
 var os = require('os');
 var path = require('path');
 var skill = require('../index.js');
+var execSync = require('child_process').execSync;
 
 var MAX_LINES = 120;
 
@@ -133,12 +134,103 @@ function run() {
     assert.strictEqual(roundTrip(text), text, 'the round trip must be exact for: ' + JSON.stringify(text));
   });
 
+  // --- code-mode exec safety ------------------------------------------------
+  var TICK = '\x60';
+  var DOLLAR = '\x24';
+
+  var nasty = [
+    '# Title',
+    '',
+    'inline ' + TICK + 'code' + TICK + ' and a ' + DOLLAR + '{expr} sequence',
+    TICK + TICK + TICK + 'js',
+    'const x = "double" and \'single\';',
+    TICK + TICK + TICK,
+    'a backslash \\ and a CRLF\r\nline',
+    'unicode: 中文 é',
+    ''
+  ].join('\n');
+
+  // escapeTemplateLiteral is round-trip safe
+  var escaped = skill.escapeTemplateLiteral(nasty);
+  assert.strictEqual(skill.unescapeTemplateLiteral(escaped), nasty,
+    'unescapeTemplateLiteral must invert escapeTemplateLiteral');
+  var cooked = new Function('return ' + TICK + escaped + TICK + ';')();
+  assert.strictEqual(cooked, nasty,
+    'the escaped text must evaluate back to the original inside a template literal');
+
+  // the guard agrees: one literal, no unescaped backtick, no interpolation
+  var guard = skill.scanTemplateLiterals(TICK + escaped + TICK);
+  assert.ok(guard.ok, 'the escaped payload must pass the guard: ' + guard.summary);
+  assert.strictEqual(guard.literalCount, 1, 'the guard must find exactly one literal');
+  assert.strictEqual(guard.literals[0].unescapedBackticks, 0, 'no unescaped backtick may survive');
+  assert.strictEqual(guard.literals[0].interpolations, 0, 'no interpolation may survive');
+
+  // the guard catches the three failure modes
+  var interpolated = skill.scanTemplateLiterals('var a = ' + TICK + 'x ' + DOLLAR + '{y} z' + TICK + ';');
+  assert.ok(!interpolated.ok, 'an interpolation must block the payload');
+  assert.ok(interpolated.issues.some(function (x) { return x.type === 'interpolation'; }),
+    'the interpolation issue must be reported');
+
+  var unterminated = skill.scanTemplateLiterals('var a = ' + TICK + 'never closed');
+  assert.ok(!unterminated.ok, 'an unterminated literal must block the payload');
+  assert.ok(unterminated.issues.some(function (x) { return x.type === 'unterminated'; }),
+    'the unterminated issue must be reported');
+
+  var nested = skill.scanTemplateLiterals('var a = ' + TICK + 'x ' + DOLLAR + '{ ' + TICK + 'y' + TICK + ' } z' + TICK + ';');
+  assert.ok(!nested.ok, 'a nested template must block the payload');
+  assert.ok(nested.issues.some(function (x) { return x.type === 'unescaped-backtick'; }),
+    'the unescaped backtick issue must be reported');
+
+  var oversize = skill.scanTemplateLiterals('var a = ' + TICK + new Array(300).join('x') + TICK + ';', { maxChars: 100 });
+  assert.ok(!oversize.ok, 'an oversized literal must block the payload');
+  assert.ok(oversize.issues.some(function (x) { return x.type === 'oversize-chars'; }),
+    'the oversize issue must be reported');
+
+  // --- the exec-append path: write the first segment, append the rest -------
+  var longText = [];
+  for (var rep = 0; rep < 6; rep++) longText.push(nasty);
+  longText = longText.join('\n');
+
+  var execTarget = path.join(dir, 'exec-append.md');
+  var plan = skill.planExecAppend(execTarget, longText, { maxLines: 4, maxChars: 400 });
+  assert.ok(plan.segmentCount >= 3, 'the plan must produce several segments, got ' + plan.segmentCount);
+  assert.strictEqual(plan.segments.map(function (s) { return s.text; }).join(''), longText,
+    'the segments must concatenate back to the original byte for byte');
+  assert.strictEqual(plan.segments[0].mode, 'write', 'the first segment must be the write segment');
+  assert.strictEqual(plan.segments[0].tool, 'write', 'the first segment must go to the write tool');
+  plan.segments.forEach(function (seg) {
+    assert.ok(seg.payload.length <= 400, 'segment ' + seg.index + ' must stay inside the size budget');
+  });
+
+  fs.writeFileSync(execTarget, plan.segments[0].payload, 'utf8');
+  for (var si = 1; si < plan.segments.length; si++) {
+    var seg = plan.segments[si];
+    assert.strictEqual(seg.mode, 'append', 'every later segment must be an append');
+    assert.strictEqual(seg.tool, 'exec', 'every later segment must go to exec');
+    assert.strictEqual(seg.encoding, 'base64', 'the append payload must be base64 encoded');
+    assert.ok(seg.templateSafe, 'the append command must be safe inside a template literal');
+    assert.ok(/^python3 -c /.test(seg.payload), 'the append payload must be a python one-liner');
+    var cmdGuard = skill.scanTemplateLiterals('await exec({ command: ' + TICK + seg.payload + TICK + ' });');
+    assert.ok(cmdGuard.ok, 'the append command must pass the guard: ' + cmdGuard.summary);
+    execSync(seg.payload);
+  }
+
+  var onDisk = fs.readFileSync(execTarget);
+  assert.ok(onDisk.equals(Buffer.from(longText, 'utf8')),
+    'the appended file must equal the original byte for byte');
+
+  // planWrite can produce the same exec payloads
+  var execPlan = skill.planWrite(execTarget, longText, { transport: 'exec', maxLines: 4, maxChars: 400 });
+  assert.strictEqual(execPlan.transport, 'exec', 'planWrite must honour the exec transport');
+  assert.strictEqual(execPlan.calls.length, plan.segmentCount, 'planWrite must return the same segment count');
+
   // --- the safety rule is part of the module contract ------------------------
   assert.ok(/never retry/i.test(skill.RECOVERY_RULE), 'the recovery rule must be exported');
   assert.ok(/resume/i.test(skill.RECOVERY_RULE), 'the recovery rule must mention resuming');
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('long-file-writer selftest: OK (' + sampleLines + ' line sample, ' + parts.length + ' parts, ' + verification.seams.length + ' seams verified)');
+  console.log('long-file-writer selftest: exec transport OK (' + plan.segmentCount + ' exec segments, ' + onDisk.length + ' bytes round trip)');
   return 0;
 }
 

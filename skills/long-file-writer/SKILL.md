@@ -82,6 +82,9 @@ report.verification.delimiters;  // { balanced: true, problems: [] }
 | `writeLongFile(path, content, opts)` | Write, append, read back, verify. Returns a report. |
 | `verifyReadBack(path, content, opts)` | The verification pass on its own. |
 | `resumeBoundary(path, parts)` | Finds the last successfully written boundary of a partial file. |
+| `escapeTemplateLiteral(text)` | Escapes the backslash, the backtick and `${` so text can live inside a JS template literal. |
+| `planExecAppend(path, text, opts)` | Exec-ready payloads: segment 1 for the `write` tool, the rest as base64 python one-liners. |
+| `scanTemplateLiterals(code, opts)` | Guard: reports template literals that are too big, carry an unescaped backtick or `${`, or were never closed. |
 
 ## Natural boundaries
 
@@ -127,6 +130,58 @@ and checks:
 | `atomic` | `false` | Write and verify a sibling temporary file, then rename it over the target; cannot be combined with `resume`. |
 | `verify` | `true` | Run the read-back verification. |
 | `onPart` | -- | Callback fired after each part is written; use it to drive one tool call per part. |
+
+## Code-mode exec path
+
+In OpenClaw code mode a payload is embedded in a JavaScript cell, and it
+breaks there in two ways:
+
+- an unescaped backtick or `${` inside a template literal ends the literal
+  early -> `SyntaxError ... Unexpected token`, and the **whole** cell never
+  runs: nothing partial happens, so there is nothing to resume;
+- a payload larger than the reply cap is truncated mid-statement.
+
+Three helpers close that gap.
+
+| Call | What it does |
+|---|---|
+| `escapeTemplateLiteral(text)` | Escapes the backslash, the backtick and `${` so arbitrary text can live inside a JS template literal. Round-trip safe. |
+| `unescapeTemplateLiteral(text)` | The inverse of the above. |
+| `isTemplateSafe(text)` | True when the text can be dropped into a template literal unchanged. |
+| `planExecAppend(path, text, opts)` | The ordered, exec-ready payloads: segment 1 for the `write` tool, segments 2..n as base64 python one-liners that are passed through the shell unchanged. |
+| `scanTemplateLiterals(code, opts)` | The guard: finds the template literals in a code cell and reports the ones that are too big, that carry an unescaped backtick or a `${` interpolation, or that were never closed. |
+
+### The recipe
+
+```js
+var writer = require('./skills/long-file-writer');
+
+// 1. guard first: catch the payload before it breaks the cell
+var guard = writer.scanTemplateLiterals(codeCell);
+if (!guard.ok) throw new Error(guard.summary);
+
+// 2. plan the write: segment 1 -> write tool, segments 2..n -> exec
+var plan = writer.planExecAppend('docs/guide.md', content);
+await write({ path: 'docs/guide.md', content: plan.segments[0].json });
+for (var i = 1; i < plan.segments.length; i++) {
+  await exec({ command: plan.segments[i].payload });
+}
+```
+
+Every append payload is a complete shell command:
+
+```
+python3 -c 'import base64,sys;open(sys.argv[1],"ab").write(base64.b64decode(sys.argv[2]))' <path> <base64>
+```
+
+The base64 is the point: the chunk travels through the shell unchanged, so
+the command holds no backtick, no dollar sign and no backslash and can be
+embedded in a JavaScript template literal as it is. Segment 1 offers the
+same content three ways: `payload` (raw), `json` (a JS string literal) and
+`escaped` (a template-literal-safe body).
+
+`planWrite(path, text, { transport: 'exec' })` returns the same payloads
+through the usual planning interface.
 
 ## Files
 
