@@ -24,6 +24,8 @@ var USAGE = [
   '  --dry-run   print the plan only, do not touch the filesystem',
   '  --resume    continue from the last successfully written boundary',
   '  --atomic    build and verify a temporary file before replacing --out',
+  '  --resume-after-cutoff <file>  plan the continuation after a reply-cap cutoff',
+  '  --repair-seam                 plan the repair of a corrupted seam',
   '',
   'safety: ' + skill.RECOVERY_RULE,
   ''
@@ -38,6 +40,8 @@ function parseArgs(argv) {
     maxChars: skill.DEFAULTS.maxChars,
     resume: false,
     atomic: false,
+    resumeAfterCutoff: null,
+    repairSeam: false,
     dryRun: false,
     help: false
   };
@@ -50,6 +54,8 @@ function parseArgs(argv) {
     else if (arg === '--max-chars') opts.maxChars = parseInt(argv[++i], 10);
     else if (arg === '--resume') opts.resume = true;
     else if (arg === '--atomic') opts.atomic = true;
+    else if (arg === '--resume-after-cutoff') opts.resumeAfterCutoff = argv[++i];
+    else if (arg === '--repair-seam') opts.repairSeam = true;
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else if (!opts.out) opts.out = arg;
@@ -96,6 +102,23 @@ function run(argv) {
     resume: opts.resume,
     atomic: opts.atomic
   };
+
+  if (opts.resumeAfterCutoff || opts.repairSeam) {
+    if (opts.resumeAfterCutoff && opts.repairSeam) {
+      console.error('long-file-writer: --resume-after-cutoff and --repair-seam cannot be combined.');
+      return 2;
+    }
+    writeOpts.sourcePath = opts.input;
+    var plan;
+    if (opts.resumeAfterCutoff) {
+      var resultText = fs.readFileSync(opts.resumeAfterCutoff, 'utf8');
+      plan = skill.planResumeAfterCutoff(opts.out, content, resultText, writeOpts);
+    } else {
+      plan = skill.planSeamRepair(opts.out, content, writeOpts);
+    }
+    console.log(JSON.stringify(plan, null, 2));
+    return 0;
+  }
 
   if (opts.dryRun) {
     console.log(JSON.stringify(skill.planWrite(opts.out, content, writeOpts), null, 2));

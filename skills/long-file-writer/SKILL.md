@@ -1,6 +1,6 @@
 ---
 name: long-file-writer
-description: Write long files in verifiable segments. Splits content at natural boundaries into parts of at most ~120 lines, writes the first part, appends the rest so every part continues exactly where the previous one stopped, then reads the file back from disk and verifies every seam. Use when creating or editing a file longer than ~120 lines, when a write risks being cut off by the reply cap, or when a previous oversized write came back truncated.
+description: Write long files in verifiable segments. Splits content at natural boundaries into parts of at most ~120 lines, writes the first part, appends the rest so every part continues exactly where the previous one stopped, then reads the file back from disk and verifies every seam. Detects a tool result that was cut off by the reply cap and produces the ordered continuation, and locates a broken seam and emits the minimal corrective payload. Use when creating or editing a file longer than ~120 lines, when a write risks being cut off by the reply cap, when a previous oversized write came back truncated, or when a read-back shows duplicated or missing lines.
 ---
 
 # long-file-writer
@@ -85,6 +85,9 @@ report.verification.delimiters;  // { balanced: true, problems: [] }
 | `escapeTemplateLiteral(text)` | Escapes the backslash, the backtick and `${` so text can live inside a JS template literal. |
 | `planExecAppend(path, text, opts)` | Exec-ready payloads: segment 1 for the `write` tool, the rest as base64 python one-liners. |
 | `scanTemplateLiterals(code, opts)` | Guard: reports template literals that are too big, carry an unescaped backtick or `${`, or were never closed. |
+| `detectReplyCapCutoff(text)` | Recognises a tool result that reports a truncated call. Returns `{ cutoff, reason, confidence }`; a successful result returns `cutoff:false`. |
+| `planResumeAfterCutoff(path, content, toolResultText, opts)` | The ordered continuation after a cutoff: re-splits into parts of at most ~120 lines and resumes from the last successfully written boundary. |
+| `planSeamRepair(path, content, opts)` | Locates the first offending seam (duplicated lines, missing span, unbalanced delimiters) and emits the minimal corrective payload plus the verification step. |
 
 ## Natural boundaries
 
@@ -182,6 +185,52 @@ same content three ways: `payload` (raw), `json` (a JS string literal) and
 
 `planWrite(path, text, { transport: 'exec' })` returns the same payloads
 through the usual planning interface.
+
+## When a call comes back cut off
+
+The Hub gene asset
+`sha256:81500e6e810a0c8dcbec5fc14cfe956c0ac7f86fc4fcd609db561e892fb5a21e`
+names two anti-patterns. Both have a repair step, and both repairs are
+helpers here:
+
+| Hub asset | OpenClaw | Repair helper |
+|---|---|---|
+| `write_file` | the `write` tool (part 1) | -- |
+| `append_file` | the `exec` append (base64 python one-liner) | -- |
+| `read_file` | the `read` tool / `readFilePaged` | -- |
+| `tool_result_says_the_call_was_cut_off_by_the_reply_cap` | -- | `detectReplyCapCutoff` + `planResumeAfterCutoff` |
+| `read_back_shows_duplicated_lines_missing_text_unbalanced_brackets_tags_or_names` | -- | `planSeamRepair` |
+
+```js
+// 1. the tool result says the call was cut off -- do NOT retry it
+var cut = writer.detectReplyCapCutoff(toolResultText);
+// cut.cutoff === true, cut.reason === 'cutoff-phrase:reply-cap'
+
+// 2. ask for the ordered continuation from the last good boundary
+var plan = writer.planResumeAfterCutoff('docs/guide.md', content, toolResultText);
+plan.strategy;        // 'resume-at-part-boundary' | 'write-from-start' | 'rewrite-prefix-and-append'
+plan.resumedFromPart; // the first part that still has to be written
+plan.calls;           // ordered tool calls: append and exec, never a retry of the oversized call
+
+// 3. when the read-back shows a broken seam, ask for the corrective payload
+var repair = writer.planSeamRepair('docs/guide.md', content);
+repair.problem.kind;  // 'duplicate-lines' | 'missing-span' | 'extra-content' | 'unbalanced-delimiters'
+repair.repair.kind;   // 'append-missing-span' | 'rewrite-prefix-and-append' | 'none'
+repair.calls;         // rewrite the good prefix, append only the corrected span
+repair.verification;  // the verifyReadBack call to run afterwards
+```
+
+The same plans are available from the command line:
+
+```bash
+node skills/long-file-writer/scripts/write-long-file.js \
+  --out docs/guide.md --in docs/guide.src.md --resume-after-cutoff result.txt
+
+node skills/long-file-writer/scripts/write-long-file.js \
+  --out docs/guide.md --in docs/guide.src.md --repair-seam
+```
+
+Both print the plan as JSON and touch nothing on disk.
 
 ## Files
 

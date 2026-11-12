@@ -860,10 +860,14 @@ function planExecAppend(filePath, text, opts) {
   var raw = text === null || text === undefined ? '' : String(text);
   var chunks = splitForExec(raw, maxLines, budget);
 
+  // The first segment is the content for the write tool. A resume plan
+  // needs every segment to be an append instead, because the file already
+  // holds the earlier parts; firstMode:'append' selects that.
+  var firstMode = opts.firstMode === 'append' ? 'append' : 'write';
   var segments = [];
   for (var i = 0; i < chunks.length; i++) {
     var chunk = chunks[i];
-    if (i === 0) {
+    if (i === 0 && firstMode === 'write') {
       segments.push({
         index: 0,
         mode: 'write',
@@ -909,6 +913,500 @@ function planExecAppend(filePath, text, opts) {
     maxLines: maxLines,
     recovery: RECOVERY_RULE
   };
+}
+
+// ---------------------------------------------------------------------------
+// Reply-cap cutoff detection and the two repairs the Hub gene asks for
+//
+// The Hub gene asset
+// sha256:81500e6e810a0c8dcbec5fc14cfe956c0ac7f86fc4fcd609db561e892fb5a21e
+// lists two anti-patterns, each with a repair step:
+//
+//   1. tool_result_says_the_call_was_cut_off_by_the_reply_cap
+//      Repair: Do not retry the same oversized call; re-split into smaller
+//              ~120-line parts and resume from the last successfully written
+//              boundary.
+//
+//   2. read_back_shows_duplicated_lines_missing_text_unbalanced_brackets_tags_or_names_
+//      Repair: Fix the offending seam by rewriting or appending only the
+//              missing/corrected span so parts meet exactly.
+//
+// detectReplyCapCutoff does the noticing (the tool result is text, an agent
+// has to recognise that it was truncated), planResumeAfterCutoff does the
+// re-splitting, planSeamRepair produces the corrective payload.
+// ---------------------------------------------------------------------------
+
+// Every phrase below is one a tool actually uses when it refuses to return a
+// payload in full. The list is deliberately short: a false positive would
+// throw a perfectly good file into the recovery path.
+var CUTOFF_SIGNALS = [
+  { id: 'reply-cap', re: /\breply\s*cap\b/i, confidence: 0.95 },
+  { id: 'cut-off', re: /\bcut\s*[- ]?\s*off\b/i, confidence: 0.92 },
+  { id: 'truncated', re: /\btruncat(?:ed|ion|e|ing)\b/i, confidence: 0.88 },
+  { id: 'output-limit', re: /\b(?:output|reply|response|payload|content)\s+(?:size\s+)?(?:limit|cap|ceiling)\b/i, confidence: 0.9 },
+  { id: 'max-output', re: /\b(?:max|maximum)\s*(?:output|reply|response|token|character|byte|payload|message)\b/i, confidence: 0.82 },
+  { id: 'exceeds-limit', re: /\b(?:exceeds?|exceeded|exceeding)\b[^.\n]{0,40}\b(?:limit|cap|maximum|max|quota|allowance)\b/i, confidence: 0.85 },
+  { id: 'character-limit', re: /\bcharacter\s+limit\b/i, confidence: 0.85 },
+  { id: 'maximum-length', re: /\bmaximum\s+length\b/i, confidence: 0.78 },
+  { id: 'too-long', re: /\btoo\s+long\b/i, confidence: 0.7 }
+];
+
+// A negation means the opposite of a cutoff and must not trigger the
+// recovery path: 'no cutoff', 'not truncated', '{"cutoff": false}'.
+function negatedAround(src, index, length) {
+  var before = src.slice(Math.max(0, index - 24), index);
+  var after = src.slice(index + length, index + length + 24);
+  if (/\b(?:no|not|never|without|zero|false)\s*(?:\w+\s*){0,2}$/.test(before)) return true;
+  if (/^["']?\s*[:=]\s*["']?false/.test(after)) return true;
+  return false;
+}
+
+// detectReplyCapCutoff -- does this tool result report a truncated call?
+//
+// Returns { cutoff, reason, confidence }. confidence is the strength of the
+// cutoff signal: 0 when nothing matched. A normal successful result always
+// returns cutoff:false.
+function detectReplyCapCutoff(text) {
+  var raw = text;
+
+  if (raw && typeof raw === 'object') {
+    var explicit = null;
+    if (typeof raw.cutoff === 'boolean') explicit = raw.cutoff;
+    else if (typeof raw.truncated === 'boolean') explicit = raw.truncated;
+    else if (typeof raw.isTruncated === 'boolean') explicit = raw.isTruncated;
+    if (explicit !== null) {
+      return {
+        cutoff: explicit,
+        reason: explicit ? 'explicit-flag' : 'explicit-flag-false',
+        confidence: explicit ? 1 : 0,
+        matched: 'explicit-flag',
+        evidence: null
+      };
+    }
+    raw = raw.message || raw.error || raw.text || raw.output || raw.content || raw.result;
+    if (raw && typeof raw === 'object') raw = JSON.stringify(raw);
+  }
+
+  var src = raw === null || raw === undefined ? '' : String(raw);
+  if (src.trim() === '') {
+    return { cutoff: false, reason: 'empty-result', confidence: 0, matched: null, evidence: null };
+  }
+
+  var best = null;
+  for (var i = 0; i < CUTOFF_SIGNALS.length; i++) {
+    var signal = CUTOFF_SIGNALS[i];
+    var m = signal.re.exec(src);
+    if (!m) continue;
+    if (negatedAround(src, m.index, m[0].length)) continue;
+    if (!best || signal.confidence > best.confidence) {
+      best = { id: signal.id, confidence: signal.confidence, evidence: m[0] };
+    }
+  }
+
+  if (!best) {
+    return { cutoff: false, reason: 'no-cutoff-phrase', confidence: 0, matched: null, evidence: null };
+  }
+  return {
+    cutoff: true,
+    reason: 'cutoff-phrase:' + best.id,
+    confidence: best.confidence,
+    matched: best.id,
+    evidence: best.evidence
+  };
+}
+
+// commonPrefixLength -- how many characters the two texts share.
+function commonPrefixLength(a, b) {
+  var n = Math.min(a.length, b.length);
+  for (var i = 0; i < n; i++) {
+    if (a.charAt(i) !== b.charAt(i)) return i;
+  }
+  return n;
+}
+
+// offsetOfLine -- the character offset where a line starts.
+function offsetOfLine(text, lineIndex) {
+  var lines = String(text).split('\n');
+  var offset = 0;
+  for (var i = 0; i < lineIndex && i < lines.length; i++) offset += lines[i].length + 1;
+  return offset;
+}
+
+// withFirstMode -- copy the options and force the first segment mode.
+function withFirstMode(opts, mode) {
+  var out = {};
+  if (opts) {
+    for (var key in opts) {
+      if (Object.prototype.hasOwnProperty.call(opts, key)) out[key] = opts[key];
+    }
+  }
+  out.firstMode = mode;
+  return out;
+}
+
+// segmentsToCalls -- the exec segments as ordered tool calls.
+function segmentsToCalls(segments) {
+  return segments.map(function (seg) {
+    return {
+      step: seg.index,
+      part: seg.index,
+      mode: seg.mode,
+      tool: seg.tool,
+      encoding: seg.encoding,
+      payload: seg.payload,
+      lines: seg.lines,
+      chars: seg.chars,
+      bytes: seg.bytes,
+      templateSafe: seg.templateSafe,
+      boundary: seg.mode === 'write' ? 'exec-write' : 'exec-append'
+    };
+  });
+}
+
+// planPlainContinuation -- the same continuation for a transport that takes
+// the raw text (the newline in front of every part is what makes the parts
+// join exactly).
+function planPlainContinuation(parts, startIndex) {
+  var calls = [];
+  for (var i = startIndex; i < parts.length; i++) {
+    calls.push({
+      step: calls.length,
+      part: i,
+      mode: i === 0 ? 'write' : 'append',
+      tool: 'write-or-append',
+      encoding: 'raw',
+      payload: (i === 0 && startIndex === 0 ? '' : '\n') + parts[i].text,
+      lines: parts[i].lineCount,
+      chars: parts[i].charCount,
+      boundary: parts[i].reason
+    });
+  }
+  return calls;
+}
+
+// ---------------------------------------------------------------------------
+// planResumeAfterCutoff -- the ordered continuation after a cutoff.
+//
+// Anti-pattern 1 of the Hub gene: the tool result says the call was cut off
+// by the reply cap. The repair is NOT to retry the same oversized call but to
+// re-split into parts of at most ~120 lines and resume from the last
+// successfully written boundary.
+//
+// The splitter (splitIntoParts), the boundary finder (resumeBoundary) and the
+// exec payload builder (planExecAppend) are reused, not reimplemented.
+// ---------------------------------------------------------------------------
+
+function planResumeAfterCutoff(filePath, content, toolResultText, opts) {
+  opts = opts || {};
+  var target = String(filePath);
+  var raw = content === null || content === undefined ? '' : String(content);
+  var detection = detectReplyCapCutoff(toolResultText);
+
+  var plan = {
+    path: target,
+    cutoff: detection.cutoff,
+    reason: detection.reason,
+    confidence: detection.confidence,
+    detection: detection,
+    strategy: 'none',
+    resumedFromPart: 0,
+    totalParts: 0,
+    existingBytes: 0,
+    boundaryReason: 'not-checked',
+    problem: null,
+    repair: null,
+    segments: [],
+    calls: [],
+    payloads: [],
+    recovery: RECOVERY_RULE,
+    next: ''
+  };
+
+  if (!detection.cutoff) {
+    plan.next = 'no cutoff reported: the tool result does not describe a truncated call, '
+      + 'do not re-split and do not retry the same call';
+    return plan;
+  }
+
+  var parts = splitIntoParts(raw, opts);
+  plan.totalParts = parts.length;
+
+  var exists = fs.existsSync(target);
+  var boundary = exists
+    ? resumeBoundary(target, parts)
+    : { nextPartIndex: 0, resumed: false, existingBytes: 0, reason: 'no-existing-file' };
+  plan.existingBytes = boundary.existingBytes;
+  plan.boundaryReason = boundary.reason;
+
+  // 1. nothing landed on disk: write the whole file again, in small parts.
+  if (!exists) {
+    var full = planExecAppend(target, raw, opts);
+    plan.strategy = 'write-from-start';
+    plan.resumedFromPart = 0;
+    plan.segments = full.segments;
+    plan.calls = segmentsToCalls(full.segments);
+    plan.payloads = full.payloads;
+    plan.next = 'apply the calls in order: the write segment first, the appends after';
+    return plan;
+  }
+
+  // 2. the file ends exactly on a part boundary: append the rest.
+  if (boundary.resumed) {
+    plan.strategy = 'resume-at-part-boundary';
+    plan.resumedFromPart = boundary.nextPartIndex;
+    if (opts.transport === 'plain') {
+      var plainCalls = planPlainContinuation(parts, boundary.nextPartIndex);
+      plan.calls = plainCalls;
+      plan.payloads = plainCalls.map(function (c) { return c.payload; });
+    } else {
+      // The newline in front of the first continued part is what makes the
+      // parts meet exactly: the file ends with the last written part.
+      var remaining = (boundary.nextPartIndex > 0 ? '\n' : '')
+        + parts.slice(boundary.nextPartIndex).map(function (p) { return p.text; }).join('\n');
+      var tail = planExecAppend(target, remaining, withFirstMode(opts, 'append'));
+      plan.segments = tail.segments;
+      plan.calls = segmentsToCalls(tail.segments);
+      plan.payloads = tail.payloads;
+    }
+    plan.next = 'apply the calls in order, then verify with verifyReadBack';
+    return plan;
+  }
+
+  // 3. the file was cut in the middle of a part: rewrite the good prefix and
+  //    append the corrected remainder.
+  var repair = planSeamRepair(target, raw, opts);
+  plan.strategy = 'rewrite-prefix-and-append';
+  plan.problem = repair.problem;
+  plan.repair = repair.repair;
+  plan.segments = repair.segments;
+  plan.calls = repair.calls;
+  plan.payloads = repair.payloads;
+  plan.next = repair.next;
+  return plan;
+}
+
+// ---------------------------------------------------------------------------
+// locateFirstProblem -- where the file on disk first goes wrong.
+//
+// Kinds: duplicate-lines, missing-span, extra-content, unbalanced-delimiters
+// and the generic content-mismatch.
+// ---------------------------------------------------------------------------
+
+function locateFirstProblem(actual, expected, opts) {
+  var actualLines = actual.split('\n');
+  var expectedLines = expected.split('\n');
+  var max = Math.min(actualLines.length, expectedLines.length);
+  var lineDiff = 0;
+  while (lineDiff < max && actualLines[lineDiff] === expectedLines[lineDiff]) lineDiff++;
+
+  var offset = firstDifference(actual, expected);
+  if (offset < 0) offset = 0;
+
+  var problem = {
+    kind: 'content-mismatch',
+    atOffset: offset,
+    atLine: lineDiff,
+    seamIndex: null,
+    detail: 'the file diverges from the intended content at line ' + lineDiff,
+    duplicates: findDuplicateLines(actual),
+    delimiters: null
+  };
+
+  // Which seam does the divergence belong to?
+  var parts = splitIntoParts(expected, opts);
+  var seamIndex = null;
+  for (var i = 0; i < parts.length - 1; i++) {
+    if (parts[i + 1].startLine <= lineDiff) seamIndex = i;
+    else break;
+  }
+  problem.seamIndex = seamIndex === null ? 0 : seamIndex;
+
+  // The line at the divergence occurs more than once in the file: the append
+  // ran twice, or it started with a line the file already had.
+  var dupAt = -1;
+  var dupOrigin = -1;
+  if (lineDiff < actualLines.length) {
+    var candidate = actualLines[lineDiff];
+    if (candidate.trim().length >= 4 && /[A-Za-z]/.test(candidate)) {
+      for (var q = 0; q < actualLines.length; q++) {
+        if (q !== lineDiff && actualLines[q] === candidate) { dupAt = lineDiff; dupOrigin = q; break; }
+      }
+    }
+  }
+  if (dupAt >= 0) {
+    problem.kind = 'duplicate-lines';
+    problem.atLine = dupAt;
+    problem.atOffset = offsetOfLine(actual, dupAt);
+    problem.duplicateOrigin = dupOrigin;
+    problem.detail = 'the line is repeated at the seam (also at line ' + dupOrigin + '): "' + actualLines[dupAt] + '"';
+    return problem;
+  }
+
+  // The file stops short of the intended content: a part was cut off.
+  if (lineDiff === actualLines.length) {
+    problem.kind = 'missing-span';
+    problem.detail = 'the file ends after ' + actualLines.length + ' lines, the intended content has ' + expectedLines.length;
+    return problem;
+  }
+
+  // The file carries content the intended content does not have.
+  if (lineDiff === expectedLines.length) {
+    problem.kind = 'extra-content';
+    problem.detail = 'the file has ' + actualLines.length + ' lines, the intended content has ' + expectedLines.length;
+    return problem;
+  }
+
+  var balance = checkBalancedDelimiters(actual);
+  problem.delimiters = balance;
+  if (!balance.balanced) {
+    problem.kind = 'unbalanced-delimiters';
+    problem.detail = balance.problems.join('; ');
+    return problem;
+  }
+
+  return problem;
+}
+
+// ---------------------------------------------------------------------------
+// planSeamRepair -- the minimal corrective payload for a broken seam.
+//
+// Anti-pattern 2 of the Hub gene: the read-back shows duplicated lines,
+// missing text, unbalanced brackets/tags or names that are used but never
+// defined. The repair is to rewrite or append only the missing/corrected
+// span so the parts meet exactly.
+//
+// The correction is expressed as: rewrite the good prefix with the write
+// tool (a write always replaces the whole file, so this is the smallest
+// change that can drop the duplicated span) and append the corrected span.
+// When the file on disk is a clean prefix of the intended content the repair
+// is append-only and nothing is rewritten.
+// ---------------------------------------------------------------------------
+
+function planSeamRepair(filePath, content, opts) {
+  opts = opts || {};
+  var target = String(filePath);
+  var expected = content === null || content === undefined ? '' : String(content);
+
+  var report = {
+    ok: false,
+    path: target,
+    problem: null,
+    repair: null,
+    segments: [],
+    calls: [],
+    payloads: [],
+    verification: null,
+    recovery: RECOVERY_RULE,
+    next: ''
+  };
+
+  if (!fs.existsSync(target)) {
+    report.problem = { kind: 'missing-file', atOffset: 0, atLine: 0, detail: 'the target file does not exist' };
+    var whole = planExecAppend(target, expected, opts);
+    report.repair = { kind: 'write-everything', payload: expected, span: { from: 0, to: expected.length } };
+    report.segments = whole.segments;
+    report.calls = segmentsToCalls(whole.segments);
+    report.payloads = whole.payloads;
+    report.ok = true;
+    report.verification = { fn: 'verifyReadBack', path: target, args: [target, expected] };
+    report.next = 'apply the calls in order, then run verifyReadBack';
+    return report;
+  }
+
+  var actual;
+  try {
+    actual = readFilePaged(target, { pageBytes: opts.pageBytes }).content;
+  } catch (err) {
+    report.problem = { kind: 'read-failed', atOffset: 0, atLine: 0, detail: err && err.message ? err.message : String(err) };
+    return report;
+  }
+
+  if (actual === expected) {
+    report.ok = true;
+    report.repair = { kind: 'none', payload: '', span: null };
+    report.verification = { fn: 'verifyReadBack', path: target, args: [target, expected] };
+    report.next = 'nothing to repair: the file already equals the intended content';
+    return report;
+  }
+
+  report.problem = locateFirstProblem(actual, expected, opts);
+
+  var prefixLen = commonPrefixLength(actual, expected);
+  var lineStart = prefixLen > 0 ? expected.lastIndexOf('\n', prefixLen - 1) + 1 : 0;
+  var actualIsPrefix = expected.indexOf(actual) === 0;
+  var appendOnly = actualIsPrefix && (actual === '' || actual.charAt(actual.length - 1) === '\n');
+
+  var prefix = appendOnly ? actual : expected.slice(0, lineStart);
+  var remainder = expected.slice(appendOnly ? actual.length : lineStart);
+
+  var calls = [];
+  var step = 0;
+  if (!appendOnly) {
+    calls.push({
+      step: step++,
+      part: null,
+      mode: 'rewrite',
+      tool: 'write',
+      encoding: 'raw',
+      payload: prefix,
+      lines: prefix === '' ? 0 : prefix.split('\n').length,
+      chars: prefix.length,
+      boundary: 'rewrite-prefix'
+    });
+  }
+
+  var segments = [];
+  var payloads = [];
+  if (opts.transport === 'plain') {
+    var rparts = splitIntoParts(remainder, opts);
+    for (var i = 0; i < rparts.length; i++) {
+      var pc = {
+        step: step++,
+        part: i,
+        mode: 'append',
+        tool: 'append',
+        encoding: 'raw',
+        payload: (i === 0 ? '' : '\n') + rparts[i].text,
+        lines: rparts[i].lineCount,
+        chars: rparts[i].charCount,
+        boundary: rparts[i].reason
+      };
+      calls.push(pc);
+      payloads.push(pc.payload);
+    }
+  } else {
+    var tail = planExecAppend(target, remainder, withFirstMode(opts, 'append'));
+    segments = tail.segments;
+    var tCalls = segmentsToCalls(tail.segments);
+    tCalls.forEach(function (c) { c.step = step++; calls.push(c); });
+    payloads = tail.payloads;
+  }
+
+  report.repair = {
+    kind: appendOnly ? 'append-missing-span' : 'rewrite-prefix-and-append',
+    payload: remainder,
+    span: { from: appendOnly ? actual.length : lineStart, to: expected.length },
+    prefixBytes: prefix.length
+  };
+  report.segments = segments;
+  report.calls = calls;
+  report.payloads = payloads;
+  report.verification = {
+    fn: 'verifyReadBack',
+    path: target,
+    args: [target, expected],
+    note: 'run verifyReadBack after the repair: the file must then equal the intended content byte for byte'
+  };
+  if (opts.sourcePath) {
+    report.verification.command = 'node -e "var w=require(\'./skills/long-file-writer\');var fs=require(\'fs\');'
+      + 'var r=w.verifyReadBack(process.argv[1],fs.readFileSync(process.argv[2],\'utf8\'));'
+      + 'console.log(JSON.stringify(r));process.exit(r.ok?0:1)" ' + target + ' ' + opts.sourcePath;
+  }
+  report.ok = true;
+  report.next = appendOnly
+    ? 'apply the append calls in order, then run verifyReadBack'
+    : 'rewrite the prefix with the write tool, apply the append calls in order, then run verifyReadBack';
+  return report;
 }
 
 // scanTemplateLiterals -- the guard.
@@ -1174,6 +1672,9 @@ module.exports = {
   unescapeTemplateLiteral: unescapeTemplateLiteral,
   isTemplateSafe: isTemplateSafe,
   planExecAppend: planExecAppend,
+  detectReplyCapCutoff: detectReplyCapCutoff,
+  planResumeAfterCutoff: planResumeAfterCutoff,
+  planSeamRepair: planSeamRepair,
   scanTemplateLiterals: scanTemplateLiterals,
   main: main
 };

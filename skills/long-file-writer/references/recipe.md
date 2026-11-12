@@ -72,6 +72,73 @@ If the file on disk matches no part boundary at all, it is not a prefix of
 the intended content: do not append to it. Start over from part 1 with a
 clean write, or restore the previous version.
 
+### The automated path
+
+```js
+// 1. did the tool result report a cutoff?
+var cut = writer.detectReplyCapCutoff(toolResultText);
+//    cut.cutoff  -> true / false
+//    cut.reason  -> 'cutoff-phrase:reply-cap', 'no-cutoff-phrase', ...
+//    cut.confidence -> 0 when nothing matched
+
+// 2. the ordered continuation (never a retry of the oversized call)
+var plan = writer.planResumeAfterCutoff('docs/guide.md', content, toolResultText);
+plan.strategy;        // 'write-from-start'
+                      // 'resume-at-part-boundary'
+                      // 'rewrite-prefix-and-append'
+plan.resumedFromPart; // the first part that still has to be written
+plan.calls;           // ordered calls: append + exec, each <= 120 lines
+
+// 3. the read-back afterwards
+writer.verifyReadBack('docs/guide.md', content).ok;  // true
+```
+
+`detectReplyCapCutoff` only reacts to the phrasings a tool really uses
+('cut off', 'truncat...', 'exceeds ... limit', 'output limit', 'maximum
+length', 'too long', 'character limit', 'reply cap') and ignores a negated
+form ('no cutoff', 'not truncated', `{"cutoff": false}`). A successful
+tool result always returns `cutoff:false` and no plan.
+
+## 5. Repair a broken seam
+
+The read-back showed duplicated lines, missing text or unbalanced brackets:
+the parts do not meet exactly.
+
+1. Find the first offending seam and classify it: `duplicate-lines`,
+   `missing-span`, `extra-content` or `unbalanced-delimiters`.
+2. Rewrite the good prefix with the write tool (a write always replaces the
+   whole file, so this is the smallest change that can drop a duplicated
+   span).
+3. Append only the corrected span, in parts of at most 120 lines.
+4. Read the file back and verify again.
+
+The skill does this for you:
+
+```js
+var repair = writer.planSeamRepair('docs/guide.md', content);
+repair.problem.kind;      // 'duplicate-lines' | 'missing-span' | ...
+repair.problem.seamIndex;  // the first offending seam
+repair.repair.kind;       // 'append-missing-span' | 'rewrite-prefix-and-append' | 'none'
+repair.calls;             // rewrite the prefix, then the append calls
+repair.verification;      // the verifyReadBack call to run afterwards
+```
+
+When the file on disk is a clean prefix of the intended content the repair is
+append-only and nothing is rewritten. When the duplicate cannot be removed
+with an append, the prefix is rewritten and only the corrected span is
+appended.
+
+## Tool mapping
+
+The Hub asset this skill implements uses generic names. On OpenClaw they map
+to:
+
+| Hub asset | OpenClaw | Notes |
+|---|---|---|
+| `write_file` | the `write` tool | part 1, and the prefix rewrite of a repair |
+| `append_file` | the `exec` append | a base64 python one-liner, safe inside a template literal |
+| `read_file` | the `read` tool / `readFilePaged` | paged with explicit byte offsets |
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |

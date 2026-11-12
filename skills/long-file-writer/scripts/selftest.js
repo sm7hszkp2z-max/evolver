@@ -228,6 +228,125 @@ function run() {
   assert.ok(/never retry/i.test(skill.RECOVERY_RULE), 'the recovery rule must be exported');
   assert.ok(/resume/i.test(skill.RECOVERY_RULE), 'the recovery rule must mention resuming');
 
+  // --- reply-cap cutoff detection -------------------------------------------
+  var cutoffText = 'Error: the reply cap was reached. The output was truncated '
+    + 'and the call was cut off before it completed.';
+  var detected = skill.detectReplyCapCutoff(cutoffText);
+  assert.ok(detected.cutoff, 'a truncated tool result must be detected');
+  assert.ok(detected.confidence > 0.5, 'the detection must carry a confidence');
+  assert.ok(/cutoff|cut-off|truncat/.test(detected.reason),
+    'the reason must name the signal: ' + detected.reason);
+
+  var okText = 'wrote 2 parts (241 lines), verified 1 seam, ok';
+  var notDetected = skill.detectReplyCapCutoff(okText);
+  assert.strictEqual(notDetected.cutoff, false,
+    'a successful tool result must not look like a cutoff');
+  assert.strictEqual(notDetected.confidence, 0,
+    'a successful tool result carries no cutoff signal');
+  assert.strictEqual(skill.detectReplyCapCutoff('no cutoff detected').cutoff, false,
+    'a negated cutoff phrase must not trigger the recovery path');
+  assert.strictEqual(skill.detectReplyCapCutoff('{"cutoff": false, "parts": 3}').cutoff, false,
+    'a structured result that says cutoff:false must not trigger the recovery path');
+  assert.ok(skill.detectReplyCapCutoff('the payload exceeds the maximum output length').cutoff,
+    'an over-long payload must be detected');
+
+  // --- the resume plan after a cutoff ---------------------------------------
+  var resumeTarget = path.join(dir, 'cutoff.md');
+  var resumeParts = skill.splitIntoParts(sample, { maxLines: 40, maxChars: 400 });
+  var writtenSoFar = resumeParts.slice(0, 2).map(function (p) { return p.text; }).join('\n');
+  fs.writeFileSync(resumeTarget, writtenSoFar, 'utf8');
+
+  var resumePlan = skill.planResumeAfterCutoff(resumeTarget, sample, cutoffText,
+    { maxLines: 40, maxChars: 400 });
+  assert.ok(resumePlan.cutoff, 'the resume plan must know that a cutoff happened');
+  assert.strictEqual(resumePlan.strategy, 'resume-at-part-boundary',
+    'the plan must resume at the last successfully written boundary');
+  assert.strictEqual(resumePlan.resumedFromPart, 2, 'the plan must continue at part 2');
+  assert.ok(resumePlan.calls.length >= 1, 'the plan must produce at least one call');
+  resumePlan.calls.forEach(function (call) {
+    assert.strictEqual(call.mode, 'append', 'a continuation must only append');
+    assert.strictEqual(call.tool, 'exec', 'a continuation must go through exec');
+    assert.ok(call.payload.length <= 400, 'a continuation call must stay inside the size budget');
+  });
+  resumePlan.calls.forEach(function (call) { execSync(call.payload); });
+  assert.strictEqual(fs.readFileSync(resumeTarget, 'utf8'), sample,
+    'the continuation must rebuild the file byte for byte');
+  assert.ok(skill.verifyReadBack(resumeTarget, sample).ok, 'the resumed file must verify');
+
+  // no cutoff -> no plan, and the agent is told not to retry
+  var noCutoffPlan = skill.planResumeAfterCutoff(resumeTarget, sample, okText);
+  assert.strictEqual(noCutoffPlan.cutoff, false,
+    'a successful tool result must not start a resume');
+  assert.strictEqual(noCutoffPlan.calls.length, 0,
+    'no calls may be produced without a cutoff');
+  assert.ok(/do not re-split/.test(noCutoffPlan.next),
+    'the plan must say why it did nothing');
+
+  // the file was cut in the middle of a part: rewrite the prefix, append the rest
+  var midTarget = path.join(dir, 'midcut.md');
+  fs.writeFileSync(midTarget, resumeParts[0].text + '\n' + resumeParts[1].text.slice(0, 40), 'utf8');
+  var midPlan = skill.planResumeAfterCutoff(midTarget, sample, cutoffText,
+    { maxLines: 40, maxChars: 400 });
+  assert.strictEqual(midPlan.strategy, 'rewrite-prefix-and-append',
+    'a file cut in the middle of a part must be rewritten');
+  fs.writeFileSync(midTarget, midPlan.calls[0].payload, 'utf8');
+  midPlan.calls.slice(1).forEach(function (call) { execSync(call.payload); });
+  assert.strictEqual(fs.readFileSync(midTarget, 'utf8'), sample,
+    'the rewrite-and-append continuation must rebuild the file byte for byte');
+
+  // --- the seam repair plan -------------------------------------------------
+  var seamParts = skill.splitIntoParts(sample);
+  var seamTarget = path.join(dir, 'seam.md');
+  var dupLine = '';
+  var dupIndex = -1;
+  for (var q = seamParts[1].lines.length - 1; q >= 0; q--) {
+    var cand = seamParts[1].lines[q];
+    if (cand.trim().length < 4 || !/[A-Za-z]/.test(cand)) continue;
+    dupLine = cand;
+    dupIndex = q;
+    break;
+  }
+  assert.ok(dupIndex >= 0, 'part 1 must offer a meaningful line to duplicate');
+  var brokenLines = seamParts[0].lines.slice(0).concat([dupLine]);
+  for (var w = 1; w < seamParts.length; w++) brokenLines = brokenLines.concat(seamParts[w].lines);
+  var broken = brokenLines.join('\n');
+  fs.writeFileSync(seamTarget, broken, 'utf8');
+
+  var seamPlan = skill.planSeamRepair(seamTarget, sample, { maxLines: 40, maxChars: 400 });
+  assert.ok(seamPlan.problem, 'the repair plan must report a problem');
+  assert.strictEqual(seamPlan.problem.kind, 'duplicate-lines',
+    'the problem must be the duplicated line: ' + JSON.stringify(seamPlan.problem));
+  assert.ok(seamPlan.problem.seamIndex !== null, 'the problem must name the offending seam');
+  assert.strictEqual(seamPlan.repair.kind, 'rewrite-prefix-and-append',
+    'a duplicated span cannot be removed with an append, the prefix must be rewritten');
+  assert.ok(seamPlan.calls.length >= 2, 'the repair must rewrite the prefix and append the rest');
+  assert.strictEqual(seamPlan.calls[0].mode, 'rewrite', 'the first call must rewrite the prefix');
+  assert.ok(seamPlan.verification && seamPlan.verification.fn === 'verifyReadBack',
+    'the repair must name the verification step');
+
+  fs.writeFileSync(seamTarget, seamPlan.calls[0].payload, 'utf8');
+  seamPlan.calls.slice(1).forEach(function (call) { execSync(call.payload); });
+  assert.strictEqual(fs.readFileSync(seamTarget, 'utf8'), sample,
+    'the repair must restore the file byte for byte');
+  assert.ok(skill.verifyReadBack(seamTarget, sample).ok, 'the repaired file must verify');
+
+  // a missing tail is repaired with an append only
+  var shortTarget = path.join(dir, 'short.md');
+  var cutAt = sample.indexOf('\n## Section 6');
+  assert.ok(cutAt > 0, 'the sample must have a section 6');
+  var cut = sample.slice(0, cutAt);
+  fs.writeFileSync(shortTarget, cut, 'utf8');
+  var shortPlan = skill.planSeamRepair(shortTarget, sample, { maxLines: 40, maxChars: 400 });
+  assert.strictEqual(shortPlan.problem.kind, 'missing-span',
+    'a truncated file must be reported as a missing span: ' + JSON.stringify(shortPlan.problem));
+  assert.strictEqual(shortPlan.repair.kind, 'append-missing-span',
+    'a missing tail must be repaired with an append only');
+  assert.strictEqual(shortPlan.calls[0].mode, 'append',
+    'the append-only repair must not rewrite anything');
+  shortPlan.calls.forEach(function (call) { execSync(call.payload); });
+  assert.strictEqual(fs.readFileSync(shortTarget, 'utf8'), sample,
+    'the append-only repair must restore the file byte for byte');
+
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('long-file-writer selftest: OK (' + sampleLines + ' line sample, ' + parts.length + ' parts, ' + verification.seams.length + ' seams verified)');
   console.log('long-file-writer selftest: exec transport OK (' + plan.segmentCount + ' exec segments, ' + onDisk.length + ' bytes round trip)');
