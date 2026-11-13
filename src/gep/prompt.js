@@ -265,6 +265,31 @@ function buildPrinciplesBlock() {
   }
 }
 
+/**
+ * Resolve the cycle tag used by the post-solidify status file name.
+ *
+ * Contract (consumer: skills/feishu-evolver-wrapper/index.js):
+ *   the wrapper reads  <logs>/status_<cycleTag>.json
+ *   where cycleTag = String(cycleNumber).padStart(4, '0')   (e.g. "0083")
+ *
+ * The core used to interpolate an undefined cycle id into that name, so the
+ * Hand wrote "status_undefined.json" -- a file the wrapper never looks for.
+ * This helper normalizes whatever the caller has ("Cycle #0083", "0083", "83")
+ * into the exact tag the wrapper expects and NEVER returns "undefined"/"null".
+ */
+function resolveStatusCycleTag(cycleId) {
+  var candidates = [cycleId, process.env.EVOLVE_CYCLE_TAG];
+  for (var i = 0; i < candidates.length; i++) {
+    var raw = candidates[i] == null ? '' : String(candidates[i]);
+    var m = raw.match(/(\d+)/);
+    if (!m) continue;
+    var n = parseInt(m[1], 10);
+    if (!isFinite(n) || n < 0) continue;
+    return String(n).padStart(4, '0');
+  }
+  return 'unknown';
+}
+
 function buildGepPrompt({
   nowIso,
   context,
@@ -287,6 +312,12 @@ function buildGepPrompt({
   const selectedGeneId = selectedGene && selectedGene.id ? selectedGene.id : 'gene_<name>';
   const envFingerprint = captureEnvFingerprint();
   const cycleLabel = cycleId ? ` Cycle #${cycleId}` : '';
+  // Post-solidify status file name contract (consumer: the wrapper).
+  // The wrapper reads <logs>/status_<cycleTag>.json with
+  // cycleTag = String(n).padStart(4, '0')  (e.g. "0083"). Interpolating an
+  // undefined cycle id produced "status_undefined.json" -- never read.
+  const statusCycleTag = resolveStatusCycleTag(cycleId);
+  const statusFileDefault = `${process.env.WORKSPACE_DIR || '.'}/logs/status_${statusCycleTag}.json`;
 
   // Extract strategy from selected gene if available
   let strategyBlock = "";
@@ -551,7 +582,7 @@ If core write is unavailable for any reason, create fallback status JSON manuall
 
 Write a JSON file with your status:
 \`\`\`bash
-cat > ${process.env.WORKSPACE_DIR || '.'}/logs/status_${cycleId}.json << 'STATUSEOF'
+cat > "\${EVOLVE_STATUS_FILE:-${statusFileDefault}}" << 'STATUSEOF'
 {
   "result": "success|failed",
   "en": "Status: [INTENT] <describe what you did in 1-2 sentences, in English>",
@@ -559,6 +590,9 @@ cat > ${process.env.WORKSPACE_DIR || '.'}/logs/status_${cycleId}.json << 'STATUS
 }
 STATUSEOF
 \`\`\`
+
+Write it to EXACTLY the path shown above. The wrapper reads that file after
+the git push; a different file name means the status is lost.
 
 Rules:
 - "en" field: English status. "zh" field: Chinese status. Content must match (different language).
@@ -587,4 +621,4 @@ Rules:
   return basePrompt.slice(0, maxChars) + "\n...[TRUNCATED]...";
 }
 
-module.exports = { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock, buildLessonsBlock, buildNarrativeBlock, buildPrinciplesBlock };
+module.exports = { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock, buildLessonsBlock, buildNarrativeBlock, buildPrinciplesBlock, resolveStatusCycleTag };

@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { extractSignals, normalizeCommand } = require('../src/gep/signals');
+const { extractSignals, normalizeCommand, pickErrorSignatureLine } = require('../src/gep/signals');
 
 const emptyInput = {
   recentSessionTranscript: '',
@@ -342,5 +342,47 @@ describe('extractSignals -- perf_bottleneck needs an incident, not a config valu
       const r = extractSignals({ ...emptyInput, todayLog: phrase });
       assert.ok(hasSignal(r, 'perf_bottleneck'), 'expected perf_bottleneck for: ' + phrase);
     }
+  });
+});
+
+describe('pickErrorSignatureLine -- a success report is not an error signature', () => {
+  const successReport =
+    'user**: exec completed (quick-bl, code 0) :: now=07:20:01 条目: receipt df7378b2 running 07:18:48 ' +
+    '- receipt 196f6528 error 07:12:55 07:16:32 reuters status error| delivery not-delivered| errs 2';
+
+  it('does not pick a successful exec report that embeds another component status error', () => {
+    assert.equal(pickErrorSignatureLine([successReport]), null);
+  });
+
+  it('does not pick a short success report with "status error" inside', () => {
+    assert.equal(
+      pickErrorSignatureLine([
+        'user**: exec completed (quick-bl, code 0) :: reuters status error| delivery not-delivered| errs 2'
+      ]),
+      null
+    );
+  });
+
+  it('still picks a genuine "error:" failure line', () => {
+    assert.equal(pickErrorSignatureLine(['error: cannot read file']), 'error: cannot read file');
+  });
+
+  it('still picks a genuine bracketed error line', () => {
+    const line = '[error] TypeError: x is not a function';
+    assert.ok(pickErrorSignatureLine([line]), 'a real error must still be detected');
+  });
+
+  it('still picks a genuine "status error" failure line', () => {
+    const line = 'news-collect-reuters: status error';
+    assert.ok(pickErrorSignatureLine([line]), 'a real status error must still be detected');
+  });
+
+  it('keeps a direct error statement even inside a success report', () => {
+    const line = 'exec completed (code 0) but [error] TypeError: x is not a function';
+    assert.ok(pickErrorSignatureLine([line]), 'direct error statements must survive');
+  });
+
+  it('does not pick a success report that only contains a weak error marker', () => {
+    assert.equal(pickErrorSignatureLine(['exec completed (code 0) 错误: 0']), null);
   });
 });

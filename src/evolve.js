@@ -1749,6 +1749,9 @@ ${mutationDirective}
         signals,
         selector,
         parentEventId: getLastEventId(),
+        // The wrapper reads <logs>/status_<cycleTag>.json after solidify; the
+        // prompt must name the same file, so the cycle tag has to be passed in.
+        cycleId: cycleNum,
         selectedGene,
         capsuleCandidates,
         genesPreview,

@@ -154,6 +154,15 @@ function analyzeRecentHistory(recentEvents) {
 
 // Strong, unambiguous error markers (a real failure statement).
 var STRONG_ERROR_RE = /\b(?:type|reference|syntax)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]|status\s+error/i;
+// A DIRECT failure statement: the line itself says the operation failed
+// ("error: ...", "exception: ...", "[error] TypeError: ..."). These are always
+// picked, no matter what else the line contains.
+var DIRECT_ERROR_RE = /\b(?:type|reference|syntax)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]/i;
+// The report says the OPERATION itself succeeded ("exec completed", "code 0",
+// "exit code 0", ...). Such a report describes several components at once, so a
+// component status text like "reuters status error" inside it belongs to
+// ANOTHER component - it is not this operation's failure.
+var SUCCESS_REPORT_RE = /\b(?:exec|execution|command|step|operation|task|run|job|process|script)\s+(?:completed|finished|succeeded|done)\b|\bcompleted\s+successfully\b|\bexit(?:ed)?\s+(?:with\s+)?(?:code|status)\s*[:=]?\s*0\b|\bcode\s*[:=]?\s*0\b|\bstatus\s*[:=]\s*(?:ok|success|successful|done)\b/i;
 // Weak markers, but NOT when negated - "无异常：9" / "没有错误：" are healthy
 // status lines, not failures.
 var WEAK_ERROR_RE = /(?<!(?:没有|无|未|没|非))(?<![有无未没非])(?:错误|异常|报错|失败)\s*[：:]/;
@@ -207,10 +216,20 @@ function pickErrorSignatureLine(lines) {
   for (var i = 0; i < list.length; i++) {
     var l = String(list[i] || '');
     if (!l) continue;
-    if (STRONG_ERROR_RE.test(l)) { strong.push(l); continue; }
+    if (STRONG_ERROR_RE.test(l)) {
+      // A line that reports the operation itself as SUCCESS is not a failure,
+      // even when the strong marker only matched ANOTHER component's status
+      // text ("reuters status error" inside an "exec completed (code 0)" report).
+      // A direct failure statement ("error:", "[error] TypeError: ...") is
+      // still picked - real detection is never weakened.
+      if (!DIRECT_ERROR_RE.test(l) && SUCCESS_REPORT_RE.test(l)) continue;
+      strong.push(l); continue;
+    }
     if (WEAK_ERROR_RE.test(l)) {
       // A weak-only match on a heartbeat status line is noise, not a failure.
       if (HEARTBEAT_STATUS_RE.test(l)) continue;
+      // Same guard as for strong matches: a success report is not a failure.
+      if (SUCCESS_REPORT_RE.test(l)) continue;
       weak.push(l);
     }
   }
