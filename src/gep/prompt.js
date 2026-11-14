@@ -4,7 +4,7 @@ const { formatAssetPreview } = require('./assets');
 const { generateInnovationIdeas } = require('../ops/innovation');
 const { analyzeRecentHistory, OPPORTUNITY_SIGNALS } = require('./signals');
 const { loadNarrativeSummary } = require('./narrativeMemory');
-const { getEvolutionPrinciplesPath } = require('./paths');
+const { getEvolutionPrinciplesPath, getRepoRoot } = require('./paths');
 
 /**
  * Build a minimal prompt for direct-reuse mode.
@@ -180,6 +180,53 @@ ENSURE VALID JSON SYNTAX (escape quotes in strings).
    }
 `.trim();
 
+/**
+ * Tool usage guardrails (Hub asset sha256:e6cd258b).
+ * The JSON config under .evolver/gep/ is the single source of truth; the prompt
+ * only renders a compact summary of it. A missing or invalid config must never
+ * break prompt assembly, so every read is guarded.
+ */
+const TOOL_USAGE_GUARDRAILS_REL = '.evolver/gep/tool_usage_guardrails.json';
+
+function loadToolUsageGuardrails() {
+  try {
+    const file = require('path').join(getRepoRoot(), TOOL_USAGE_GUARDRAILS_REL);
+    if (!fs.existsSync(file)) return null;
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function guardrailValue(obj, key, fallback) {
+  if (!obj || typeof obj !== 'object') return fallback;
+  const v = obj[key];
+  return (v === undefined || v === null) ? fallback : v;
+}
+
+function buildToolUsageGuardrailsBlock() {
+  const g = loadToolUsageGuardrails();
+  if (!g) return '';
+  const tp = g.tool_bypass_policy || {};
+  const dedup = g.signal_deduplication || {};
+  const lines = [
+    '- exec limits: max ' + guardrailValue(g, 'max_consecutive_exec_calls', '?') +
+      ' consecutive, max ' + guardrailValue(g, 'max_exec_calls_per_cycle', '?') +
+      ' per cycle, retries max ' + guardrailValue(g, 'max_retries', '?') +
+      ' (cooldown ' + guardrailValue(g, 'retry_cooldown_seconds', '?') + 's).',
+    '- tool_bypass_policy: ' + guardrailValue(tp, 'action', 'route_to_registered_tools') +
+      ' (' + guardrailValue(tp, 'mode', 'block_ad_hoc_script_execution') + ').',
+    '- batch_operations: prefer single-shot commands over iterative loops.',
+    '- signal_deduplication: suppress the same signal within ' +
+      guardrailValue(dedup, 'suppress_same_signal_within_cycles', '?') +
+      ' cycles, max ' + guardrailValue(dedup, 'max_occurrences_per_cycle', '?') + ' per cycle.',
+    '- source: ' + TOOL_USAGE_GUARDRAILS_REL
+  ];
+  return '\nTool Usage Guardrails:\n' + lines.join('\n') + '\n';
+}
+
 function buildAntiPatternZone(failedCapsules, signals) {
   if (!Array.isArray(failedCapsules) || failedCapsules.length === 0) return '';
   if (!Array.isArray(signals) || signals.length === 0) return '';
@@ -318,6 +365,10 @@ function buildGepPrompt({
   // undefined cycle id produced "status_undefined.json" -- never read.
   const statusCycleTag = resolveStatusCycleTag(cycleId);
   const statusFileDefault = `${process.env.WORKSPACE_DIR || '.'}/logs/status_${statusCycleTag}.json`;
+
+  // Tool usage guardrails (Hub asset sha256:e6cd258b). Empty when the
+  // config is missing or invalid -- the prompt must always build.
+  const toolUsageGuardrailsBlock = buildToolUsageGuardrailsBlock();
 
   // Extract strategy from selected gene if available
   let strategyBlock = "";
@@ -459,7 +510,7 @@ CONSTRAINTS:
 - New skills -> \`skills/<name>/\`.
 - NEVER modify \`skills/evolver/\` or \`skills/feishu-evolver-wrapper/\`. These are managed through the human-reviewed release pipeline.
   Self-modification causes instability and is blocked by solidify. To enable (NOT recommended): set EVOLVE_ALLOW_SELF_MODIFY=true.
-
+${toolUsageGuardrailsBlock}
 CONSTITUTIONAL ETHICS (EvoMap Ethics Committee -- Mandatory):
 These are non-negotiable rules derived from EvoMap's Constitution. Violation = FAILED + ROLLBACK.
 1. HUMAN WELFARE PRIORITY: Never create tools, scripts, or strategies that could harm humans,
@@ -621,4 +672,4 @@ Rules:
   return basePrompt.slice(0, maxChars) + "\n...[TRUNCATED]...";
 }
 
-module.exports = { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock, buildLessonsBlock, buildNarrativeBlock, buildPrinciplesBlock, resolveStatusCycleTag };
+module.exports = { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock, buildLessonsBlock, buildNarrativeBlock, buildPrinciplesBlock, resolveStatusCycleTag, buildToolUsageGuardrailsBlock };

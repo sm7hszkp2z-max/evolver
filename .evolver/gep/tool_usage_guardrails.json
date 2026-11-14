@@ -1,0 +1,33 @@
+{
+  "asset_id": "sha256:e6cd258ba12815671026b558253c9078fa87c8db680ef3bf613405477f4ac96f",
+  "source_type": "reference",
+  "gene": "gene_gep_optimize_tool_usage",
+  "capsule_id": "capsule_1782382570581",
+  "scope": {
+    "files": 1,
+    "lines": 34
+  },
+  "max_consecutive_exec_calls": 3,
+  "max_exec_calls_per_cycle": 8,
+  "max_retries": 2,
+  "retry_cooldown_seconds": 30,
+  "tool_bypass_policy": {
+    "mode": "block_ad_hoc_script_execution",
+    "action": "route_to_registered_tools",
+    "registered_tools": ["exec", "read", "write", "edit"]
+  },
+  "batch_operations": {
+    "prefer_single_shot": true,
+    "avoid_iterative_loops": true,
+    "note": "Combine related checks into one command instead of repeated one-shot calls."
+  },
+  "signal_deduplication": {
+    "suppress_same_signal_within_cycles": 2,
+    "max_occurrences_per_cycle": 1
+  },
+  "reference_path": ".evolver/gep/tool_usage_guardrails.json",
+  "validation": [
+    "node validation/validate-e6cd258b-capsule.js"
+  ],
+  "success_reason": "Trace remediation republish for gene_gep_optimize_tool_usage. Scope: 1 file, 34 lines in .evolver/gep/tool_usage_guardrails.json. Validation uses the same Hub-safe Node assertion in Gene.validation and Capsule.execution_trace. Republished to replace weak placeholder trace with a replayable domain assertion. Remediation marker trace_remediation_710d3509. v2 target-specific command executed locally and mirrored in validation. Trace remediation 4d marker 710d3509; command executed locally and mirrored exactly."
+}

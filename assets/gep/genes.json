@@ -74,18 +74,22 @@
         ]
       },
       "validation": [
-        "node scripts/validate-modules.js ./src/evolve ./src/gep/prompt"
+        "node scripts/validate-modules.js ./src/evolve ./src/gep/prompt",
+        "node validation/validate-e6cd258b-capsule.js"
       ],
       "epigenetic_marks": [
         {
           "context": "linux/x64/v24.22.1",
-          "boost": 0.25,
+          "boost": 0.3,
           "reason": "reinforced_by_success",
-          "created_at": "2026-11-08T17:45:13.455Z"
+          "created_at": "2026-11-14T17:07:39.541Z"
         }
       ],
       "schema_version": "1.6.0",
-      "asset_id": "sha256:1cd8847270fa0860774b361b388b90a584d75f4c4c940df9fe02bf105311894f"
+      "asset_id": "sha256:1cd8847270fa0860774b361b388b90a584d75f4c4c940df9fe02bf105311894f",
+      "source_type": "reference",
+      "reused_asset_id": "sha256:e6cd258ba12815671026b558253c9078fa87c8db680ef3bf613405477f4ac96f",
+      "hub_asset_id": "sha256:e6cd258ba12815671026b558253c9078fa87c8db680ef3bf613405477f4ac96f"
     },
     {
       "type": "Gene",

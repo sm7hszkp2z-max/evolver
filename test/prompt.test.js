@@ -70,3 +70,23 @@ describe('resolveStatusCycleTag', () => {
     assert.notEqual(tag, 'null');
   });
 });
+
+describe('buildGepPrompt -- tool usage guardrails', () => {
+  const cfgPath = require('node:path').resolve(__dirname, '..', '.evolver/gep/tool_usage_guardrails.json');
+
+  it('embeds the Hub guardrails block when the config is present', () => {
+    const prompt = build('0085');
+    if (require('node:fs').existsSync(cfgPath)) {
+      assert.ok(prompt.includes('Tool Usage Guardrails'), 'prompt must embed the guardrails block');
+      assert.ok(prompt.includes('max 3 consecutive'), 'prompt must carry the exec limits');
+      assert.ok(prompt.includes('.evolver/gep/tool_usage_guardrails.json'), 'prompt must name the guardrails source');
+    } else {
+      assert.ok(!prompt.includes('Tool Usage Guardrails'), 'no block without a config');
+    }
+  });
+
+  it('never throws when the guardrails config is unreadable', () => {
+    const { buildToolUsageGuardrailsBlock } = require('../src/gep/prompt');
+    assert.doesNotThrow(() => buildToolUsageGuardrailsBlock());
+  });
+});
