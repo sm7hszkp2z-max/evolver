@@ -35,7 +35,13 @@ const { fetchTasks, selectBestTask, claimTask, taskToSignals, claimWorkerTask, e
 const { generateQuestions } = require('./gep/questionGenerator');
 const { buildMutation, isHighRiskMutationAllowed } = require('./gep/mutation');
 const { selectPersonalityForRun } = require('./gep/personality');
-const { clip, writePromptArtifact, renderSessionsSpawnCall } = require('./gep/bridge');
+const {
+  clip,
+  writePromptArtifact,
+  renderSessionsSpawnCall,
+  resolveBridgeAgentId,
+  loadBridgeAgentAllowlist,
+} = require('./gep/bridge');
 const { getEvolutionDir } = require('./gep/paths');
 const { shouldReflect, buildReflectionContext, recordReflection } = require('./gep/reflection');
 const { loadNarrativeSummary } = require('./gep/narrativeMemory');
@@ -1812,6 +1818,16 @@ ${mutationDirective}
       artifact = null;
     }
 
+    // OpenClaw refuses sessions_spawn for agent ids outside the deployment's
+    // allowed set (e.g. "main" -> "agentId is not allowed ... allowed: personal").
+    // Resolve the id against the allowlist so the printed payload is dispatchable.
+    const allowedAgentIds = loadBridgeAgentAllowlist({ env: process.env, repoRoot: REPO_ROOT });
+    const requestedAgentId = String(AGENT_NAME || '').trim() || 'main';
+    const bridgeAgentId = resolveBridgeAgentId({ requested: requestedAgentId, allowed: allowedAgentIds });
+    if (bridgeAgentId !== requestedAgentId) {
+      console.log(`[Bridge] agent id '${requestedAgentId}' not allowed; using '${bridgeAgentId}'`);
+    }
+
     const executorTask = [
       'You are the executor (the Hand).',
       'Your job is to apply a safe, minimal patch in this repo following the attached GEP protocol prompt.',
@@ -1822,7 +1838,7 @@ ${mutationDirective}
       '',
       'Loop chaining (only if you are running in loop mode): after solidify succeeds, print a sessions_spawn call to start the next loop run with a short delay.',
       'Example:',
-      'sessions_spawn({ task: "exec: node skills/feishu-evolver-wrapper/lifecycle.js ensure", agentId: "main", cleanup: "delete", label: "gep_loop_next" })',
+      `sessions_spawn({ task: "exec: node skills/feishu-evolver-wrapper/lifecycle.js ensure", agentId: "${bridgeAgentId}", cleanup: "delete", label: "gep_loop_next" })`,
       '',
       'GEP protocol prompt (may be truncated here; prefer the prompt file if provided):',
       clip(prompt, 24000),
@@ -1830,7 +1846,8 @@ ${mutationDirective}
 
     const spawn = renderSessionsSpawnCall({
       task: executorTask,
-      agentId: AGENT_NAME,
+      agentId: bridgeAgentId,
+      allowedAgentIds,
       cleanup: 'delete',
       label: `gep_bridge_${cycleNum}`,
     });

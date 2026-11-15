@@ -50,10 +50,57 @@ function writePromptArtifact({ memoryDir, cycleId, runId, prompt, meta }) {
   return { promptPath, metaPath };
 }
 
-function renderSessionsSpawnCall({ task, agentId, label, cleanup }) {
+function normalizeAgentIds(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const raw of list) {
+    const id = String(raw || '').trim();
+    if (id && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+// Pick the agent id that OpenClaw will actually accept for sessions_spawn.
+// - no allowlist  -> keep the requested id (backward compatible)
+// - id allowed    -> keep it
+// - not allowed   -> fall back to the first allowed id
+function resolveBridgeAgentId({ requested, allowed } = {}) {
+  const req = String(requested || '').trim() || 'main';
+  const list = normalizeAgentIds(allowed);
+  if (!list.length) return req;
+  if (list.includes(req)) return req;
+  return list[0];
+}
+
+// Allowlist of agent ids accepted by the local OpenClaw deployment.
+// Sources: EVOLVER_BRIDGE_AGENT_IDS env (comma separated) and
+// .evolver/gep/bridge.json ({"allowedAgentIds":["personal"]}).
+// Missing file / missing env -> empty allowlist (backward compatible).
+function loadBridgeAgentAllowlist({ env, repoRoot } = {}) {
+  const e = env || process.env || {};
+  const ids = [];
+  const fromEnv = String(e.EVOLVER_BRIDGE_AGENT_IDS || '')
+    .split(',')
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+  ids.push(...fromEnv);
+  const root = String(repoRoot || process.cwd() || '');
+  try {
+    if (root) {
+      const cfgPath = path.join(root, '.evolver', 'gep', 'bridge.json');
+      if (fs.existsSync(cfgPath)) {
+        const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+        ids.push(...normalizeAgentIds(raw && raw.allowedAgentIds));
+      }
+    }
+  } catch (e) {}
+  return normalizeAgentIds(ids);
+}
+
+function renderSessionsSpawnCall({ task, agentId, label, cleanup, allowedAgentIds } = {}) {
   const t = String(task || '').trim();
   if (!t) throw new Error('bridge: missing task');
-  const a = String(agentId || 'main');
+  const a = resolveBridgeAgentId({ requested: agentId || 'main', allowed: allowedAgentIds });
   const l = String(label || 'gep_bridge');
   const c = cleanup ? String(cleanup) : 'delete';
 
@@ -67,5 +114,7 @@ module.exports = {
   clip,
   writePromptArtifact,
   renderSessionsSpawnCall,
+  resolveBridgeAgentId,
+  loadBridgeAgentAllowlist,
 };
 
