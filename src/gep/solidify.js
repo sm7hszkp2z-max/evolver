@@ -1151,12 +1151,71 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
   const selectedCapsuleId =
     lastRun && typeof lastRun.selected_capsule_id === 'string' && lastRun.selected_capsule_id.trim()
       ? String(lastRun.selected_capsule_id).trim() : null;
-  const capsuleId = success ? selectedCapsuleId || buildCapsuleId(ts) : null;
-  const derivedIntent = intent || (mutation && mutation.category) || (geneUsed && geneUsed.category) || 'repair';
-  const intentMismatch =
-    intent && mutation && typeof mutation.category === 'string' && String(intent) !== String(mutation.category);
-  if (intentMismatch) protocolViolations.push(`intent_mismatch_with_mutation:${String(intent)}!=${String(mutation.category)}`);
 
+  // Never credit a foreign capsule: a reused capsule must belong to the gene that is
+  // actually used, otherwise its success_streak is credited to a gene that did not
+  // produce it. When the gene does not match, a new capsule id is minted.
+  let prevCapsule = null;
+  let capsuleReuseRejected = null;
+  if (selectedCapsuleId) {
+    try {
+      const list = require('./assetStore').loadCapsules();
+      prevCapsule = Array.isArray(list)
+        ? list.find(c => c && c.type === 'Capsule' && String(c.id) === selectedCapsuleId)
+        : null;
+    } catch (e) {}
+    if (prevCapsule && geneUsed && geneUsed.id && prevCapsule.gene && String(prevCapsule.gene) !== String(geneUsed.id)) {
+      capsuleReuseRejected = {
+        capsule_id: selectedCapsuleId,
+        capsule_gene: String(prevCapsule.gene),
+        gene_used: String(geneUsed.id),
+        reason: 'capsule_gene_mismatch',
+        action: 'mint_new_capsule_id',
+      };
+      prevCapsule = null;
+    }
+  }
+  const capsuleId = success
+    ? (selectedCapsuleId && !capsuleReuseRejected ? selectedCapsuleId : buildCapsuleId(ts))
+    : null;
+
+  // Intent resolution. Documented precedence:
+  //   1) the category of the gene that actually lands in genes_used
+  //   2) the --intent CLI flag
+  //   3) the mutation category
+  //   4) 'repair'
+  // The recorded intent must agree with genes_used. Every disagreement between the
+  // flag, the mutation category and the gene category is recorded in
+  // meta.intent_resolution instead of being silently paired.
+  const geneCategory = geneUsed && typeof geneUsed.category === 'string' ? String(geneUsed.category) : null;
+  const mutationCategory = mutation && typeof mutation.category === 'string' ? String(mutation.category) : null;
+  const requestedIntent = intent ? String(intent) : null;
+  const derivedIntent = geneCategory || requestedIntent || mutationCategory || 'repair';
+  const intentConflicts = [];
+  if (requestedIntent && mutationCategory && requestedIntent !== mutationCategory) {
+    intentConflicts.push('intent_flag_vs_mutation_category:' + requestedIntent + '!=' + mutationCategory);
+  }
+  if (requestedIntent && geneCategory && requestedIntent !== geneCategory) {
+    intentConflicts.push('intent_flag_vs_gene_category:' + requestedIntent + '!=' + geneCategory);
+  }
+  if (mutationCategory && geneCategory && mutationCategory !== geneCategory) {
+    intentConflicts.push('mutation_category_vs_gene_category:' + mutationCategory + '!=' + geneCategory);
+  }
+  const intentResolution = {
+    precedence: 'gene_category > intent_flag > mutation_category > repair',
+    requested_intent: requestedIntent,
+    mutation_category: mutationCategory,
+    gene_category: geneCategory,
+    effective_intent: derivedIntent,
+    resolved_by: geneCategory
+      ? 'gene_category'
+      : (requestedIntent ? 'intent_flag' : (mutationCategory ? 'mutation_category' : 'default')),
+    conflicts: intentConflicts,
+  };
+  if (geneCategory && derivedIntent !== geneCategory) {
+    protocolViolations.push('intent_gene_mismatch:' + derivedIntent + '!=' + geneCategory);
+  }
+  
   const sourceType = lastRun && lastRun.source_type ? String(lastRun.source_type) : 'generated';
   const reusedAssetId = lastRun && lastRun.reused_asset_id ? String(lastRun.reused_asset_id) : null;
   const reusedChainId = lastRun && lastRun.reused_chain_id ? String(lastRun.reused_chain_id) : null;
@@ -1185,6 +1244,12 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
     meta: {
       at: ts,
       signal_key: signalKey,
+      intent_resolution: intentResolution,
+      capsule_reuse: {
+        selected_capsule_id: selectedCapsuleId,
+        resolved_capsule_id: capsuleId,
+        rejected: capsuleReuseRejected,
+      },
       selector: lastRun && lastRun.selector ? lastRun.selector : null,
       blast_radius_estimate: lastRun && lastRun.blast_radius_estimate ? lastRun.blast_radius_estimate : null,
       mutation: mutation || null,
@@ -1224,13 +1289,8 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
     const autoSummary = geneUsed
       ? `固化：${geneUsed.id} 命中信号 ${signals.join(', ') || '(none)'}，变更 ${blast.files} 文件 / ${blast.lines} 行。`
       : `固化：命中信号 ${signals.join(', ') || '(none)'}，变更 ${blast.files} 文件 / ${blast.lines} 行。`;
-    let prevCapsule = null;
-    try {
-      if (selectedCapsuleId) {
-        const list = require('./assetStore').loadCapsules();
-        prevCapsule = Array.isArray(list) ? list.find(c => c && c.type === 'Capsule' && String(c.id) === selectedCapsuleId) : null;
-      }
-    } catch (e) {}
+    // prevCapsule was resolved above together with the capsule/gene match guard,
+    // so a capsule that belongs to a different gene can never be reused here.
     const successReason = buildSuccessReason({ gene: geneUsed, signals, blast, mutation, score });
     const capsuleDiff = captureDiffSnapshot(repoRoot);
     const capsuleContent = buildCapsuleContent({ intent, gene: geneUsed, signals, blast, mutation, score });

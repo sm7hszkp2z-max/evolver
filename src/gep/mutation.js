@@ -97,6 +97,42 @@ function isHighRiskMutationAllowed(personalityState) {
   return rigor >= 0.6 && riskTol <= 0.5;
 }
 
+var GENE_CATEGORIES = ['repair', 'optimize', 'innovate'];
+
+function geneCategoryOf(selectedGene) {
+  const c = selectedGene && typeof selectedGene.category === 'string' ? String(selectedGene.category) : '';
+  return GENE_CATEGORIES.indexOf(c) >= 0 ? c : null;
+}
+
+// Resolve the planned mutation category against the category of the gene it targets.
+// Precedence: hard error signals (repair) > targeted gene category > context category.
+// Every deviation from the context category is recorded in category_override so the
+// ledger can be audited instead of silently pairing a category with a foreign gene.
+function resolveMutationCategory({ contextCategory, geneCategory }) {
+  if (!geneCategory) return { category: contextCategory, override: null };
+  if (contextCategory === geneCategory) return { category: contextCategory, override: null };
+  if (contextCategory === 'repair') {
+    return {
+      category: 'repair',
+      override: {
+        context_category: contextCategory,
+        gene_category: geneCategory,
+        applied_category: 'repair',
+        reason: 'error_signals_take_precedence',
+      },
+    };
+  }
+  return {
+    category: geneCategory,
+    override: {
+      context_category: contextCategory,
+      gene_category: geneCategory,
+      applied_category: geneCategory,
+      reason: 'gene_category_alignment',
+    },
+  };
+}
+
 function buildMutation({
   signals,
   selectedGene,
@@ -107,7 +143,10 @@ function buildMutation({
   expected_effect,
 } = {}) {
   const ts = nowTsMs();
-  const category = mutationCategoryFromContext({ signals, driftEnabled: !!driftEnabled });
+  const contextCategory = mutationCategoryFromContext({ signals, driftEnabled: !!driftEnabled });
+  const geneCategory = geneCategoryOf(selectedGene);
+  const resolvedCategory = resolveMutationCategory({ contextCategory, geneCategory });
+  const category = resolvedCategory.category;
   const triggerSignals = uniqStrings(signals);
 
   const base = {
@@ -119,6 +158,15 @@ function buildMutation({
     expected_effect: String(expected_effect || expectedEffectFromCategory(category)),
     risk_level: 'low',
   };
+
+  // Record the deliberate category alignment so the evolution ledger stays auditable.
+  if (resolvedCategory.override) {
+    base.category_override = resolvedCategory.override;
+    base.trigger_signals = uniqStrings([
+      ...(base.trigger_signals || []),
+      'align:mutation_category_' + String(resolvedCategory.override.reason),
+    ]);
+  }
 
   // Default risk assignment: innovate is medium; others low.
   if (category === 'innovate') base.risk_level = 'medium';
@@ -132,11 +180,32 @@ function buildMutation({
   // - forbid innovate + high-risk personality (downgrade innovation to optimize)
   // - forbid high-risk mutation unless personality satisfies constraints
   const highRiskPersonality = isHighRiskPersonality(personalityState || null);
+  let safetyDowngraded = false;
   if (base.category === 'innovate' && highRiskPersonality) {
     base.category = 'optimize';
     base.expected_effect = 'safety downgrade: optimize under high-risk personality (avoid innovate+high-risk combo)';
     base.risk_level = 'low';
     base.trigger_signals = uniqStrings([...(base.trigger_signals || []), 'safety:avoid_innovate_with_high_risk_personality']);
+    safetyDowngraded = true;
+  }
+
+  // Final consistency check: the planned mutation category must agree with the
+  // category of the gene it targets. Any residual deviation (safety downgrade)
+  // is recorded explicitly, never silently paired.
+  if (geneCategory && base.category !== geneCategory) {
+    const priorReason = base.category_override ? String(base.category_override.reason) : null;
+    base.category_override = {
+      context_category: contextCategory,
+      gene_category: geneCategory,
+      applied_category: base.category,
+      reason: priorReason
+        ? priorReason + (safetyDowngraded ? '+safety_downgrade' : '')
+        : 'safety_downgrade',
+    };
+    base.trigger_signals = uniqStrings([
+      ...(base.trigger_signals || []),
+      'align:mutation_category_' + (safetyDowngraded ? 'safety_downgrade' : 'gene_category_alignment'),
+    ]);
   }
 
   if (base.risk_level === 'high' && !isHighRiskMutationAllowed(personalityState || null)) {
@@ -171,6 +240,9 @@ function normalizeMutation(obj) {
     expected_effect: typeof m.expected_effect === 'string' ? m.expected_effect : expectedEffectFromCategory(m.category),
     risk_level: ['low', 'medium', 'high'].includes(String(m.risk_level)) ? String(m.risk_level) : 'low',
   };
+  if (m.category_override && typeof m.category_override === 'object') {
+    out.category_override = m.category_override;
+  }
   return out;
 }
 
@@ -182,5 +254,7 @@ module.exports = {
   isHighRiskMutationAllowed,
   isHighRiskPersonality,
   hasOpportunitySignal,
+  geneCategoryOf,
+  resolveMutationCategory,
 };
 
