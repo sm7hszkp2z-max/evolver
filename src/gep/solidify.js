@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const { loadGenes, upsertGene, appendEventJsonl, appendCapsule, upsertCapsule, getLastEventId, appendFailedCapsule } = require('./assetStore');
+const stagnationGuard = require('./stagnationGuard');
 const { computeSignalKey, memoryGraphPath } = require('./memoryGraph');
 const { computeCapsuleSuccessStreak, isBlastRadiusSafe } = require('./a2a');
 const { getRepoRoot, getMemoryDir, getEvolutionDir, getWorkspaceRoot, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./paths');
@@ -1220,6 +1221,36 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
   const reusedAssetId = lastRun && lastRun.reused_asset_id ? String(lastRun.reused_asset_id) : null;
   const reusedChainId = lastRun && lastRun.reused_chain_id ? String(lastRun.reused_chain_id) : null;
 
+  // Asset provenance on the Gene itself. Solidify used to write source_type and
+  // reused_asset_id on the event and the capsule only, so the landed gene still
+  // looked "generated" and the Hub asset landing was not provable. The gene now
+  // carries the same three values as the capsule.
+  if (geneUsed && typeof geneUsed === 'object') {
+    geneUsed.source_type = sourceType;
+    geneUsed.reused_asset_id = reusedAssetId;
+    geneUsed.hub_asset_id = reusedAssetId;
+  }
+
+  // StagnationGuard verdict. The runner stores it in the run state, but a cycle
+  // can also be solidified without the runner having computed it (interrupted
+  // run), so the verdict is recomputed here when it is missing. Fail-safe: it
+  // never throws and never changes the outcome of the solidify.
+  let stagnationGuardVerdict = lastRun && lastRun.stagnation_guard ? lastRun.stagnation_guard : null;
+  try {
+    if (!stagnationGuardVerdict) {
+      const readEventsForGuard = require('./assetStore').readAllEvents;
+      const allEvents = readEventsForGuard();
+      const history = Array.isArray(allEvents)
+        ? allEvents.filter(function (e) { return e && e.type === 'EvolutionEvent'; })
+        : [];
+      stagnationGuardVerdict = stagnationGuard.guard(history, reusedAssetId, { root: repoRoot });
+    }
+    console.log(stagnationGuard.formatVerdict(stagnationGuardVerdict));
+  } catch (e) {
+    stagnationGuardVerdict = { verdict: 'ok', reason: 'guard_error', stalled: false, redundant: false };
+    console.log('[StagnationGuard] guard failed (non-fatal): ' + (e && e.message ? e.message : e));
+  }
+
   // LessonL: carry applied lesson IDs for Hub effectiveness adjustment
   const appliedLessons = lastRun && Array.isArray(lastRun.applied_lessons) ? lastRun.applied_lessons : [];
 
@@ -1271,6 +1302,7 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
         ? analyzeBlastRadiusBreakdown(blast.all_changed_files || blast.changed_files || [])
         : null,
       blast_estimate_comparison: compareBlastEstimate(blastRadiusEstimate, blast),
+      stagnation_guard: stagnationGuardVerdict,
       validation_ok: validation.ok,
       validation: validation.results.map(r => ({ cmd: r.cmd, ok: r.ok })),
       validation_report: validationReport,

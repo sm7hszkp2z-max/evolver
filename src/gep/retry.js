@@ -167,18 +167,48 @@ function httpError(res) {
 async function fetchWithRetry(url, init, opts) {
   const o = opts || {};
   const timeoutMs = Number.isFinite(o.timeoutMs) ? o.timeoutMs : 8000;
-  const result = await retryWithBackoff(async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(o.timeoutReason || 'request_timeout'), timeoutMs);
-    try {
-      const res = await fetch(url, Object.assign({}, init, { signal: controller.signal }));
-      if (res && !res.ok && (res.status === 429 || res.status >= 500)) throw httpError(res);
-      return res;
-    } finally {
-      clearTimeout(timer);
-    }
-  }, Object.assign({}, o, { label: o.label || 'fetch' }));
-  return result.value;
+  const startedAt = Date.now();
+  let attemptCount = 0;
+  try {
+    const result = await retryWithBackoff(async () => {
+      attemptCount += 1;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(o.timeoutReason || 'request_timeout'), timeoutMs);
+      try {
+        const res = await fetch(url, Object.assign({}, init, { signal: controller.signal }));
+        if (res && !res.ok && (res.status === 429 || res.status >= 500)) throw httpError(res);
+        return res;
+      } finally {
+        clearTimeout(timer);
+      }
+    }, Object.assign({}, o, { label: o.label || 'fetch' }));
+    reportCompletion(o, {
+      ok: true,
+      status: result.value && result.value.status ? result.value.status : null,
+      durationMs: Date.now() - startedAt,
+      retryCount: Math.max(0, attemptCount - 1)
+    });
+    return result.value;
+  } catch (err) {
+    reportCompletion(o, {
+      ok: false,
+      status: err && err.status ? err.status : null,
+      durationMs: Date.now() - startedAt,
+      retryCount: Math.max(0, attemptCount - 1),
+      error: err && err.message ? String(err.message) : String(err)
+    });
+    throw err;
+  }
+}
+
+// Task metrics hook (Hub asset sha256:e8b9eca2...): every outbound Hub call can
+// report duration_ms / status / retry_count. The hook is best-effort: a broken
+// or throwing callback must never change the outcome of the call it observes.
+function reportCompletion(opts, info) {
+  if (!opts || typeof opts.onComplete !== 'function') return;
+  try {
+    opts.onComplete(Object.assign({ label: opts.label || 'fetch' }, info));
+  } catch (_) {}
 }
 
 module.exports = {

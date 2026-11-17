@@ -8,6 +8,27 @@
 
 const { getNodeId, buildHubHeaders } = require('./a2aProtocol');
 const { fetchWithRetry } = require('./retry');
+const { recordTaskMetric } = require('./metrics');
+
+// Task metrics for the external_task path (Hub asset sha256:e8b9eca2...):
+// every Hub A2A call records duration_ms, status and retry_count. Writing a
+// metric never breaks the call it observes.
+function taskMetricRecorder(label, taskId) {
+  return function (info) {
+    const i = info || {};
+    let status = i.status;
+    if (status === undefined || status === null || status === '') status = i.ok ? 'ok' : 'error';
+    recordTaskMetric({
+      label: label,
+      task_id: taskId || null,
+      duration_ms: Number.isFinite(Number(i.durationMs)) ? Number(i.durationMs) : 0,
+      status: status,
+      retry_count: Number.isFinite(Number(i.retryCount)) ? Number(i.retryCount) : 0,
+      ok: !!i.ok,
+      error: i.error ? String(i.error).slice(0, 200) : null
+    });
+  };
+}
 
 // Signal hygiene: decides which raw task tokens are real evolution signals.
 var hygiene = require('../../skills/signal-hygiene');
@@ -66,7 +87,7 @@ async function fetchTasks(opts) {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify(msg),
-    }, { timeoutMs: 8000, label: 'hub_fetch' });
+    }, { timeoutMs: 8000, label: 'hub_fetch', onComplete: taskMetricRecorder('hub_fetch', null) });
 
     if (!res.ok) return { tasks: [] };
 
@@ -359,7 +380,7 @@ async function claimTask(taskId, opts) {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify(body),
-    }, { timeoutMs: 5000, label: 'hub_claim' });
+    }, { timeoutMs: 5000, label: 'hub_claim', onComplete: taskMetricRecorder('hub_claim', taskId) });
 
     return res.ok;
   } catch {
@@ -383,7 +404,7 @@ async function completeTask(taskId, assetId) {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({ task_id: taskId, asset_id: assetId, node_id: nodeId }),
-    }, { timeoutMs: 5000, label: 'hub_complete' });
+    }, { timeoutMs: 5000, label: 'hub_complete', onComplete: taskMetricRecorder('hub_complete', taskId) });
 
     return res.ok;
   } catch {
@@ -433,7 +454,7 @@ async function claimWorkerTask(taskId) {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({ task_id: taskId, node_id: nodeId }),
-    }, { timeoutMs: 5000, label: 'hub_work_claim' });
+    }, { timeoutMs: 5000, label: 'hub_work_claim', onComplete: taskMetricRecorder('hub_work_claim', taskId) });
 
     if (!res.ok) return null;
     return await res.json();
@@ -452,7 +473,7 @@ async function completeWorkerTask(assignmentId, resultAssetId) {
       method: 'POST',
       headers: buildAuthHeaders(),
       body: JSON.stringify({ assignment_id: assignmentId, node_id: nodeId, result_asset_id: resultAssetId }),
-    }, { timeoutMs: 5000, label: 'hub_work_complete' });
+    }, { timeoutMs: 5000, label: 'hub_work_complete', onComplete: taskMetricRecorder('hub_work_complete', null) });
 
     return res.ok;
   } catch {

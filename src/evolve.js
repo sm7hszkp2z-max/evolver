@@ -19,6 +19,7 @@ const { selectGeneAndCapsule, matchPatternToSignals } = require('./gep/selector'
 const { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock } = require('./gep/prompt');
 const { projectCapsuleForPrompt, projectGeneForPrompt, projectAssetsForPrompt } = require('./gep/assets');
 const { hubSearch } = require('./gep/hubSearch');
+const stagnationGuard = require('./gep/stagnationGuard');
 const { logAssetCall } = require('./gep/assetCallLog');
 const { extractCapabilityCandidates, renderCandidatesPreview } = require('./gep/candidates');
 const memoryAdapter = require('./gep/memoryGraphAdapter');
@@ -1395,6 +1396,23 @@ async function run() {
     hubHit = { hit: false, reason: 'exception' };
   }
 
+  // StagnationGuard (Hub asset sha256:e8b9eca2...): the stable_success_plateau /
+  // force_steady_state / evolution_saturation / empty_cycle_loop_detected signals
+  // used to be written into the prompt and then ignored by everything else.
+  // The guard turns them into a verdict that is printed, stored in the run state
+  // and recorded by solidify, so the cycle records WHY it looked redundant.
+  // Fail-safe by design: a failure inside the guard leaves the runner behaving
+  // exactly as if the guard had returned "ok" -- it never skips a cycle.
+  let stagnationVerdict = null;
+  try {
+    const matchedAssetId = hubHit && hubHit.hit ? (hubHit.asset_id || null) : null;
+    stagnationVerdict = stagnationGuard.guard(recentEvents, matchedAssetId, { root: getRepoRoot() });
+    console.log(stagnationGuard.formatVerdict(stagnationVerdict));
+  } catch (e) {
+    console.log(`[StagnationGuard] guard failed (non-fatal, cycle continues): ${e && e.message ? e.message : e}`);
+    stagnationVerdict = { verdict: 'ok', reason: 'guard_error', stalled: false, redundant: false };
+  }
+
   // Memory Graph reasoning: prefer high-confidence paths, suppress known low-success paths (unless drift is explicit).
   let memoryAdvice = null;
   try {
@@ -1617,6 +1635,7 @@ async function run() {
         reused_asset_id: hubHit && hubHit.hit ? (hubHit.asset_id || null) : null,
         reused_source_node: hubHit && hubHit.hit ? (hubHit.source_node_id || null) : null,
         reused_chain_id: hubHit && hubHit.hit ? (hubHit.chain_id || null) : null,
+        stagnation_guard: stagnationVerdict,
         baseline_untracked: baselineUntracked,
         baseline_git_head: baselineHead,
         blast_radius_estimate: blastRadiusEstimate,
