@@ -253,6 +253,57 @@
         "Solidify: record EvolutionEvent, update Gene definitions, create Capsule on success"
       ],
       "asset_id": "sha256:674538ccb9fee993638c47d2a957c8b12e5c81faadd6df0f98db3d2986dc16eb"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795021631410",
+      "trigger": [
+        "external_task",
+        "repeated_tool_usage:exec"
+      ],
+      "gene": "gene_auto_c26ae3c2",
+      "summary": "固化：gene_auto_c26ae3c2 命中信号 external_task, repeated_tool_usage:exec，变更 2 文件 / 193 行。",
+      "confidence": 0.85,
+      "blast_radius": {
+        "files": 2,
+        "lines": 193
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.85
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_auto_c26ae3c2 (optimize) matched signals [external_task, repeated_tool_usage:exec]. Scope: 2 file(s), 193 line(s) changed. Outcome score: 0.85. Strategy applied: Extract structured signals from logs and user instructions; Select an existing Gene by signals match (no improvisation); Estimate blast radius (files, lines) before editing and record it.",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_auto_c26ae3c2 (optimize)\n\nSignals: external_task, repeated_tool_usage:exec\n\nStrategy:\n1. Extract structured signals from logs and user instructions\n2. Select an existing Gene by signals match (no improvisation)\n3. Estimate blast radius (files, lines) before editing and record it\n4. Apply smallest reversible patch\n5. Validate using declared validation steps; rollback on failure\n6. Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\n\nScope: 2 file(s), 193 line(s)\n\nChanged files:\nsrc/evolve.js\ntest/stagnationGuardPropagation.test.js\n\nOutcome score: 0.85",
+      "diff": "diff --git a/assets/gep/genes.json b/assets/gep/genes.json\nindex 307fc7fd..c98b380b 100644\n--- a/assets/gep/genes.json\n+++ b/assets/gep/genes.json\n@@ -244,6 +244,48 @@\n         }\n       ],\n       \"asset_id\": \"sha256:54b937d3bf5c25d1539c700073eda606938b113e9dbb73f6b71567a98f962384\"\n+    },\n+    {\n+      \"type\": \"Gene\",\n+      \"schema_version\": \"1.6.0\",\n+      \"id\": \"gene_auto_c26ae3c2\",\n+      \"category\": \"optimize\",\n+      \"signals_match\": [\n+        \"external_task\",\n+        \"repeated_tool_usage:exec\"\n+      ],\n+      \"preconditions\": [\n+        \"signals_key == external_task|repeated_tool_usage:exec\"\n+      ],\n+      \"strategy\": [\n+        \"Extract structured signals from logs and user instructions\",\n+        \"Select an existing Gene by signals match (no improvisation)\",\n+        \"Estimate blast radius (files, lines) before editing and record it\",\n+        \"Apply smallest reversible patch\",\n+        \"Validate using declared validation steps; rollback on failure\",\n+        \"Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\"\n+      ],\n+      \"constraints\": {\n+        \"max_files\": 12,\n+        \"forbidden_paths\": [\n+          \".git\",\n+          \"node_modules\",\n+          \"skills/feishu-evolver-wrapper\",\n+          \"skills/feishu-common\",\n+          \"skills/feishu-post\",\n+          \"skills/feishu-card\",\n+          \"skills/feishu-doc\",\n+          \"skills/skill-tools\",\n+          \"skills/clawhub\",\n+          \"skills/clawhub-batch-undelete\",\n+          \"skills/git-sync\"\n+        ]\n+      },\n+      \"validation\": [\n+        \"node scripts/validate-modules.js ./src/gep/solidify\"\n+      ],\n+      \"epigenetic_marks\": [],\n+      \"asset_id\": \"sha256:18533a9787577760645f648136da7501c3a9a6668110cf533723dcfabd310152\"\n     }\n   ]\n }\ndiff --git a/src/evolve.js b/src/evolve.js\nindex ee0b765b..d259eea2 100644\n--- a/src/evolve.js\n+++ b/src/evolve.js\n@@ -756,6 +756,39 @@ function getRecentActiveSessionCount(windowMs) {\n   } catch (_) { return 0; }\n }\n \n+// Turn a stalled StagnationGuard verdict into a real cycle signal.\n+//\n+// Why this exists (cycle #0093): the guard can tell that the evolution loop\n+// sits on a stable-success plateau, but until now its verdict never reached\n+// the gene selector. selectGeneAndCapsule() only saw the raw signal list, no\n+// curated gene scored above zero, and every cycle minted a fresh gene_auto_*\n+// gene -- so the plateau was self-sustaining: detected, reported, ignored.\n+//\n+// The fix is deliberately tiny: feed the guard's OWN reason (e.g.\n+// \"stable_success_plateau\") into the cycle signals. That reason is already\n+// part of gene_gep_innovate_from_opportunity's signals_match, so the curated\n+// gene becomes selectable again without touching any matching pattern.\n+//\n+// Fail-safe by design: returns the signals array untouched when the verdict\n+// is not \"stalled\", when the reason is empty, or when anything throws.\n+function propagateStagnationSignal(signals, verdict) {\n+  try {\n+    if (!Array.isArray(signals)) return signals;\n+    if (!verdict || verdict.stalled !== true) return signals;\n+    var reason = typeof verdict.reason === 'string' ? verdict.reason.trim() : '';\n+    if (!reason) return signals;\n+    for (var i = 0; i < signals.length; i++) {\n+      if (String(signals[i]) === reason) return signals; // never duplicate\n+    }\n+    signals.push(reason);\n+    console.log('[StagnationGuard] Plateau signal ' + reason + ' injected into cycle signals (' + signals.length + ' total).');\n+    return signals;\n+  } catch (e) {\n+    console.log('[StagnationGuard] signal propagation skipped (non-fatal): ' + (e && e.message ? e.message : e));\n+    return signals;\n+  }\n+}\n+\n async function run() {\n   const bridgeEnabled = String(process.env.EVOLVE_BRIDGE || '').toLowerCase() !== 'false';\n   const loopMode = ARGS.includes('--loop') || ARGS.includes('--mad-dog') || String(process.env.EVOLVE_LOOP || '').toLowerCase() === 'true';\n@@ -1413,6 +1446,17 @@ async function run() {\n     stagnationVerdict = { verdict: 'ok', reason: 'guard_error', stalled: false, redundant: false };\n   }\n \n+  // StagnationGuard -> selector propagation (cycle #0093).\n+  // A verdict is only useful if it can change what the cycle DOES. Feed a\n+  // stalled verdict's reason into the cycle signals so the curated gene whose\n+  // signals_match already contains that reason (e.g.\n+  // gene_gep_innovate_from_opportunity / \"stable_success_plateau\") becomes a\n+  // scored candidate instead of leaving the selection empty.\n+  // The very same array instance is handed to selectGeneAndCapsule() below\n+  // and to buildGepPrompt() further down, so the plateau is also visible in\n+  // the prompt's \"Context [Signals]\" block.\n+  propagateStagnationSignal(signals, stagnationVerdict);\n+\n   // Memory Graph reasoning: prefer high-confidence paths, suppress known low-success paths (unless drift is explicit).\n   let memoryAdvice = null;\n   try {\n@@ -1503,9 +1547,13 @@ async function run() {\n   const forceInnovation =\n     String(process.env.FORCE_INNOVATION || process.env.EVOLVE_FORCE_INNOVATION || '').toLowerCase() === 'true';\n   const mutationInnovateMode = !!IS_RANDOM_DRIFT || !!innovationPressure || !!forceInnovation;\n-  const mutationSignals = innovationPressure ? [...(Array.isArray(signals) ? signals : []), 'stable_success_plateau'] : signals;\n+  // Set() so an already present plateau signal (injected above by the\n+  // stagnation guard) is never duplicated in the mutation trigger signals.\n+  const mutationSignals = innovationPressure\n+    ? Array.from(new Set([...(Array.isArray(signals) ? signals : []), 'stable_success_plateau']))\n+    : signals;\n   const mutationSignalsEffective = forceInnovation\n-    ? [...(Array.isArray(mutationSignals) ? mutationSignals : []), 'force_innovation']\n+    ? Array.from(new Set([...(Array.isArray(mutationSignals) ? mutationSignals : []), 'force_innovation']))\n     : mutationSignals;\n \n   const allowHighRisk =\n@@ -1883,5 +1931,5 @@ ${mutationDirective}\n   }\n }\n \n-module.exports = { run };\n+module.exports = { run, propagateStagnationSignal };\n \n",
+      "strategy": [
+        "Extract structured signals from logs and user instructions",
+        "Select an existing Gene by signals match (no improvisation)",
+        "Estimate blast radius (files, lines) before editing and record it",
+        "Apply smallest reversible patch",
+        "Validate using declared validation steps; rollback on failure",
+        "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
+      ],
+      "asset_id": "sha256:f17774f549b12ff0300f84b0933d47d1ee930fe2775f0730f747084df5540f4f"
     }
   ]
 }

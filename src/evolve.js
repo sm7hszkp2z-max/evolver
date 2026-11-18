@@ -756,6 +756,39 @@ function getRecentActiveSessionCount(windowMs) {
   } catch (_) { return 0; }
 }
 
+// Turn a stalled StagnationGuard verdict into a real cycle signal.
+//
+// Why this exists (cycle #0093): the guard can tell that the evolution loop
+// sits on a stable-success plateau, but until now its verdict never reached
+// the gene selector. selectGeneAndCapsule() only saw the raw signal list, no
+// curated gene scored above zero, and every cycle minted a fresh gene_auto_*
+// gene -- so the plateau was self-sustaining: detected, reported, ignored.
+//
+// The fix is deliberately tiny: feed the guard's OWN reason (e.g.
+// "stable_success_plateau") into the cycle signals. That reason is already
+// part of gene_gep_innovate_from_opportunity's signals_match, so the curated
+// gene becomes selectable again without touching any matching pattern.
+//
+// Fail-safe by design: returns the signals array untouched when the verdict
+// is not "stalled", when the reason is empty, or when anything throws.
+function propagateStagnationSignal(signals, verdict) {
+  try {
+    if (!Array.isArray(signals)) return signals;
+    if (!verdict || verdict.stalled !== true) return signals;
+    var reason = typeof verdict.reason === 'string' ? verdict.reason.trim() : '';
+    if (!reason) return signals;
+    for (var i = 0; i < signals.length; i++) {
+      if (String(signals[i]) === reason) return signals; // never duplicate
+    }
+    signals.push(reason);
+    console.log('[StagnationGuard] Plateau signal ' + reason + ' injected into cycle signals (' + signals.length + ' total).');
+    return signals;
+  } catch (e) {
+    console.log('[StagnationGuard] signal propagation skipped (non-fatal): ' + (e && e.message ? e.message : e));
+    return signals;
+  }
+}
+
 async function run() {
   const bridgeEnabled = String(process.env.EVOLVE_BRIDGE || '').toLowerCase() !== 'false';
   const loopMode = ARGS.includes('--loop') || ARGS.includes('--mad-dog') || String(process.env.EVOLVE_LOOP || '').toLowerCase() === 'true';
@@ -1413,6 +1446,17 @@ async function run() {
     stagnationVerdict = { verdict: 'ok', reason: 'guard_error', stalled: false, redundant: false };
   }
 
+  // StagnationGuard -> selector propagation (cycle #0093).
+  // A verdict is only useful if it can change what the cycle DOES. Feed a
+  // stalled verdict's reason into the cycle signals so the curated gene whose
+  // signals_match already contains that reason (e.g.
+  // gene_gep_innovate_from_opportunity / "stable_success_plateau") becomes a
+  // scored candidate instead of leaving the selection empty.
+  // The very same array instance is handed to selectGeneAndCapsule() below
+  // and to buildGepPrompt() further down, so the plateau is also visible in
+  // the prompt's "Context [Signals]" block.
+  propagateStagnationSignal(signals, stagnationVerdict);
+
   // Memory Graph reasoning: prefer high-confidence paths, suppress known low-success paths (unless drift is explicit).
   let memoryAdvice = null;
   try {
@@ -1503,9 +1547,13 @@ async function run() {
   const forceInnovation =
     String(process.env.FORCE_INNOVATION || process.env.EVOLVE_FORCE_INNOVATION || '').toLowerCase() === 'true';
   const mutationInnovateMode = !!IS_RANDOM_DRIFT || !!innovationPressure || !!forceInnovation;
-  const mutationSignals = innovationPressure ? [...(Array.isArray(signals) ? signals : []), 'stable_success_plateau'] : signals;
+  // Set() so an already present plateau signal (injected above by the
+  // stagnation guard) is never duplicated in the mutation trigger signals.
+  const mutationSignals = innovationPressure
+    ? Array.from(new Set([...(Array.isArray(signals) ? signals : []), 'stable_success_plateau']))
+    : signals;
   const mutationSignalsEffective = forceInnovation
-    ? [...(Array.isArray(mutationSignals) ? mutationSignals : []), 'force_innovation']
+    ? Array.from(new Set([...(Array.isArray(mutationSignals) ? mutationSignals : []), 'force_innovation']))
     : mutationSignals;
 
   const allowHighRisk =
@@ -1883,5 +1931,5 @@ ${mutationDirective}
   }
 }
 
-module.exports = { run };
+module.exports = { run, propagateStagnationSignal };
 
