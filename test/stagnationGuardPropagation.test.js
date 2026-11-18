@@ -19,7 +19,16 @@ function loadGenePool() {
   const file = path.join(__dirname, '..', 'assets', 'gep', 'genes.json');
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   const genes = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.genes) ? raw.genes : []);
-  return genes.filter(function (g) { return g && g.type === 'Gene'; });
+  // Only the curated genes (the hand-written ones) are used here, on purpose.
+  // The live pool gains a fresh gene_auto_* gene on every solidify, and those
+  // auto genes match the cycle's raw signals. Coupling this test to the live
+  // pool therefore made it fail on the very cycle that landed it (cycle
+  // #0093: gene_auto_c26ae3c2 matched external_task|repeated_tool_usage:exec
+  // and outscored the curated plateau gene). The contract under test is about
+  // the curated pool, so the pool is pinned to it.
+  return genes.filter(function (g) {
+    return g && g.type === 'Gene' && !/^gene_auto_/.test(String(g.id || ''));
+  });
 }
 
 // Mirror of the guard block in src/evolve.js: the guard runs inside a
