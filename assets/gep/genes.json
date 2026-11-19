@@ -131,14 +131,14 @@
           "context": "linux/x64/v24.22.1",
           "boost": 0.5,
           "reason": "reinforced_by_success",
-          "created_at": "2026-11-17T17:10:37.411Z"
+          "created_at": "2026-11-19T17:06:49.984Z"
         }
       ],
       "schema_version": "1.6.0",
       "asset_id": "sha256:17afe80de570e9dd685918589c238932fc8692ae6700ec864aaba834e40e5082",
-      "source_type": "reference",
-      "reused_asset_id": "sha256:e8b9eca2159a6bb09354917e6484f8999bad4e52179560bb7d8dd97d8e6734d5",
-      "hub_asset_id": "sha256:e8b9eca2159a6bb09354917e6484f8999bad4e52179560bb7d8dd97d8e6734d5"
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "hub_asset_id": null
     },
     {
       "type": "Gene",

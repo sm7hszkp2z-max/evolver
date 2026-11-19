@@ -304,6 +304,59 @@
         "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
       ],
       "asset_id": "sha256:f17774f549b12ff0300f84b0933d47d1ee930fe2775f0730f747084df5540f4f"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795108009963",
+      "trigger": [
+        "bounty_task",
+        "external_task",
+        "user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。",
+        "stable_success_plateau"
+      ],
+      "gene": "gene_gep_innovate_from_opportunity",
+      "summary": "固化：gene_gep_innovate_from_opportunity 命中信号 bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau，变更 3 文件 / 361 行。",
+      "confidence": 0.85,
+      "blast_radius": {
+        "files": 3,
+        "lines": 361
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.85
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_gep_innovate_from_opportunity (innovate) matched signals [bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau]. Scope: 3 file(s), 361 line(s) changed. Outcome score: 0.85. Strategy applied: Extract opportunity signals and identify the specific user need or system gap; Search existing Genes and Capsules for partial matches (avoid reinventing); Design a minimal, testable implementation plan (prefer small increments).",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_gep_innovate_from_opportunity (innovate)\n\nSignals: bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau\n\nStrategy:\n1. Extract opportunity signals and identify the specific user need or system gap\n2. Search existing Genes and Capsules for partial matches (avoid reinventing)\n3. Design a minimal, testable implementation plan (prefer small increments)\n4. Estimate blast radius; innovate changes may touch more files but must stay within constraints\n5. Implement the change with clear validation criteria\n6. Validate using declared validation steps; rollback on failure\n7. Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\n\nScope: 3 file(s), 361 line(s)\n\nChanged files:\nskills/exec-redundancy-auditor/index.js\nskills/exec-redundancy-auditor/package.json\nskills/exec-redundancy-auditor/scripts/selftest.js\n\nOutcome score: 0.85",
+      "strategy": [
+        "Extract opportunity signals and identify the specific user need or system gap",
+        "Search existing Genes and Capsules for partial matches (avoid reinventing)",
+        "Design a minimal, testable implementation plan (prefer small increments)",
+        "Estimate blast radius; innovate changes may touch more files but must stay within constraints",
+        "Implement the change with clear validation criteria",
+        "Validate using declared validation steps; rollback on failure",
+        "Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success"
+      ],
+      "asset_id": "sha256:9233f94a305a2ac5e08b6e5ce65717468839683d3b3d506dca547b1734ca514e"
     }
   ]
 }
