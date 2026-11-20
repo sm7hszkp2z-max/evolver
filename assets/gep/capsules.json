@@ -316,18 +316,18 @@
         "stable_success_plateau"
       ],
       "gene": "gene_gep_innovate_from_opportunity",
-      "summary": "固化：gene_gep_innovate_from_opportunity 命中信号 bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau，变更 3 文件 / 361 行。",
+      "summary": "Resolve nested skill dependency references in their owning repository so symlinked evolver skills do not emit false integration failures; retain real missing-file detection.",
       "confidence": 0.85,
       "blast_radius": {
-        "files": 3,
-        "lines": 361
+        "files": 2,
+        "lines": 71
       },
       "outcome": {
         "status": "success",
         "score": 0.85
       },
-      "success_streak": 1,
-      "success_reason": "Gene gene_gep_innovate_from_opportunity (innovate) matched signals [bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau]. Scope: 3 file(s), 361 line(s) changed. Outcome score: 0.85. Strategy applied: Extract opportunity signals and identify the specific user need or system gap; Search existing Genes and Capsules for partial matches (avoid reinventing); Design a minimal, testable implementation plan (prefer small increments).",
+      "success_streak": 2,
+      "success_reason": "Gene gene_gep_innovate_from_opportunity (innovate) matched signals [bounty_task, external_task, integration_key_missing, missing_integration_file:skills/exec-redundancy-auditor/index.js]. Scope: 2 file(s), 71 line(s) changed. Outcome score: 0.85. Strategy applied: Extract opportunity signals and identify the specific user need or system gap; Search existing Genes and Capsules for partial matches (avoid reinventing); Design a minimal, testable implementation plan (prefer small increments).",
       "env_fingerprint": {
         "device_id": "c406356c3d798921841c5266a132e719",
         "node_version": "v24.22.1",
@@ -341,12 +341,13 @@
         "cwd": "8f88cfd236fa",
         "container": false
       },
-      "source_type": "generated",
-      "reused_asset_id": null,
+      "source_type": "reference",
+      "reused_asset_id": "sha256:0066765ee17ca24c5eb3edffe98b2133a6d8b0f56ee11a383c3299ae0e2267df",
       "a2a": {
-        "eligible_to_broadcast": false
+        "eligible_to_broadcast": true
       },
-      "content": "Gene: gene_gep_innovate_from_opportunity (innovate)\n\nSignals: bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau\n\nStrategy:\n1. Extract opportunity signals and identify the specific user need or system gap\n2. Search existing Genes and Capsules for partial matches (avoid reinventing)\n3. Design a minimal, testable implementation plan (prefer small increments)\n4. Estimate blast radius; innovate changes may touch more files but must stay within constraints\n5. Implement the change with clear validation criteria\n6. Validate using declared validation steps; rollback on failure\n7. Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\n\nScope: 3 file(s), 361 line(s)\n\nChanged files:\nskills/exec-redundancy-auditor/index.js\nskills/exec-redundancy-auditor/package.json\nskills/exec-redundancy-auditor/scripts/selftest.js\n\nOutcome score: 0.85",
+      "content": "Gene: gene_gep_innovate_from_opportunity (innovate)\n\nSignals: bounty_task, external_task, integration_key_missing, missing_integration_file:skills/exec-redundancy-auditor/index.js, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。, stable_success_plateau\n\nStrategy:\n1. Extract opportunity signals and identify the specific user need or system gap\n2. Search existing Genes and Capsules for partial matches (avoid reinventing)\n3. Design a minimal, testable implementation plan (prefer small increments)\n4. Estimate blast radius; innovate changes may touch more files but must stay within constraints\n5. Implement the change with clear validation criteria\n6. Validate using declared validation steps; rollback on failure\n7. Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success\n\nScope: 2 file(s), 71 line(s)\n\nChanged files:\nsrc/ops/skills_monitor.js\ntest/skillsMonitor.test.js\n\nOutcome score: 0.85",
+      "diff": "diff --git a/src/ops/skills_monitor.js b/src/ops/skills_monitor.js\nindex 1c78781d..feb4b521 100644\n--- a/src/ops/skills_monitor.js\n+++ b/src/ops/skills_monitor.js\n@@ -174,15 +174,33 @@ function collectSkillJsFiles(skillsDir, skillName) {\n     return out;\n }\n \n-function resolveDepTarget(workspaceRoot, skillName, fileName) {\n+// A scanned skill may itself contain a skills/ tree (e.g. the evolver repo\n+// installed through a workspace symlink). Resolve those local references in\n+// their source context, not exclusively against unrelated workspace siblings.\n+function sourceSkillRoots(sourceFile, skillPath) {\n+    var roots = [path.join(skillPath, 'skills')];\n+    var dir = path.dirname(sourceFile);\n+    var boundary = path.resolve(skillPath);\n+    while (dir === boundary || dir.startsWith(boundary + path.sep)) {\n+        if (path.basename(dir) === 'skills' && roots.indexOf(dir) === -1) roots.push(dir);\n+        if (dir === boundary) break;\n+        dir = path.dirname(dir);\n+    }\n+    return roots;\n+}\n+\n+function resolveDepTarget(workspaceRoot, skillName, fileName, localRoots) {\n     var candidates = [\n         path.join(workspaceRoot, 'skills', skillName, fileName),\n         path.join(workspaceRoot, 'skills', skillName, 'scripts', fileName),\n         path.join(workspaceRoot, '.openclaw', 'plugin-skills', skillName, fileName),\n         path.join(os.homedir(), '.openclaw', 'plugin-skills', skillName, fileName),\n     ];\n+    for (var root of (localRoots || [])) {\n+        candidates.unshift(path.join(root, skillName, fileName), path.join(root, skillName, 'scripts', fileName));\n+    }\n     for (var i = 0; i < candidates.length; i++) {\n-        try { if (fs.existsSync(candidates[i])) return candidates[i]; } catch (e) {}\n+        try { if (fs.statSync(candidates[i]).isFile()) return candidates[i]; } catch (e) {}\n     }\n     return null;\n }\n@@ -252,10 +270,10 @@ function isSkillDirInFlux(workspaceRoot, skillName) {\n // Re-check an absent target a few times: a genuinely missing file stays\n // missing, a file that is momentarily absent (directory rewrite) reappears.\n // Returns true when the target is still absent after every attempt.\n-function confirmDepTargetAbsent(workspaceRoot, skillName, fileName) {\n+function confirmDepTargetAbsent(workspaceRoot, skillName, fileName, localRoots) {\n     for (var attempt = 0; attempt < DEP_CHECK_ATTEMPTS; attempt++) {\n         sleepSync(DEP_CHECK_DELAY_MS);\n-        if (resolveDepTarget(workspaceRoot, skillName, fileName)) return false;\n+        if (resolveDepTarget(workspaceRoot, skillName, fileName, localRoots)) return false;\n     }\n     return true;\n }\n@@ -286,6 +304,7 @@ function findMissingSkillDependencies(options) {\n         for (var f = 0; f < files.length; f++) {\n             var content;\n             try { content = stripComments(fs.readFileSync(files[f], 'utf8')); } catch (e) { continue; }\n+            var localRoots = sourceSkillRoots(files[f], skillPath);\n             for (var p = 0; p < DEP_REF_PATTERNS.length; p++) {\n                 var re = new RegExp(DEP_REF_PATTERNS[p].source, 'gi');\n                 var m;\n@@ -295,10 +314,10 @@ function findMissingSkillDependencies(options) {\n                     if (depSkill === skillName) continue;\n                     var target = 'skills/' + depSkill + '/' + depFile;\n                     if (seen.has(target)) continue;\n-                    if (resolveDepTarget(workspaceRoot, depSkill, depFile)) continue;\n+                    if (resolveDepTarget(workspaceRoot, depSkill, depFile, localRoots)) continue;\n                     // Stability check: the target may be momentarily absent\n                     // because the skill directory is being rewritten right now.\n-                    if (!confirmDepTargetAbsent(workspaceRoot, depSkill, depFile)) {\n+                    if (!confirmDepTargetAbsent(workspaceRoot, depSkill, depFile, localRoots)) {\n                         seen.add(target);\n                         continue;\n                     }\n",
       "strategy": [
         "Extract opportunity signals and identify the specific user need or system gap",
         "Search existing Genes and Capsules for partial matches (avoid reinventing)",
@@ -356,7 +357,7 @@
         "Validate using declared validation steps; rollback on failure",
         "Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success"
       ],
-      "asset_id": "sha256:9233f94a305a2ac5e08b6e5ce65717468839683d3b3d506dca547b1734ca514e"
+      "asset_id": "sha256:da545b17e96e267ed00e843d7dbf2916709c76addbdbe9eb0f511b7a6e67c5e3"
     }
   ]
 }

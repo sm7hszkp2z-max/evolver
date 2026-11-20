@@ -174,15 +174,33 @@ function collectSkillJsFiles(skillsDir, skillName) {
     return out;
 }
 
-function resolveDepTarget(workspaceRoot, skillName, fileName) {
+// A scanned skill may itself contain a skills/ tree (e.g. the evolver repo
+// installed through a workspace symlink). Resolve those local references in
+// their source context, not exclusively against unrelated workspace siblings.
+function sourceSkillRoots(sourceFile, skillPath) {
+    var roots = [path.join(skillPath, 'skills')];
+    var dir = path.dirname(sourceFile);
+    var boundary = path.resolve(skillPath);
+    while (dir === boundary || dir.startsWith(boundary + path.sep)) {
+        if (path.basename(dir) === 'skills' && roots.indexOf(dir) === -1) roots.push(dir);
+        if (dir === boundary) break;
+        dir = path.dirname(dir);
+    }
+    return roots;
+}
+
+function resolveDepTarget(workspaceRoot, skillName, fileName, localRoots) {
     var candidates = [
         path.join(workspaceRoot, 'skills', skillName, fileName),
         path.join(workspaceRoot, 'skills', skillName, 'scripts', fileName),
         path.join(workspaceRoot, '.openclaw', 'plugin-skills', skillName, fileName),
         path.join(os.homedir(), '.openclaw', 'plugin-skills', skillName, fileName),
     ];
+    for (var root of (localRoots || [])) {
+        candidates.unshift(path.join(root, skillName, fileName), path.join(root, skillName, 'scripts', fileName));
+    }
     for (var i = 0; i < candidates.length; i++) {
-        try { if (fs.existsSync(candidates[i])) return candidates[i]; } catch (e) {}
+        try { if (fs.statSync(candidates[i]).isFile()) return candidates[i]; } catch (e) {}
     }
     return null;
 }
@@ -252,10 +270,10 @@ function isSkillDirInFlux(workspaceRoot, skillName) {
 // Re-check an absent target a few times: a genuinely missing file stays
 // missing, a file that is momentarily absent (directory rewrite) reappears.
 // Returns true when the target is still absent after every attempt.
-function confirmDepTargetAbsent(workspaceRoot, skillName, fileName) {
+function confirmDepTargetAbsent(workspaceRoot, skillName, fileName, localRoots) {
     for (var attempt = 0; attempt < DEP_CHECK_ATTEMPTS; attempt++) {
         sleepSync(DEP_CHECK_DELAY_MS);
-        if (resolveDepTarget(workspaceRoot, skillName, fileName)) return false;
+        if (resolveDepTarget(workspaceRoot, skillName, fileName, localRoots)) return false;
     }
     return true;
 }
@@ -286,6 +304,7 @@ function findMissingSkillDependencies(options) {
         for (var f = 0; f < files.length; f++) {
             var content;
             try { content = stripComments(fs.readFileSync(files[f], 'utf8')); } catch (e) { continue; }
+            var localRoots = sourceSkillRoots(files[f], skillPath);
             for (var p = 0; p < DEP_REF_PATTERNS.length; p++) {
                 var re = new RegExp(DEP_REF_PATTERNS[p].source, 'gi');
                 var m;
@@ -295,10 +314,10 @@ function findMissingSkillDependencies(options) {
                     if (depSkill === skillName) continue;
                     var target = 'skills/' + depSkill + '/' + depFile;
                     if (seen.has(target)) continue;
-                    if (resolveDepTarget(workspaceRoot, depSkill, depFile)) continue;
+                    if (resolveDepTarget(workspaceRoot, depSkill, depFile, localRoots)) continue;
                     // Stability check: the target may be momentarily absent
                     // because the skill directory is being rewritten right now.
-                    if (!confirmDepTargetAbsent(workspaceRoot, depSkill, depFile)) {
+                    if (!confirmDepTargetAbsent(workspaceRoot, depSkill, depFile, localRoots)) {
                         seen.add(target);
                         continue;
                     }
