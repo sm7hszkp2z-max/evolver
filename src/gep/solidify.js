@@ -1003,6 +1003,76 @@ function isGitRepo(dir) {
   }
 }
 
+// --- Measured outcome score -------------------------------------------------
+// outcome.score used to be a hardcoded constant (0.85 on success, 0.2 on
+// failure). Because StagnationGuard measures the plateau by the VARIANCE of
+// outcome.score over the last N cycles, a constant made that variance
+// structurally 0.000000: the guard reported "stalled / stable_success_plateau"
+// forever and its verdict carried no information about real progress.
+//
+// The score is now MEASURED from the evidence that already exists in a cycle:
+//   - validation pass ratio (how many of the gene's validation commands passed)
+//   - constraint violations / protocol violations
+//   - canary result
+//   - blast radius (mild penalty for a very large footprint)
+//   - capsule reuse rejection
+//
+// Failure semantics are unchanged: success is still
+//   constraintCheck.ok && validation.ok && protocolViolations.length === 0
+// and a failed cycle always scores <= 0.2 so skillDistiller and the publish
+// gate keep excluding it. A fully passing cycle stays inside [0.78, 0.95] so
+// the auto-publish gate (minPublishScore = 0.78) still accepts it.
+const OUTCOME_SCORE_SUCCESS_MIN = 0.78;
+const OUTCOME_SCORE_SUCCESS_MAX = 0.95;
+const OUTCOME_SCORE_FAILED_MAX = 0.2;
+
+function computeOutcomeScore(evidence) {
+  const ev = evidence && typeof evidence === 'object' ? evidence : {};
+  const validation = ev.validation && typeof ev.validation === 'object' ? ev.validation : {};
+  const results = Array.isArray(validation.results) ? validation.results : [];
+  const constraintCheck = ev.constraintCheck && typeof ev.constraintCheck === 'object' ? ev.constraintCheck : {};
+  const canary = ev.canary && typeof ev.canary === 'object' ? ev.canary : {};
+  const protocolViolations = Array.isArray(ev.protocolViolations) ? ev.protocolViolations : [];
+  const blast = ev.blast && typeof ev.blast === 'object' ? ev.blast : {};
+
+  const passed = results.filter(function (r) { return r && r.ok; }).length;
+  const total = results.length;
+  const passRatio = total > 0 ? passed / total : 0;
+
+  // Mirror the solidify failure semantics exactly; only fall back to the raw
+  // result list when validation.ok is not a boolean.
+  const validationOk = typeof validation.ok === 'boolean'
+    ? validation.ok
+    : (total > 0 ? passed === total : true);
+  const constraintsOk = constraintCheck.ok !== false;
+  const protocolOk = protocolViolations.length === 0;
+  const success = constraintsOk && validationOk && protocolOk;
+
+  if (!success) {
+    // Failed cycles stay low (never above 0.2) but keep a small positive value
+    // so partial evidence (some validation commands passed) is still visible.
+    const violationCount =
+      (Array.isArray(constraintCheck.violations) ? constraintCheck.violations.length : 0) +
+      protocolViolations.length;
+    const failPenalty = Math.min(0.05, violationCount * 0.01);
+    const base = Math.max(0.05, OUTCOME_SCORE_FAILED_MAX - failPenalty);
+    return clamp01(base * (0.5 + 0.5 * passRatio));
+  }
+
+  // Success path: start from the top of the band and move with the evidence.
+  const depth = total > 0 ? Math.min(1, (passed - 1) / 3) : 0;
+  let score = 0.90;
+  score += 0.02 * depth;                                   // more validation evidence
+  if (canary.ok && !canary.skipped) score += 0.01;         // canary actually ran
+  score -= 0.05 * (1 - passRatio);                         // defensive: partial pass
+  score -= 0.02 * (Number(blast.files) > 20 ? Math.min(2, (Number(blast.files) - 20) / 10) : 0);
+  score -= 0.03 * (Number(blast.lines) > 2000 ? Math.min(2, (Number(blast.lines) - 2000) / 2000) : 0);
+  if (ev.capsuleReuseRejected) score -= 0.02;
+  score = Math.min(score, OUTCOME_SCORE_SUCCESS_MAX);
+  score = Math.max(score, OUTCOME_SCORE_SUCCESS_MIN);
+  return clamp01(score);
+}
+
 function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } = {}) {
   const repoRoot = getRepoRoot();
 
@@ -1147,7 +1217,6 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
   const success = constraintCheck.ok && validation.ok && protocolViolations.length === 0;
   const ts = nowIso();
   const outcomeStatus = success ? 'success' : 'failed';
-  const score = clamp01(success ? 0.85 : 0.2);
 
   const selectedCapsuleId =
     lastRun && typeof lastRun.selected_capsule_id === 'string' && lastRun.selected_capsule_id.trim()
@@ -1179,6 +1248,17 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
   const capsuleId = success
     ? (selectedCapsuleId && !capsuleReuseRejected ? selectedCapsuleId : buildCapsuleId(ts))
     : null;
+
+  // Measured outcome score (see computeOutcomeScore). The score is computed
+  // after the capsule resolution so that capsuleReuseRejected can feed into it.
+  const score = computeOutcomeScore({
+    validation: validation,
+    constraintCheck: constraintCheck,
+    canary: canary,
+    protocolViolations: protocolViolations,
+    blast: blast,
+    capsuleReuseRejected: capsuleReuseRejected,
+  });
 
   // Intent resolution. Documented precedence:
   //   1) the category of the gene that actually lands in genes_used
@@ -1758,6 +1838,7 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
 
 module.exports = {
   solidify,
+  computeOutcomeScore,
   isGitRepo,
   readStateForSolidify,
   writeStateForSolidify,
