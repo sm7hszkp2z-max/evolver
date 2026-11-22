@@ -296,6 +296,52 @@
       "source_type": "generated",
       "reused_asset_id": null,
       "hub_asset_id": null
+    },
+    {
+      "type": "Gene",
+      "schema_version": "1.6.0",
+      "id": "gene_gep_innovate_dependency_scanner",
+      "category": "innovate",
+      "signals_match": [
+        "evolution_stagnation_detected",
+        "stable_success_plateau"
+      ],
+      "preconditions": [
+        "no log_error blocking signal in the cycle",
+        "stagnation guard verdict is stalled (stable_success_plateau over the window)"
+      ],
+      "strategy": [
+        "Read the stagnation verdict and the real trigger signals before selecting any gene",
+        "Run the skill-overlap check against skills/ and the local skill catalog, and drop overlapping catalyst ideas",
+        "Pick one non-overlapping capability idea and build it as an offline, deterministic, self-tested skill under skills/<name>/",
+        "Create every skill file in one cycle (index.js, SKILL.md, package.json, scripts/selftest.js) with no network calls and no secrets",
+        "Register a new innovate-category gene in assets/gep/genes.json (object form {version, genes}) with matching signals_match and offline validation commands",
+        "Align the run state to the innovate gene before solidify so genes_used, intent and mutation category agree",
+        "Run the declared validation commands, then solidify, commit and push"
+      ],
+      "constraints": {
+        "max_files": 25,
+        "forbidden_paths": [
+          ".git",
+          "node_modules"
+        ]
+      },
+      "validation": [
+        "node scripts/validate-modules.js ./src/evolve ./src/gep/solidify",
+        "node skills/dependency-scanner/scripts/selftest.js"
+      ],
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "hub_asset_id": null,
+      "epigenetic_marks": [
+        {
+          "context": "linux/x64/v24.22.1",
+          "boost": 0.1,
+          "reason": "success_in_environment",
+          "created_at": "2026-11-22T17:08:30.666Z"
+        }
+      ],
+      "asset_id": "sha256:f8107f508f505c3a395b33acc39fa35acbeda3e5cdfcc5e0f928b53d62698c34"
     }
   ]
 }

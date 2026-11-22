@@ -358,6 +358,59 @@
         "Solidify: record EvolutionEvent with intent=innovate, create new Gene if pattern is novel, create Capsule on success"
       ],
       "asset_id": "sha256:677f17416739945494e5d784d6b6d4e082d2968d3cddea6bcb15f6c76beb3a7f"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795367310645",
+      "trigger": [
+        "external_task",
+        "evolution_stagnation_detected",
+        "stable_success_plateau"
+      ],
+      "gene": "gene_gep_innovate_dependency_scanner",
+      "summary": "固化：gene_gep_innovate_dependency_scanner 命中信号 external_task, evolution_stagnation_detected, stable_success_plateau，变更 3 文件 / 800 行。",
+      "confidence": 0.8966666666666667,
+      "blast_radius": {
+        "files": 3,
+        "lines": 800
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.8966666666666667
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_gep_innovate_dependency_scanner (innovate) matched signals [external_task, evolution_stagnation_detected, stable_success_plateau]. Scope: 3 file(s), 800 line(s) changed. Outcome score: 0.90. Strategy applied: Read the stagnation verdict and the real trigger signals before selecting any gene; Run the skill-overlap check against skills/ and the local skill catalog, and drop overlapping catalyst ideas; Pick one non-overlapping capability idea and build it as an offline, deterministic, self-tested skill unde.",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Intent: innovate\n\nGene: gene_gep_innovate_dependency_scanner (innovate)\n\nSignals: external_task, evolution_stagnation_detected, stable_success_plateau\n\nStrategy:\n1. Read the stagnation verdict and the real trigger signals before selecting any gene\n2. Run the skill-overlap check against skills/ and the local skill catalog, and drop overlapping catalyst ideas\n3. Pick one non-overlapping capability idea and build it as an offline, deterministic, self-tested skill under skills/<name>/\n4. Create every skill file in one cycle (index.js, SKILL.md, package.json, scripts/selftest.js) with no network calls and no secrets\n5. Register a new innovate-category gene in assets/gep/genes.json (object form {version, genes}) with matching signals_match and offline validation commands\n6. Align the run state to the innovate gene before solidify so genes_used, intent and mutation category agree\n7. Run the declared validation commands, then solidify, commit and push\n\nScope: 3 file(s), 800 line(s)\n\nChanged files:\nskills/dependency-scanner/index.js\nskills/dependency-scanner/package.json\nskills/dependency-scanner/scripts/selftest.js\n\nOutcome score: 0.90",
+      "diff": "diff --git a/assets/gep/genes.json b/assets/gep/genes.json\nindex b612b47f..ca7245e1 100644\n--- a/assets/gep/genes.json\n+++ b/assets/gep/genes.json\n@@ -296,6 +296,40 @@\n       \"source_type\": \"generated\",\n       \"reused_asset_id\": null,\n       \"hub_asset_id\": null\n+    },\n+{\n+      \"type\": \"Gene\",\n+      \"schema_version\": \"1.6.0\",\n+      \"id\": \"gene_gep_innovate_dependency_scanner\",\n+      \"category\": \"innovate\",\n+      \"signals_match\": [\n+        \"evolution_stagnation_detected\",\n+        \"stable_success_plateau\"\n+      ],\n+      \"preconditions\": [\n+        \"no log_error blocking signal in the cycle\",\n+        \"stagnation guard verdict is stalled (stable_success_plateau over the window)\"\n+      ],\n+      \"strategy\": [\n+        \"Read the stagnation verdict and the real trigger signals before selecting any gene\",\n+        \"Run the skill-overlap check against skills/ and the local skill catalog, and drop overlapping catalyst ideas\",\n+        \"Pick one non-overlapping capability idea and build it as an offline, deterministic, self-tested skill under skills/<name>/\",\n+        \"Create every skill file in one cycle (index.js, SKILL.md, package.json, scripts/selftest.js) with no network calls and no secrets\",\n+        \"Register a new innovate-category gene in assets/gep/genes.json (object form {version, genes}) with matching signals_match and offline validation commands\",\n+        \"Align the run state to the innovate gene before solidify so genes_used, intent and mutation category agree\",\n+        \"Run the declared validation commands, then solidify, commit and push\"\n+      ],\n+      \"constraints\": {\n+        \"max_files\": 25,\n+        \"forbidden_paths\": [\n+          \".git\",\n+          \"node_modules\"\n+        ]\n+      },\n+      \"validation\": [\n+        \"node scripts/validate-modules.js ./src/evolve ./src/gep/solidify\",\n+        \"node skills/dependency-scanner/scripts/selftest.js\"\n+      ]\n     }\n   ]\n }\n",
+      "strategy": [
+        "Read the stagnation verdict and the real trigger signals before selecting any gene",
+        "Run the skill-overlap check against skills/ and the local skill catalog, and drop overlapping catalyst ideas",
+        "Pick one non-overlapping capability idea and build it as an offline, deterministic, self-tested skill under skills/<name>/",
+        "Create every skill file in one cycle (index.js, SKILL.md, package.json, scripts/selftest.js) with no network calls and no secrets",
+        "Register a new innovate-category gene in assets/gep/genes.json (object form {version, genes}) with matching signals_match and offline validation commands",
+        "Align the run state to the innovate gene before solidify so genes_used, intent and mutation category agree",
+        "Run the declared validation commands, then solidify, commit and push"
+      ],
+      "asset_id": "sha256:e568b792e767bdb8fd71ab1fd2a11307e31dd1fc510cbf56d1b49ebfc5afe364"
     }
   ]
 }
