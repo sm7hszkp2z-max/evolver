@@ -27,6 +27,20 @@ function matchPatternToSignals(pattern, signals) {
   return sig.some(s => s.toLowerCase().includes(needle));
 }
 
+// The strongest prior success recorded for a gene (its epigenetic boost).
+// Used as the deterministic tie-break between genes that match the same
+// signals: the gene that has actually succeeded here before wins.
+function epigeneticBoost(gene) {
+  if (!gene || !Array.isArray(gene.epigenetic_marks)) return 0;
+  var best = 0;
+  for (var i = 0; i < gene.epigenetic_marks.length; i++) {
+    var m = gene.epigenetic_marks[i];
+    var b = m && typeof m.boost === 'number' ? m.boost : 0;
+    if (b > best) best = b;
+  }
+  return best;
+}
+
 function scoreGene(gene, signals) {
   if (!gene || gene.type !== 'Gene') return 0;
   const patterns = Array.isArray(gene.signals_match) ? gene.signals_match : [];
@@ -99,7 +113,11 @@ function selectGene(genes, signals, opts) {
       return { gene: g, score: s };
     })
     .filter(x => x.score > 0)
-    .sort((a, b) => b.score - a.score);
+    // Deterministic tie-break: two genes that match the same signals are not
+    // equally good. The one with the stronger prior success in this
+    // environment wins, so the selection stays reproducible and auditable
+    // instead of coin-flipping between equivalent-looking genes.
+    .sort((a, b) => (b.score - a.score) || (epigeneticBoost(b.gene) - epigeneticBoost(a.gene)));
 
   if (scored.length === 0) return { selected: null, alternatives: [], driftIntensity: driftIntensity };
 
@@ -150,12 +168,20 @@ function selectGene(genes, signals, opts) {
   const pool = gatedPool.length > 0 ? gatedPool : filtered;
 
   // Stochastic selection under drift: with probability proportional to driftIntensity,
-  // pick a random gene from the top candidates instead of always picking the best.
+  // pick among the candidates that the evidence cannot distinguish. Two genes
+  // that match the same signals AND carry the same prior success are
+  // equivalent, so drift explores between them. A gene with a stronger track
+  // record always wins, which keeps the outcome stable for a given signal
+  // profile instead of random.
   var selectedIdx = 0;
   if (driftIntensity > 0 && pool.length > 1 && Math.random() < driftIntensity) {
-    // Weighted random selection from top candidates (favor higher-scoring but allow lower)
-    var topN = Math.min(pool.length, Math.max(2, Math.ceil(pool.length * driftIntensity)));
-    selectedIdx = Math.floor(Math.random() * topN);
+    var best = pool[0];
+    var tied = pool.filter(function (x) {
+      return x.score === best.score && epigeneticBoost(x.gene) === epigeneticBoost(best.gene);
+    });
+    if (tied.length > 1) {
+      selectedIdx = pool.indexOf(tied[Math.floor(Math.random() * tied.length)]);
+    }
   }
 
   return {

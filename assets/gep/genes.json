@@ -342,6 +342,53 @@
         }
       ],
       "asset_id": "sha256:f8107f508f505c3a395b33acc39fa35acbeda3e5cdfcc5e0f928b53d62698c34"
+    },
+    {
+      "type": "Gene",
+      "id": "gene_gep_innovate_scoped_error_evidence",
+      "category": "innovate",
+      "signals_match": [
+        "evolution_stagnation_detected",
+        "stable_success_plateau"
+      ],
+      "preconditions": [
+        "the stagnation guard reports a plateau, or the cycle signals carry evolution_stagnation_detected",
+        "the coarse log_error tag fires without a live error line, or it disagrees with the fine errsig: signature"
+      ],
+      "strategy": [
+        "Locate the real source of the signal instead of regex-matching the whole corpus",
+        "Classify every candidate line as LIVE failure evidence or a QUOTED / already-resolved artifact",
+        "Derive the coarse log_error tag and the fine errsig: signature from one verdict so they can never disagree",
+        "Keep the classifier inside the skill that already owns signal hygiene; never create a second, overlapping skill",
+        "Prove the behaviour with a regression test: quoted failures stay silent, direct failures stay loud"
+      ],
+      "constraints": {
+        "max_files": 12,
+        "forbidden_paths": [
+          ".git",
+          "node_modules",
+          "skills/evolver",
+          "skills/feishu-evolver-wrapper"
+        ]
+      },
+      "validation": [
+        "node --test test/",
+        "node scripts/validate-modules.js ./src/gep/assetStore ./src/gep/skillDistiller ./src/gep/solidify ./src/gep/selector",
+        "node skills/signal-hygiene/scripts/selftest.js"
+      ],
+      "schema_version": "1.6.0",
+      "source_type": "reference",
+      "reused_asset_id": "sha256:52094b9fe9d1cc2f5506103a130681287dfb8739b1da37b048d05ca58a80d44a",
+      "hub_asset_id": "sha256:52094b9fe9d1cc2f5506103a130681287dfb8739b1da37b048d05ca58a80d44a",
+      "epigenetic_marks": [
+        {
+          "context": "linux/x64/v24.22.1",
+          "boost": 0.1,
+          "reason": "success_in_environment",
+          "created_at": "2026-11-23T17:12:24.751Z"
+        }
+      ],
+      "asset_id": "sha256:b3b653ea57ef6ce148fd7ec2f140f8274a9f6abb7e26d459fc862d179a671163"
     }
   ]
 }

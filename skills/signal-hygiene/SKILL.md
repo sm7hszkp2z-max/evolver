@@ -84,6 +84,9 @@ families (`errsig:boom`), the canonical name for aliases (`bottleneck` ->
 - `isKnownSignal(token)`
 - `resolveSignal(token)`
 - `normalizeToken(token)`
+- @BT@classifyErrorEvidence(lines)@BT@ - live vs. quoted failure evidence
+- @BT@isQuotedArtifact(line)@BT@ / @BT@hasJsonPayload(line)@BT@ / @BT@stripJsonPayload(line)@BT@
+- @BT@DIRECT_ERROR_RE@BT@ / @BT@STRONG_ERROR_RE@BT@ / @BT@SUCCESS_REPORT_RE@BT@ / @BT@WEAK_ERROR_RE@BT@
 
 ## Wiring (already done, keep it that way)
 
@@ -101,6 +104,49 @@ are canonical signals -- keep pushing them directly.
 Any new signal name that this repository starts emitting must be added to
 `KNOWN_SIGNALS` (or `KNOWN_SIGNAL_PATTERNS`); otherwise the sanitizer will
 drop it and the cycle will never see it.
+
+### `classifyErrorEvidence(lines) -> verdict`
+
+Decides whether a failure is **live** or merely **quoted**. This is the single
+source of truth for both the coarse `log_error` tag and the fine
+`errsig:` signature in `src/gep/signals.js`, so the two can never
+disagree.
+
+```js
+var hygiene = require('../../skills/signal-hygiene');
+
+hygiene.classifyErrorEvidence(['error: cannot read file']);
+// -> { live: true, direct: true, quoted: false, success: false,
+//      line: 'error: cannot read file', lines: [...], reason: 'live_direct_failure' }
+
+hygiene.classifyErrorEvidence([
+  '**TOOLRESULT**: {"status":"failed","code":"invalid_input","error":"SyntaxError at x.js:1"}'
+]);
+// -> { live: false, direct: false, quoted: true, success: false,
+//      line: null, lines: [], reason: 'quoted_artifact_only' }
+```
+
+Rules, per line:
+
+1. a **direct** failure statement (`error:`, `exception:`, `[error]`,
+   `TypeError:`) is live evidence - always;
+2. a **quoted** artifact is not live evidence: a serialized JSON payload (a
+   toolResult from an earlier turn), a tool-output wrapper (`**TOOLRESULT**`,
+   `"isError":true`), or an already-resolved failure;
+3. a report that states the operation **succeeded** (`exec completed`,
+   `code 0`, `status=ok`) is a success, even when it quotes another
+   component's status text;
+4. a direct statement that sits **outside** a quoted payload stays live.
+
+Verdict fields: `live`, `direct`, `quoted`, `success`, `line`
+(first live line), `lines` (all live lines), `reason`.
+
+Why it matters: the signal corpus contains the agent's own session transcript,
+so a single stale toolResult quoted by a previous turn used to fire
+`log_error` forever. That tag forces the mutation category to
+`repair` (src/gep/mutation.js, src/gep/solidify.js), so the cycle could
+never leave the repair gene while the stagnation guard reported a plateau - a
+self-feeding loop, because every cycle re-mined its own history.
 
 ## Self-test
 

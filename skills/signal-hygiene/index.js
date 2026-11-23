@@ -258,6 +258,204 @@ function sanitizeSignals(tokens, opts) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Error evidence classification
+// ---------------------------------------------------------------------------
+//
+// WHY THIS EXISTS
+// --------------
+// src/gep/signals.js used to decide "is there a live error?" with ONE regex
+// applied to the WHOLE signal corpus:
+//
+//   /\[error\]|error:|exception:|iserror":true|"status":\s*"error"|...
+//
+// The corpus is the session transcript + today's log + memory + user notes +
+// the integration report. The transcript holds the agent's OWN tool output,
+// so a single stale toolResult that a previous turn quoted verbatim
+// ("status":"failed", "isError":true) kept the coarse `log_error` tag firing
+// forever. Downstream that tag forces the mutation category to `repair`
+// (src/gep/mutation.js) and to `repair` again in src/gep/solidify.js, so the
+// cycle could never leave the repair gene while the stagnation guard kept
+// reporting a plateau. Each cycle then re-mined its own history: a
+// self-feeding loop.
+//
+// The question the protocol actually asks is "is this failure HAPPENING, or
+// is this a RECORD of a failure that already happened?". This module answers
+// it line by line:
+//
+//   * a DIRECT failure statement ("error:", "exception:", "[error]",
+//     "TypeError:") is live evidence - always;
+//   * a QUOTED artifact (a serialized toolResult, a report quoting another
+//     component's status, an already-resolved failure) is NOT live evidence;
+//   * a report that states the operation SUCCEEDED ("exec completed",
+//     "code 0", "status=ok") is a success even when it quotes another
+//     component's status text.
+//
+// A real fault is never hidden: a live fault is narrated in prose ("error:
+// cannot read file"), and prose is a direct statement. A direct statement
+// that sits OUTSIDE a quoted payload also stays live.
+// ---------------------------------------------------------------------------
+
+// A DIRECT failure statement: the line itself says the operation failed.
+//   "error: cannot read file" / "[error] TypeError: x" / "exception: boom"
+//   / "ReferenceError: tools is not defined"
+var DIRECT_ERROR_RE = /\b(?:type|reference|syntax|range)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]/i;
+
+// An INDIRECT failure marker: the line reports a failing status without
+// stating the failure itself ("news-collect-reuters: status error").
+var STRONG_ERROR_RE = /\b(?:type|reference|syntax|range)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]|status\s+error|status["']?\s*:\s*["']?failed/i;
+
+// The report says the OPERATION itself succeeded.
+var SUCCESS_REPORT_RE = /\b(?:exec|execution|command|step|operation|task|run|job|process|script)\s+(?:completed|finished|succeeded|done)\b|\bcompleted\s+successfully\b|\bexit(?:ed)?\s+(?:with\s+)?(?:code|status)\s*[:=]?\s*0\b|\bcode\s*[:=]?\s*0\b|\bstatus\s*[:=]\s*(?:ok|success|successful|done)\b/i;
+
+// Weak markers, but NOT when negated - "无异常：9" / "没有错误：" are healthy
+// status lines, not failures.
+var WEAK_ERROR_RE = /(?<!(?:没有|无|未|没|非))(?<![有无未没非])(?:错误|异常|报错|失败)\s*[：:]/;
+
+// A heartbeat reply is a status report, never a failure.
+var HEARTBEAT_STATUS_RE = /HEARTBEAT_OK/i;
+
+// A QUOTED artifact: the line is a RECORD of a result, not this system's
+// own live failure.
+var QUOTED_ARTIFACT_RES = [
+  /\*\*+\s*TOOLRESULT\s*\*\*+/i,   // "**TOOLRESULT**: {...}"
+  /\[\s*TOOLRESULT\s*\]/i,          // "[TOOLRESULT] {...}"
+  /\*\*+\s*CUSTOM\s*\*\*/i,         // "**CUSTOM**:"
+  /"toolResult"/i,                     // serialized tool result
+  /"role"\s*:\s*"tool"/i,
+  /\btool_result\b/i,
+  /"?isError"?\s*:\s*true/i,           // "isError":true
+];
+
+// An already-resolved failure: the text says the problem was handled.
+var RESOLVED_RE = /\balready resolved\b|\bpreviously failed\b|\bhas been fixed\b|\bwas fixed\b|\bsuperseded\b|\bresolved after\b|已解决|已修复|已恢复/i;
+
+// A serialized JSON object inside a line.
+var JSON_PAYLOAD_RE = /\{[\s\S]*\}/;
+// A quoted key inside a payload.
+var JSON_KEY_RE = /"[^"]{1,60}"\s*:/;
+
+/**
+ * Does this line contain a serialized JSON payload?
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function hasJsonPayload(line) {
+  var m = String(line || '').match(JSON_PAYLOAD_RE);
+  return !!(m && JSON_KEY_RE.test(m[0]));
+}
+
+/**
+ * Remove the serialized payload from a line, so the remaining prose can be
+ * judged on its own. A failure statement OUTSIDE the payload is live; a
+ * failure statement INSIDE it is quoted.
+ *
+ * @param {string} line
+ * @returns {string}
+ */
+function stripJsonPayload(line) {
+  return String(line || '').replace(JSON_PAYLOAD_RE, ' ');
+}
+
+/**
+ * Is this line a quoted / already-resolved artifact?
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isQuotedArtifact(line) {
+  var s = String(line || '');
+  if (!s) return false;
+  for (var i = 0; i < QUOTED_ARTIFACT_RES.length; i++) {
+    if (QUOTED_ARTIFACT_RES[i].test(s)) return true;
+  }
+  return false;
+}
+
+/**
+ * Classify the error evidence carried by a set of lines.
+ *
+ * The verdict is the single source of truth for BOTH the coarse `log_error`
+ * tag and the fine `errsig:` signature, so the two can never disagree.
+ *
+ * @param {string[]|string} lines
+ * @returns {{live:boolean, direct:boolean, quoted:boolean, success:boolean,
+ *            line:string|null, lines:string[], reason:string}}
+ */
+function classifyErrorEvidence(lines) {
+  var list = Array.isArray(lines) ? lines : (typeof lines === 'string' ? lines.split('\n') : []);
+  var verdict = {
+    live: false,
+    direct: false,
+    quoted: false,
+    success: false,
+    line: null,
+    lines: [],
+    reason: 'no_error_evidence',
+  };
+
+  for (var i = 0; i < list.length; i++) {
+    var raw = list[i];
+    if (raw === null || raw === undefined) continue;
+    var line = String(raw).trim();
+    if (!line) continue;
+
+    var payload = hasJsonPayload(line);
+    var outside = payload ? stripJsonPayload(line) : line;
+    var directOutside = DIRECT_ERROR_RE.test(outside);
+    var isDirect = directOutside || DIRECT_ERROR_RE.test(line);
+
+    // A success report is a success - even when it quotes another
+    // component's status text ("exec completed (code 0) :: reuters status
+    // error| ..."). A DIRECT failure statement still wins: the operation
+    // itself failed.
+    if (SUCCESS_REPORT_RE.test(line) && !directOutside) {
+      verdict.success = true;
+      continue;
+    }
+
+    // A quoted / already-resolved artifact is a record of a failure, not a
+    // live failure. It must never produce log_error. A direct statement
+    // OUTSIDE the payload keeps the line live.
+    if (payload) {
+      if (!directOutside) {
+        verdict.quoted = true;
+        continue;
+      }
+    } else if (isQuotedArtifact(line)) {
+      verdict.quoted = true;
+      continue;
+    } else if (!isDirect && RESOLVED_RE.test(line)) {
+      // An already-resolved failure is a record, not a live fault. A direct
+      // failure statement is never downgraded to "resolved".
+      verdict.quoted = true;
+      continue;
+    }
+
+    var isStrong = STRONG_ERROR_RE.test(line);
+    var isWeak = WEAK_ERROR_RE.test(line);
+    if (!isDirect && !isStrong && !isWeak) continue;
+
+    // A heartbeat status line is noise, not a failure.
+    if (!isDirect && HEARTBEAT_STATUS_RE.test(line)) continue;
+
+    verdict.live = true;
+    if (isDirect) verdict.direct = true;
+    verdict.lines.push(line);
+    if (!verdict.line) verdict.line = line;
+  }
+
+  if (verdict.live) {
+    verdict.reason = verdict.direct ? 'live_direct_failure' : 'live_indirect_failure';
+  } else if (verdict.quoted) {
+    verdict.reason = 'quoted_artifact_only';
+  } else if (verdict.success) {
+    verdict.reason = 'success_report_only';
+  }
+  return verdict;
+}
+
 module.exports = {
   KNOWN_SIGNALS: KNOWN_SIGNALS,
   KNOWN_SIGNAL_PATTERNS: KNOWN_SIGNAL_PATTERNS,
@@ -267,4 +465,12 @@ module.exports = {
   isKnownSignal: isKnownSignal,
   resolveSignal: resolveSignal,
   normalizeToken: normalizeToken,
+  classifyErrorEvidence: classifyErrorEvidence,
+  isQuotedArtifact: isQuotedArtifact,
+  hasJsonPayload: hasJsonPayload,
+  stripJsonPayload: stripJsonPayload,
+  DIRECT_ERROR_RE: DIRECT_ERROR_RE,
+  STRONG_ERROR_RE: STRONG_ERROR_RE,
+  SUCCESS_REPORT_RE: SUCCESS_REPORT_RE,
+  WEAK_ERROR_RE: WEAK_ERROR_RE,
 };

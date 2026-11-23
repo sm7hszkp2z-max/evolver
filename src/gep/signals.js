@@ -1,3 +1,9 @@
+// The error-evidence classifier lives in the signal-hygiene skill. It is the
+// single place that decides whether a failure is LIVE or merely QUOTED, so
+// the coarse log_error tag and the fine errsig: signature are derived from
+// the same verdict and can never disagree.
+var hygiene = require('../../skills/signal-hygiene');
+
 // Opportunity signal names (shared with mutation.js and personality.js).
 var OPPORTUNITY_SIGNALS = [
   'user_feature_request',
@@ -152,21 +158,18 @@ function analyzeRecentHistory(recentEvents) {
 // Fix: prefer a STRONG error token, fall back to a weak one, and strip the
 // volatile runtime state from whatever is emitted.
 
-// Strong, unambiguous error markers (a real failure statement).
-var STRONG_ERROR_RE = /\b(?:type|reference|syntax)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]|status\s+error/i;
-// A DIRECT failure statement: the line itself says the operation failed
-// ("error: ...", "exception: ...", "[error] TypeError: ..."). These are always
-// picked, no matter what else the line contains.
-var DIRECT_ERROR_RE = /\b(?:type|reference|syntax)error\b\s*:|\berror\s*:|\bexception\s*:|\[error\b|\[error\]/i;
-// The report says the OPERATION itself succeeded ("exec completed", "code 0",
-// "exit code 0", ...). Such a report describes several components at once, so a
-// component status text like "reuters status error" inside it belongs to
-// ANOTHER component - it is not this operation's failure.
-var SUCCESS_REPORT_RE = /\b(?:exec|execution|command|step|operation|task|run|job|process|script)\s+(?:completed|finished|succeeded|done)\b|\bcompleted\s+successfully\b|\bexit(?:ed)?\s+(?:with\s+)?(?:code|status)\s*[:=]?\s*0\b|\bcode\s*[:=]?\s*0\b|\bstatus\s*[:=]\s*(?:ok|success|successful|done)\b/i;
-// Weak markers, but NOT when negated - "无异常：9" / "没有错误：" are healthy
-// status lines, not failures.
-var WEAK_ERROR_RE = /(?<!(?:没有|无|未|没|非))(?<![有无未没非])(?:错误|异常|报错|失败)\s*[：:]/;
-
+// The error policy lives in skills/signal-hygiene so that there is exactly
+// one implementation of it:
+//   * a DIRECT failure statement (error:, exception:, [error], TypeError:)
+//     is live evidence - always;
+//   * a QUOTED artifact (a serialized toolResult, a report quoting another
+//     component status, an already-resolved failure) is NOT live evidence;
+//   * a report that says the operation SUCCEEDED (exec completed, code 0,
+//     status=ok) is a success even when it quotes another component status.
+//
+// The corpus holds the agent OWN transcript, so a stale toolResult that a
+// previous turn quoted verbatim used to fire the coarse log_error tag
+// forever and drag every cycle into the repair gene.
 // Machine state, not failure description. Applied to the captured line.
 var VOLATILE_STATE_RULES = [
   // tool-result wrapper: "**TOOLRESULT**:" / "[TOOLRESULT]"
@@ -204,38 +207,14 @@ function stripVolatileRuntimeState(text) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
-// Pick the most informative error line: strong error tokens first, weak ones
-// as fallback. Returns the cleaned line (volatile state already stripped).
-// A heartbeat reply ("HEARTBEAT_OK ...") is a status report, never a failure.
-var HEARTBEAT_STATUS_RE = /HEARTBEAT_OK/i;
-
+// Pick the most informative live error line. Returns the cleaned line
+// (volatile state already stripped). A heartbeat reply ("HEARTBEAT_OK")
+// is a status report, never a failure.
 function pickErrorSignatureLine(lines) {
-  var list = Array.isArray(lines) ? lines : [];
-  var strong = [];
-  var weak = [];
-  for (var i = 0; i < list.length; i++) {
-    var l = String(list[i] || '');
-    if (!l) continue;
-    if (STRONG_ERROR_RE.test(l)) {
-      // A line that reports the operation itself as SUCCESS is not a failure,
-      // even when the strong marker only matched ANOTHER component's status
-      // text ("reuters status error" inside an "exec completed (code 0)" report).
-      // A direct failure statement ("error:", "[error] TypeError: ...") is
-      // still picked - real detection is never weakened.
-      if (!DIRECT_ERROR_RE.test(l) && SUCCESS_REPORT_RE.test(l)) continue;
-      strong.push(l); continue;
-    }
-    if (WEAK_ERROR_RE.test(l)) {
-      // A weak-only match on a heartbeat status line is noise, not a failure.
-      if (HEARTBEAT_STATUS_RE.test(l)) continue;
-      // Same guard as for strong matches: a success report is not a failure.
-      if (SUCCESS_REPORT_RE.test(l)) continue;
-      weak.push(l);
-    }
-  }
-  var candidates = strong.concat(weak);
-  for (var c = 0; c < candidates.length; c++) {
-    var cleaned = stripVolatileRuntimeState(candidates[c]);
+  var verdict = hygiene.classifyErrorEvidence(lines);
+  if (!verdict.live) return null;
+  for (var i = 0; i < verdict.lines.length; i++) {
+    var cleaned = stripVolatileRuntimeState(verdict.lines[i]);
     // Require some informative content; a pure counter line carries no signal.
     if (cleaned && cleaned.length >= 3) return cleaned;
   }
@@ -317,19 +296,23 @@ function extractSignals({ recentSessionTranscript, todayLog, memorySnippet, user
 
   // --- Defensive signals (errors, missing resources) ---
 
-  // Refined error detection regex to avoid false positives on "fail"/"failed" in normal text.
-  // We prioritize structured error markers ([error], error:, exception:) and specific JSON patterns.
-  var errorHit = /\[error\]|error:|exception:|iserror":true|"status":\s*"error"|"status":\s*"failed"|错误\s*[：:]|异常\s*[：:]|报错\s*[：:]|失败\s*[：:]/.test(lower);
+  // --- Defensive signals (errors, missing resources) ---
+  //
+  // The corpus contains the agent OWN transcript, so a stale toolResult
+  // that a previous turn quoted verbatim ("status":"failed",
+  // "isError":true) used to fire the coarse log_error tag forever and drag
+  // every cycle into the repair gene. The classifier decides whether a
+  // failure is LIVE or merely QUOTED; the coarse tag and the fine errsig:
+  // signature come from the SAME verdict, so a quoted failure can never
+  // force a repair and a real fault can never be hidden.
+  var corpusLines = proseCorpus.split('\n').map(function (l) { return String(l || '').trim(); }).filter(Boolean);
+  var errorEvidence = hygiene.classifyErrorEvidence(corpusLines);
+  var errorHit = errorEvidence.live;
   if (errorHit) signals.push('log_error');
 
   // Error signature (more reproducible than a coarse "log_error" tag).
   try {
-    var lines = corpus
-      .split('\n')
-      .map(function (l) { return String(l || '').trim(); })
-      .filter(Boolean);
-
-    var errLine = pickErrorSignatureLine(lines);
+    var errLine = pickErrorSignatureLine(corpusLines);
 
     if (errLine) {
       var clipped = errLine.replace(/\s+/g, ' ').slice(0, 260);

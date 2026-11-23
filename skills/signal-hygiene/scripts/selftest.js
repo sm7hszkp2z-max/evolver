@@ -125,6 +125,25 @@ for (const token of cleaned) {
 }
 
 console.log('[selftest] signal-hygiene: all ' + 'assertions passed');
+
+// --- error evidence classification -----------------------------------------
+const { classifyErrorEvidence } = hygiene;
+assert.strictEqual(typeof classifyErrorEvidence, 'function', 'classifyErrorEvidence must be exported');
+
+const staleToolResult = '**TOOLRESULT**: {"status":"failed","code":"invalid_input","output":[],' +
+  '"error":"SyntaxError at openclaw-code-mode:user.js:36:1: Unterminated string constant"}';
+const staleVerdict = classifyErrorEvidence([staleToolResult]);
+assert.strictEqual(staleVerdict.live, false, 'a quoted toolResult must not be live evidence');
+assert.strictEqual(staleVerdict.quoted, true, 'a quoted toolResult must be reported as quoted');
+
+const directVerdict = classifyErrorEvidence(['error: cannot read file']);
+assert.strictEqual(directVerdict.live, true, 'a direct failure statement must be live evidence');
+assert.strictEqual(directVerdict.direct, true, 'a direct failure statement must be marked direct');
+
+const successVerdict = classifyErrorEvidence(['exec completed (code 0) :: reuters status error']);
+assert.strictEqual(successVerdict.live, false, 'a success report must not be live evidence');
+assert.strictEqual(successVerdict.success, true, 'a success report must be reported as success');
+
 console.log('[selftest] KNOWN_SIGNALS=' + hygiene.KNOWN_SIGNALS.length +
             ' PREFIXES=' + hygiene.PREFIXED_SIGNAL_PREFIXES.length +
             ' ALIASES=' + Object.keys(hygiene.ALIAS_MAP).length);
