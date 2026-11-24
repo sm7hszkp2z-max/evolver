@@ -90,3 +90,60 @@ describe('buildGepPrompt -- tool usage guardrails', () => {
     assert.doesNotThrow(() => buildToolUsageGuardrailsBlock());
   });
 });
+
+describe('buildHubMatchedBlock -- oversized hub payload', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { buildHubMatchedBlock } = require('../src/gep/prompt');
+  const cfgPath = path.resolve(__dirname, '..', '.evolver/gep/tool_usage_guardrails.json');
+
+  it('renders a valid, bounded payload without surviving truncation markers', () => {
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const limit = cfg.hub_payload_max_chars;
+    assert.ok(Number.isInteger(limit), 'hub_payload_max_chars must be an integer in the guardrails config');
+    assert.ok(limit > 0, 'hub_payload_max_chars must be positive');
+
+    const strategy = [
+      'Analyze tool usage patterns and find the root cause of repetition',
+      'Enforce exec limits and route ad-hoc script execution to registered tools',
+      'Batch operations into single commands and deduplicate signals'
+    ];
+    const payload = {
+      id: 'capsule_oversized_regression',
+      gene: 'gene_gep_optimize_tool_usage',
+      type: 'Capsule',
+      asset_id: 'sha256:oversized-regression',
+      summary: 'Oversized hub payload used by the payload cap regression test',
+      strategy,
+      anti_patterns: ['repeated exec calls without batching'],
+      outcome: { status: 'success', score: 0.73 },
+      trigger: ['repeated_tool_usage:exec', 'protocol_drift'],
+      content: 'Gene: gene_gep_optimize_tool_usage (optimize)\n\n...[TRUNCATED]...\n' + 'x'.repeat(50000),
+      env_fingerprint: { cwd: 'y'.repeat(5000) },
+      success_reason: 'z'.repeat(5000)
+    };
+
+    const block = buildHubMatchedBlock({
+      capsule: { payload, asset_id: payload.asset_id, confidence: 0.73 }
+    });
+
+    const match = block.match(/```json\n([\s\S]*?)\n```/);
+    assert.ok(match, 'hub block must embed a fenced json payload');
+    const json = match[1];
+    assert.ok(
+      json.length <= limit,
+      'rendered hub payload must stay within hub_payload_max_chars (got ' + json.length + ', limit ' + limit + ')'
+    );
+    let parsed = null;
+    try {
+      parsed = JSON.parse(json);
+    } catch (err) {
+      assert.fail('rendered hub payload must be valid JSON: ' + err.message);
+    }
+    assert.ok(parsed && typeof parsed === 'object' && !Array.isArray(parsed), 'rendered hub payload must be a JSON object');
+    assert.ok(!block.includes('[TRUNCATED]'), 'embedded truncation marker must not survive into the prompt');
+    for (const step of strategy) {
+      assert.ok(block.includes(step), 'hub strategy step must still be present: ' + step);
+    }
+  });
+});

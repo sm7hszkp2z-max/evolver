@@ -7,6 +7,7 @@
     "files": 1,
     "lines": 34
   },
+  "hub_payload_max_chars": 6000,
   "max_consecutive_exec_calls": 3,
   "max_exec_calls_per_cycle": 8,
   "max_retries": 2,

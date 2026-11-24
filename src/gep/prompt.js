@@ -49,29 +49,188 @@ IMPORTANT: Do NOT reinvent. Apply faithfully.
 }
 
 /**
+ * Hub payload rendering guardrails (cycle #0099).
+ *
+ * The matched Hub payload used to be embedded verbatim with an unbounded
+ * JSON.stringify(payload, null, 2). In practice that single block could eat
+ * almost half of the GEP prompt budget, and the payload arriving from the Hub
+ * already carried an embedded truncation marker, i.e. malformed JSON with the
+ * strategy cut in half. The rendered payload is now:
+ *   - derived: only the decisive fields survive, bulky duplicates are dropped,
+ *   - sanitized: incoming truncation markers are removed so the block is valid JSON,
+ *   - bounded: hub_payload_max_chars from .evolver/gep/tool_usage_guardrails.json,
+ *     which stays the single source of truth for guardrail values.
+ */
+const HUB_PAYLOAD_MAX_CHARS_FALLBACK = 6000;
+const HUB_PAYLOAD_KEEP_FIELDS = ['id', 'gene', 'type', 'asset_id', 'summary', 'strategy', 'anti_patterns', 'outcome', 'trigger', 'content'];
+const HUB_PAYLOAD_CONTENT_MAX_CHARS = 1200;
+const HUB_PAYLOAD_SHORTEN_MARKER = ' [shortened]';
+
+/**
+ * Remove truncation markers that came in from the Hub so the embedded block
+ * stays parseable JSON.
+ */
+function sanitizeHubText(value) {
+  if (typeof value !== 'string') return value;
+  return value
+    .replace(/\.{2,}\s*\[TRUNCATED[^\]]*\]\s*\.{2,}/gi, ' ')
+    .replace(/\[TRUNCATED[^\]]*\]/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function sanitizeHubValue(value) {
+  if (typeof value === 'string') return sanitizeHubText(value);
+  if (Array.isArray(value)) return value.map(sanitizeHubValue);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const key of Object.keys(value)) out[key] = sanitizeHubValue(value[key]);
+    return out;
+  }
+  return value;
+}
+
+/** Shorten a string on a word boundary; never cut mid-token. */
+function shortenHubText(text, maxChars) {
+  const s = String(text === undefined || text === null ? '' : text);
+  if (s.length <= maxChars) return s;
+  const marker = HUB_PAYLOAD_SHORTEN_MARKER;
+  const cut = s.slice(0, Math.max(0, maxChars - marker.length));
+  return cut.replace(/\s+\S*$/, '') + marker;
+}
+
+/** Derive the decisive payload view: keep the useful fields, drop the bulky rest. */
+function buildHubPayloadView(payload) {
+  const src = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  const view = {};
+  for (const key of HUB_PAYLOAD_KEEP_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(src, key)) continue;
+    view[key] = sanitizeHubValue(src[key]);
+  }
+  const dropped = Object.keys(src).filter(function (key) {
+    return HUB_PAYLOAD_KEEP_FIELDS.indexOf(key) === -1;
+  });
+  if (dropped.length) view.dropped_fields = dropped;
+  return view;
+}
+
+/** The guardrail budget comes from the JSON config, never from a hard-coded literal. */
+function hubPayloadMaxChars(guardrails) {
+  const raw = guardrails && typeof guardrails === 'object' ? guardrails.hub_payload_max_chars : undefined;
+  const value = Number(raw);
+  if (!isFinite(value) || value <= 0) return HUB_PAYLOAD_MAX_CHARS_FALLBACK;
+  return Math.floor(value);
+}
+
+/**
+ * Render the Hub payload as a VALID JSON object that never exceeds
+ * hub_payload_max_chars. When it does not fit, fields are dropped and named in
+ * dropped_fields instead of cutting the JSON mid-string.
+ */
+function buildHubPayloadJson(payload, maxChars) {
+  const limit = isFinite(maxChars) && maxChars > 0 ? Math.floor(maxChars) : HUB_PAYLOAD_MAX_CHARS_FALLBACK;
+  const view = buildHubPayloadView(payload);
+  const dropped = new Set(Array.isArray(view.dropped_fields) ? view.dropped_fields : []);
+  const render = function () { return JSON.stringify(view, null, 2); };
+
+  if (typeof view.content === 'string' && view.content.length > HUB_PAYLOAD_CONTENT_MAX_CHARS) {
+    view.content = shortenHubText(view.content, HUB_PAYLOAD_CONTENT_MAX_CHARS);
+  }
+  let json = render();
+  if (json.length <= limit) return json;
+
+  const droppable = ['content', 'anti_patterns', 'trigger', 'outcome', 'summary'];
+  for (const key of droppable) {
+    if (json.length <= limit) break;
+    if (!Object.prototype.hasOwnProperty.call(view, key)) continue;
+    dropped.add(key);
+    delete view[key];
+    view.dropped_fields = Array.from(dropped);
+    json = render();
+  }
+  if (json.length <= limit) return json;
+
+  if (Array.isArray(view.strategy)) {
+    for (let cap = 600; cap >= 60 && json.length > limit; cap = Math.floor(cap / 2)) {
+      view.strategy = view.strategy.map(function (step) {
+        return typeof step === 'string' ? shortenHubText(step, cap) : step;
+      });
+      view.strategy_shortened = true;
+      json = render();
+    }
+  }
+  if (json.length <= limit) return json;
+
+  const minimal = {
+    id: view.id || null,
+    gene: view.gene || null,
+    type: view.type || null,
+    asset_id: view.asset_id || null,
+    strategy: view.strategy || [],
+    dropped_fields: Array.from(dropped),
+    note: 'hub payload trimmed to fit hub_payload_max_chars'
+  };
+  let minimalJson = JSON.stringify(minimal, null, 2);
+  for (let cap = 60; cap >= 10 && minimalJson.length > limit; cap = Math.floor(cap / 2)) {
+    minimal.strategy = (Array.isArray(minimal.strategy) ? minimal.strategy : []).map(function (step) {
+      return typeof step === 'string' ? shortenHubText(step, cap) : step;
+    });
+    minimalJson = JSON.stringify(minimal, null, 2);
+  }
+  if (minimalJson.length <= limit) return minimalJson;
+  return JSON.stringify({
+    id: minimal.id,
+    gene: minimal.gene,
+    asset_id: minimal.asset_id,
+    strategy: [],
+    dropped_fields: Array.from(dropped),
+    note: 'hub payload trimmed to fit hub_payload_max_chars'
+  }, null, 2);
+}
+
+/** Render the Hub strategy as a plain readable list so the Hand always sees it. */
+function renderHubStrategyList(payload) {
+  const src = payload && typeof payload === 'object' ? payload : {};
+  const strategy = Array.isArray(src.strategy) ? src.strategy : null;
+  if (!strategy || strategy.length === 0) return '';
+  const lines = strategy.map(function (step, index) {
+    const text = typeof step === 'string' ? step : JSON.stringify(sanitizeHubValue(step));
+    return '  ' + (index + 1) + '. ' + sanitizeHubText(text);
+  });
+  return '\n- Strategy:\n' + lines.join('\n');
+}
+
+/**
  * Build a Hub Matched Solution block.
  */
 function buildHubMatchedBlock({ capsule }) {
   if (!capsule) return '(no hub match)';
   const payload = capsule.payload || capsule;
-  const summary = payload.summary || capsule.summary || '(no summary)';
-  const gene = payload.gene || capsule.gene || '(unknown)';
+  // The guardrail budget is read through the existing loader, so the JSON
+  // config under .evolver/gep/ stays the single source of truth.
+  const guardrails = loadToolUsageGuardrails();
+  const maxChars = hubPayloadMaxChars(guardrails);
+  const summary = sanitizeHubText(payload.summary || capsule.summary || '(no summary)');
+  const gene = sanitizeHubText(payload.gene || capsule.gene || '(unknown)');
   const confidence = payload.confidence || capsule.confidence || 0;
-  const assetId = capsule.asset_id || '(unknown)';
+  const assetId = sanitizeHubText(payload.asset_id || capsule.asset_id || '(unknown)');
+  const payloadJson = buildHubPayloadJson(payload, maxChars);
+  const strategyBlock = renderHubStrategyList(payload);
+  const fence = '```';
 
-  return `
-Hub Matched Solution (STRONG REFERENCE):
-- Asset: ${assetId} (${confidence})
-- Gene: ${gene}
-- Summary: ${summary}
-- Payload:
-\`\`\`json
-${JSON.stringify(payload, null, 2)}
-\`\`\`
-Use this as your primary approach if applicable. Adapt to local context.
-`.trim();
+  return [
+    'Hub Matched Solution (STRONG REFERENCE):',
+    '- Asset: ' + assetId + ' (' + confidence + ')',
+    '- Gene: ' + gene,
+    '- Summary: ' + summary,
+    strategyBlock,
+    '- Payload:',
+    fence + 'json',
+    payloadJson,
+    fence,
+    'Use this as your primary approach if applicable. Adapt to local context.'
+  ].filter(function (line) { return line !== ''; }).join('\n').trim();
 }
-
 /**
  * Truncate context intelligently to preserve header/footer structure.
  */
@@ -672,4 +831,4 @@ Rules:
   return basePrompt.slice(0, maxChars) + "\n...[TRUNCATED]...";
 }
 
-module.exports = { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock, buildLessonsBlock, buildNarrativeBlock, buildPrinciplesBlock, resolveStatusCycleTag, buildToolUsageGuardrailsBlock };
+module.exports = { buildGepPrompt, buildReusePrompt, buildHubMatchedBlock, buildHubPayloadJson, buildHubPayloadView, buildLessonsBlock, buildNarrativeBlock, buildPrinciplesBlock, resolveStatusCycleTag, buildToolUsageGuardrailsBlock };

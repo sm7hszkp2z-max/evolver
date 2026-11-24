@@ -80,16 +80,16 @@
       "epigenetic_marks": [
         {
           "context": "linux/x64/v24.22.1",
-          "boost": 0.35,
+          "boost": 0.39999999999999997,
           "reason": "reinforced_by_success",
-          "created_at": "2026-11-16T17:10:28.913Z"
+          "created_at": "2026-11-24T17:08:26.890Z"
         }
       ],
       "schema_version": "1.6.0",
       "asset_id": "sha256:1cd8847270fa0860774b361b388b90a584d75f4c4c940df9fe02bf105311894f",
       "source_type": "reference",
-      "reused_asset_id": "sha256:e6cd258ba12815671026b558253c9078fa87c8db680ef3bf613405477f4ac96f",
-      "hub_asset_id": "sha256:e6cd258ba12815671026b558253c9078fa87c8db680ef3bf613405477f4ac96f"
+      "reused_asset_id": "sha256:a9fb018ed0c6a7c55e144841f291a6d7292af5a28a56c01301a469a7de988243",
+      "hub_asset_id": "sha256:a9fb018ed0c6a7c55e144841f291a6d7292af5a28a56c01301a469a7de988243"
     },
     {
       "type": "Gene",
