@@ -33,6 +33,24 @@ function isBlastRadiusSafe(blastRadius) {
   return files <= lim.maxFiles && lines <= lim.maxLines;
 }
 
+// Lower bound of the Hub blast-radius contract.
+//
+// The Hub rejects every capsule whose blast_radius.files is not >= 1 with
+// "capsule_blast_radius_files_must_be_positive". isBlastRadiusSafe() only
+// enforces the UPPER bound, so a 0-file radius used to pass locally and the
+// publish path shipped a payload the Hub always refuses.
+//
+// This function is the SINGLE home of the lower bound: every publish-eligibility
+// path must use it, so the rule cannot drift between independent copies.
+function hasPositiveBlastRadius(blastRadius) {
+  if (!blastRadius || typeof blastRadius !== 'object') return false;
+  var files = Number(blastRadius.files);
+  if (!Number.isFinite(files) || files < 1) return false;
+  var lines = Number(blastRadius.lines);
+  if (Number.isFinite(lines) && lines < 0) return false;
+  return true;
+}
+
 function clamp01(n) {
   var x = Number(n);
   if (!Number.isFinite(x)) return 0;
@@ -92,9 +110,13 @@ function isCapsuleBroadcastEligible(capsule, opts) {
   var score = capsule.outcome && capsule.outcome.score != null ? safeNumber(capsule.outcome.score, null) : null;
   if (score == null || score < 0.7) return false;
   var blast = capsule.blast_radius || (capsule.outcome && capsule.outcome.blast_radius) || null;
+  // Hub contract lower bound: blast_radius.files >= 1 (single home for the rule).
+  if (!hasPositiveBlastRadius(blast)) return false;
   if (!isBlastRadiusSafe(blast)) return false;
   var events = Array.isArray(opts.events) ? opts.events : readEvolutionEvents();
-  var streak = computeCapsuleSuccessStreak({ capsuleId: capsule.id, events: events });
+  var streak = (opts.streak != null && Number.isFinite(Number(opts.streak)))
+    ? Number(opts.streak)
+    : computeCapsuleSuccessStreak({ capsuleId: capsule.id, events: events });
   if (streak < 2) return false;
   return true;
 }
@@ -166,7 +188,7 @@ function readTextIfExists(filePath) {
 }
 
 module.exports = {
-  isAllowedA2AAsset, lowerConfidence, isBlastRadiusSafe,
+  isAllowedA2AAsset, lowerConfidence, isBlastRadiusSafe, hasPositiveBlastRadius,
   computeCapsuleSuccessStreak, isCapsuleBroadcastEligible,
   exportEligibleCapsules, isGeneBroadcastEligible,
   exportEligibleGenes, parseA2AInput, readTextIfExists,

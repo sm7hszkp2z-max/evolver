@@ -464,6 +464,58 @@
         "Prove the behaviour with a regression test: quoted failures stay silent, direct failures stay loud"
       ],
       "asset_id": "sha256:8c1064662bfb0a67f229526b2787638866005c6260f99e8f8b13d0cf54bbc63b"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795627041221",
+      "trigger": [
+        "bounty_task",
+        "external_task",
+        "perf_bottleneck"
+      ],
+      "gene": "gene_auto_c26ae3c2",
+      "summary": "固化：gene_auto_c26ae3c2 命中信号 bounty_task, external_task, perf_bottleneck，变更 5 文件 / 492 行。",
+      "confidence": 0.91,
+      "blast_radius": {
+        "files": 5,
+        "lines": 492
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.91
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_auto_c26ae3c2 (optimize) matched signals [bounty_task, external_task, perf_bottleneck]. Scope: 5 file(s), 492 line(s) changed. Outcome score: 0.91. Strategy applied: Extract structured signals from logs and user instructions; Select an existing Gene by signals match (no improvisation); Estimate blast radius (files, lines) before editing and record it.",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "reference",
+      "reused_asset_id": "sha256:52094b9fe9d1cc2f5506103a130681287dfb8739b1da37b048d05ca58a80d44a",
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_auto_c26ae3c2 (optimize)\n\nSignals: bounty_task, external_task, perf_bottleneck\n\nStrategy:\n1. Extract structured signals from logs and user instructions\n2. Select an existing Gene by signals match (no improvisation)\n3. Estimate blast radius (files, lines) before editing and record it\n4. Apply smallest reversible patch\n5. Validate using declared validation steps; rollback on failure\n6. Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\n\nScope: 5 file(s), 492 line(s)\n\nChanged files:\nsrc/gep/a2a.js\nsrc/gep/a2aProtocol.js\nsrc/gep/solidify.js\ntest/a2aPublishContract.test.js\nvalidation/validate-publish-contract.js\n\nOutcome score: 0.91",
+      "diff": "diff --git a/assets/gep/genes.json b/assets/gep/genes.json\nindex 3109ca06..1f730ba7 100644\n--- a/assets/gep/genes.json\n+++ b/assets/gep/genes.json\n@@ -282,7 +282,11 @@\n         ]\n       },\n       \"validation\": [\n-        \"node scripts/validate-modules.js ./src/gep/solidify\"\n+        \"node scripts/validate-modules.js ./src/gep/solidify\",\n+        \"node --test test/a2aPublishContract.test.js\",\n+        \"node validation/validate-publish-contract.js\",\n+        \"node scripts/validate-modules.js ./src/gep/a2a ./src/gep/a2aProtocol ./src/gep/solidify\",\n+        \"node --test test/\"\n       ],\n       \"epigenetic_marks\": [\n         {\ndiff --git a/src/gep/a2a.js b/src/gep/a2a.js\nindex f47a7cf6..a6b912e4 100644\n--- a/src/gep/a2a.js\n+++ b/src/gep/a2a.js\n@@ -33,6 +33,24 @@ function isBlastRadiusSafe(blastRadius) {\n   return files <= lim.maxFiles && lines <= lim.maxLines;\n }\n \n+// Lower bound of the Hub blast-radius contract.\n+//\n+// The Hub rejects every capsule whose blast_radius.files is not >= 1 with\n+// \"capsule_blast_radius_files_must_be_positive\". isBlastRadiusSafe() only\n+// enforces the UPPER bound, so a 0-file radius used to pass locally and the\n+// publish path shipped a payload the Hub always refuses.\n+//\n+// This function is the SINGLE home of the lower bound: every publish-eligibility\n+// path must use it, so the rule cannot drift between independent copies.\n+function hasPositiveBlastRadius(blastRadius) {\n+  if (!blastRadius || typeof blastRadius !== 'object') return false;\n+  var files = Number(blastRadius.files);\n+  if (!Number.isFinite(files) || files < 1) return false;\n+  var lines = Number(blastRadius.lines);\n+  if (Number.isFinite(lines) && lines < 0) return false;\n+  return true;\n+}\n+\n function clamp01(n) {\n   var x = Number(n);\n   if (!Number.isFinite(x)) return 0;\n@@ -92,9 +110,13 @@ function isCapsuleBroadcastEligible(capsule, opts) {\n   var score = capsule.outcome && capsule.outcome.score != null ? safeNumber(capsule.outcome.score, null) : null;\n   if (score == null || score < 0.7) return false;\n   var blast = capsule.blast_radius || (capsule.outcome && capsule.outcome.blast_radius) || null;\n+  // Hub contract lower bound: blast_radius.files >= 1 (single home for the rule).\n+  if (!hasPositiveBlastRadius(blast)) return false;\n   if (!isBlastRadiusSafe(blast)) return false;\n   var events = Array.isArray(opts.events) ? opts.events : readEvolutionEvents();\n-  var streak = computeCapsuleSuccessStreak({ capsuleId: capsule.id, events: events });\n+  var streak = (opts.streak != null && Number.isFinite(Number(opts.streak)))\n+    ? Number(opts.streak)\n+    : computeCapsuleSuccessStreak({ capsuleId: capsule.id, events: events });\n   if (streak < 2) return false;\n   return true;\n }\n@@ -166,7 +188,7 @@ function readTextIfExists(filePath) {\n }\n \n module.exports = {\n-  isAllowedA2AAsset, lowerConfidence, isBlastRadiusSafe,\n+  isAllowedA2AAsset, lowerConfidence, isBlastRadiusSafe, hasPositiveBlastRadius,\n   computeCapsuleSuccessStreak, isCapsuleBroadcastEligible,\n   exportEligibleCapsules, isGeneBroadcastEligible,\n   exportEligibleGenes, parseA2AInput, readTextIfExists,\ndiff --git a/src/gep/a2aProtocol.js b/src/gep/a2aProtocol.js\nindex 75dd8d2a..9ae2259a 100644\n--- a/src/gep/a2aProtocol.js\n+++ b/src/gep/a2aProtocol.js\n@@ -348,6 +348,25 @@ function fileTransportList(opts) {\n \n // --- HTTP Transport (connects to evomap-hub) ---\n \n+// Surface the Hub's machine-readable error code (e.g.\n+// \"capsule_blast_radius_files_must_be_positive\") instead of a generic message.\n+function extractHubError(data, bodyText, statusText) {\n+  if (data && typeof data === 'object') {\n+    var candidates = [data.error, data.code, data.error_code, data.message, data.detail];\n+    if (data.payload && typeof data.payload === 'object') {\n+      candidates = candidates.concat([data.payload.error, data.payload.code, data.payload.message]);\n+    }\n+    for (var i = 0; i < candidates.length; i++) {\n+      var c = candidates[i];\n+      if (c && typeof c === 'object' && c.code) c = c.code;\n+      if (c != null && String(c).trim()) return String(c).trim();\n+    }\n+  }\n+  var raw = String(bodyText || '').trim();\n+  if (raw) return raw.slice(0, 500);\n+  return String(statusText || 'http_error');\n+}\n+\n function httpTransportSend(message, opts) {\n   var hubUrl = (opts && opts.hubUrl) || process.env.A2A_HUB_URL;\n   if (!hubUrl) return { ok: false, error: 'A2A_HUB_URL not set' };\n@@ -358,8 +377,37 @@ function httpTransportSend(message, opts) {\n     headers: buildHubHeaders(),\n     body: body,\n   })\n-    .then(function (res) { return res.json(); })\n-    .then(function (data) { return { ok: true, response: data }; })\n+    .then(function (res) {\n+      // The Hub answers 4xx when the payload violates its contract (for\n+      // example blast_radius.files must be >= 1). Reading the body without\n+      // checking res.ok turned every rejection into ok:true, so a refused\n+      // publish was logged as a success. The status is the error boundary.\n+      return res.text().then(function (raw) {\n+        var bodyText = String(raw == null ? '' : raw);\n+        var data = null;\n+        var parsed = false;\n+        if (bodyText.trim()) {\n+          try { data = JSON.parse(bodyText); parsed = true; } catch (e) { parsed = false; }\n+        }\n+        if (!res.ok) {\n+          return {\n+            ok: false,\n+            status: res.status,\n+            error: extractHubError(data, bodyText, res.statusText),\n+            response: parsed ? data : { raw: bodyText.slice(0, 1000) },\n+          };\n+        }\n+        if (!parsed) {\n+          return {\n+            ok: false,\n+            status: res.status,\n+            error: 'invalid_json_response',\n+            response: { raw: bodyText.slice(0, 1000) },\n+          };\n+        }\n+        return { ok: true, response: data, status: res.status };\n+      });\n+    })\n     .catch(function (err) { return { ok: false, error: err.message }; });\n }\n \ndiff --git a/src/gep/solidify.js b/src/gep/solidify.js\nindex b3dc4ff3..af56ea09 100644\n--- a/src/gep/solidify.js\n+++ b/src/gep/solidify.js\n@@ -4,7 +4,7 @@ const { execSync } = require('child_process');\n const { loadGenes, upsertGene, appendEventJsonl, appendCapsule, upsertCapsule, getLastEventId, appendFailedCapsule } = require('./assetStore');\n const stagnationGuard = require('./stagnationGuard');\n const { computeSignalKey, memoryGraphPath } = require('./memoryGraph');\n-const { computeCapsuleSuccessStreak, isBlastRadiusSafe } = require('./a2a');\n+const { computeCapsuleSuccessStreak, isCapsuleBroadcastEligible, hasPositiveBlastRadius } = require('./a2a');\n const { getRepoRoot, getMemoryDir, getEvolutionDir, getWorkspaceRoot, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./paths');\n const { extractSignals } = require('./signals');\n const { selectGene } = require('./selector');\n@@ -1489,11 +1489,11 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true }\n     if (capsule) {\n       const streak = computeCapsuleSuccessStreak({ capsuleId: capsule.id });\n       capsule.success_streak = streak || 1;\n+      // Single shared predicate (src/gep/a2a.js): the Hub blast-radius contract\n+      // lower bound (files >= 1), the upper bound, the score gate and the\n+      // success-streak gate live in ONE place and can no longer drift apart.\n       capsule.a2a = {\n-        eligible_to_broadcast:\n-          isBlastRadiusSafe(capsule.blast_radius) &&\n-          (capsule.outcome.score || 0) >= 0.7 &&\n-          (capsule.success_streak || 0) >= 2,\n+        eligible_to_broadcast: isCapsuleBroadcastEligible(capsule, { streak: capsule.success_streak }),\n       };\n       capsule.asset_id = computeAssetId(capsule);\n       upsertCapsule(capsule);\n@@ -1528,6 +1528,32 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true }\n \n   // Search-First Evolution: auto-publish eligible capsules to the Hub (as Gene+Capsule bundle).\n   let publishResult = null;\n+  if (!dryRun && cap\n... [TRUNCATED]",
+      "strategy": [
+        "Extract structured signals from logs and user instructions",
+        "Select an existing Gene by signals match (no improvisation)",
+        "Estimate blast radius (files, lines) before editing and record it",
+        "Apply smallest reversible patch",
+        "Validate using declared validation steps; rollback on failure",
+        "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
+      ],
+      "asset_id": "sha256:31008a2daea2ea5ab2cce37164adaee306c803ff5de36f720b69323374d624f1"
     }
   ]
 }

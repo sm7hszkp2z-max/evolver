@@ -4,7 +4,7 @@ const { execSync } = require('child_process');
 const { loadGenes, upsertGene, appendEventJsonl, appendCapsule, upsertCapsule, getLastEventId, appendFailedCapsule } = require('./assetStore');
 const stagnationGuard = require('./stagnationGuard');
 const { computeSignalKey, memoryGraphPath } = require('./memoryGraph');
-const { computeCapsuleSuccessStreak, isBlastRadiusSafe } = require('./a2a');
+const { computeCapsuleSuccessStreak, isCapsuleBroadcastEligible, hasPositiveBlastRadius } = require('./a2a');
 const { getRepoRoot, getMemoryDir, getEvolutionDir, getWorkspaceRoot, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./paths');
 const { extractSignals } = require('./signals');
 const { selectGene } = require('./selector');
@@ -1489,11 +1489,11 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
     if (capsule) {
       const streak = computeCapsuleSuccessStreak({ capsuleId: capsule.id });
       capsule.success_streak = streak || 1;
+      // Single shared predicate (src/gep/a2a.js): the Hub blast-radius contract
+      // lower bound (files >= 1), the upper bound, the score gate and the
+      // success-streak gate live in ONE place and can no longer drift apart.
       capsule.a2a = {
-        eligible_to_broadcast:
-          isBlastRadiusSafe(capsule.blast_radius) &&
-          (capsule.outcome.score || 0) >= 0.7 &&
-          (capsule.success_streak || 0) >= 2,
+        eligible_to_broadcast: isCapsuleBroadcastEligible(capsule, { streak: capsule.success_streak }),
       };
       capsule.asset_id = computeAssetId(capsule);
       upsertCapsule(capsule);
@@ -1528,6 +1528,32 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
 
   // Search-First Evolution: auto-publish eligible capsules to the Hub (as Gene+Capsule bundle).
   let publishResult = null;
+  if (!dryRun && capsule && !(capsule.a2a && capsule.a2a.eligible_to_broadcast)) {
+    // The capsule cannot be broadcast. When the blocker is the Hub blast-radius
+    // contract (blast_radius.files must be >= 1), record the EXACT Hub error code
+    // instead of a generic reason, so the operator learns the intended way to
+    // publish non-code knowledge: it must travel as a Gene, not as a 0-file
+    // Capsule.
+    const zeroFileBlast = !hasPositiveBlastRadius(capsule.blast_radius);
+    const reason = zeroFileBlast
+      ? 'capsule_blast_radius_files_must_be_positive'
+      : 'not_broadcast_eligible';
+    publishResult = { attempted: false, reason };
+    logAssetCall({
+      run_id: lastRun && lastRun.run_id ? lastRun.run_id : null,
+      action: 'asset_publish_skip',
+      asset_id: capsule.asset_id || capsule.id,
+      asset_type: 'Capsule',
+      reason,
+      signals: Array.isArray(capsule.trigger) ? capsule.trigger : [],
+      extra: {
+        source_type: sourceType,
+        reused_asset_id: reusedAssetId,
+        gene_id: capsule.gene || (geneUsed && geneUsed.id) || null,
+        blast_radius: capsule.blast_radius || null,
+      },
+    });
+  }
   if (!dryRun && capsule && capsule.a2a && capsule.a2a.eligible_to_broadcast) {
     const autoPublish = String(process.env.EVOLVER_AUTO_PUBLISH || 'true').toLowerCase() !== 'false';
     const visibility = String(process.env.EVOLVER_DEFAULT_VISIBILITY || 'public').toLowerCase();
@@ -1585,35 +1611,66 @@ function solidify({ intent, summary, dryRun = false, rollbackOnFailure = true } 
           });
           var result = httpTransportSend(msg, { hubUrl });
           // httpTransportSend returns a Promise
+          publishResult = { attempted: true, asset_id: capsule.asset_id || capsule.id, bundle: true };
           if (result && typeof result.then === 'function') {
             result
               .then(function (res) {
-                if (res && res.ok) {
+                var published = !!(res && res.ok);
+                if (published) {
                   console.log('[AutoPublish] Published bundle (Gene+Capsule) ' + (capsule.asset_id || capsule.id) + ' to Hub.');
                 } else {
                   console.log('[AutoPublish] Hub rejected: ' + JSON.stringify(res));
                 }
+                publishResult.outcome = published ? 'published' : 'rejected';
+                publishResult.status = (res && res.status) || null;
+                publishResult.error = (res && res.error) || null;
+                // The log entry lives INSIDE the promise resolution: the real
+                // outcome decides the record, so a rejected publish can never be
+                // logged as a success.
+                logAssetCall({
+                  run_id: lastRun && lastRun.run_id ? lastRun.run_id : null,
+                  action: 'asset_publish',
+                  asset_id: capsule.asset_id || capsule.id,
+                  asset_type: 'Capsule',
+                  source_node_id: null,
+                  chain_id: publishChainId || null,
+                  status: published ? 'published' : 'rejected',
+                  reason: published
+                    ? null
+                    : String((res && (res.error || res.status)) || 'hub_rejected'),
+                  signals: Array.isArray(capsule.trigger) ? capsule.trigger : [],
+                  extra: {
+                    source_type: sourceType,
+                    reused_asset_id: reusedAssetId,
+                    gene_id: publishGene && publishGene.id ? publishGene.id : null,
+                    parent: parentRef || null,
+                    hub_response: (res && res.response) || null,
+                  },
+                });
               })
               .catch(function (err) {
                 console.log('[AutoPublish] Failed (non-fatal): ' + err.message);
+                publishResult.outcome = 'error';
+                publishResult.error = err.message;
+                logAssetCall({
+                  run_id: lastRun && lastRun.run_id ? lastRun.run_id : null,
+                  action: 'asset_publish',
+                  asset_id: capsule.asset_id || capsule.id,
+                  asset_type: 'Capsule',
+                  source_node_id: null,
+                  chain_id: publishChainId || null,
+                  status: 'error',
+                  reason: String(err && err.message ? err.message : err),
+                  signals: Array.isArray(capsule.trigger) ? capsule.trigger : [],
+                  extra: {
+                    source_type: sourceType,
+                    reused_asset_id: reusedAssetId,
+                    gene_id: publishGene && publishGene.id ? publishGene.id : null,
+                    parent: parentRef || null,
+                  },
+                });
               });
           }
-          publishResult = { attempted: true, asset_id: capsule.asset_id || capsule.id, bundle: true };
-          logAssetCall({
-            run_id: lastRun && lastRun.run_id ? lastRun.run_id : null,
-            action: 'asset_publish',
-            asset_id: capsule.asset_id || capsule.id,
-            asset_type: 'Capsule',
-            source_node_id: null,
-            chain_id: publishChainId || null,
-            signals: Array.isArray(capsule.trigger) ? capsule.trigger : [],
-            extra: {
-              source_type: sourceType,
-              reused_asset_id: reusedAssetId,
-              gene_id: publishGene && publishGene.id ? publishGene.id : null,
-              parent: parentRef || null,
-            },
-          });
         } else {
           publishResult = { attempted: false, reason: 'no_hub_url' };
         }

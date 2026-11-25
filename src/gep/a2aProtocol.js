@@ -348,6 +348,25 @@ function fileTransportList(opts) {
 
 // --- HTTP Transport (connects to evomap-hub) ---
 
+// Surface the Hub's machine-readable error code (e.g.
+// "capsule_blast_radius_files_must_be_positive") instead of a generic message.
+function extractHubError(data, bodyText, statusText) {
+  if (data && typeof data === 'object') {
+    var candidates = [data.error, data.code, data.error_code, data.message, data.detail];
+    if (data.payload && typeof data.payload === 'object') {
+      candidates = candidates.concat([data.payload.error, data.payload.code, data.payload.message]);
+    }
+    for (var i = 0; i < candidates.length; i++) {
+      var c = candidates[i];
+      if (c && typeof c === 'object' && c.code) c = c.code;
+      if (c != null && String(c).trim()) return String(c).trim();
+    }
+  }
+  var raw = String(bodyText || '').trim();
+  if (raw) return raw.slice(0, 500);
+  return String(statusText || 'http_error');
+}
+
 function httpTransportSend(message, opts) {
   var hubUrl = (opts && opts.hubUrl) || process.env.A2A_HUB_URL;
   if (!hubUrl) return { ok: false, error: 'A2A_HUB_URL not set' };
@@ -358,8 +377,37 @@ function httpTransportSend(message, opts) {
     headers: buildHubHeaders(),
     body: body,
   })
-    .then(function (res) { return res.json(); })
-    .then(function (data) { return { ok: true, response: data }; })
+    .then(function (res) {
+      // The Hub answers 4xx when the payload violates its contract (for
+      // example blast_radius.files must be >= 1). Reading the body without
+      // checking res.ok turned every rejection into ok:true, so a refused
+      // publish was logged as a success. The status is the error boundary.
+      return res.text().then(function (raw) {
+        var bodyText = String(raw == null ? '' : raw);
+        var data = null;
+        var parsed = false;
+        if (bodyText.trim()) {
+          try { data = JSON.parse(bodyText); parsed = true; } catch (e) { parsed = false; }
+        }
+        if (!res.ok) {
+          return {
+            ok: false,
+            status: res.status,
+            error: extractHubError(data, bodyText, res.statusText),
+            response: parsed ? data : { raw: bodyText.slice(0, 1000) },
+          };
+        }
+        if (!parsed) {
+          return {
+            ok: false,
+            status: res.status,
+            error: 'invalid_json_response',
+            response: { raw: bodyText.slice(0, 1000) },
+          };
+        }
+        return { ok: true, response: data, status: res.status };
+      });
+    })
     .catch(function (err) { return { ok: false, error: err.message }; });
 }
 
