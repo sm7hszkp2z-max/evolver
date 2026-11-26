@@ -286,20 +286,22 @@
         "node --test test/a2aPublishContract.test.js",
         "node validation/validate-publish-contract.js",
         "node scripts/validate-modules.js ./src/gep/a2a ./src/gep/a2aProtocol ./src/gep/solidify",
+        "node --test test/blastRadiusFootprint.test.js",
+        "node validation/validate-analysis-capsule-footprint.js",
         "node --test test/"
       ],
       "epigenetic_marks": [
         {
           "context": "linux/x64/v24.22.1",
-          "boost": 0.15000000000000002,
+          "boost": 0.2,
           "reason": "reinforced_by_success",
-          "created_at": "2026-11-25T17:17:21.282Z"
+          "created_at": "2026-11-26T17:07:53.551Z"
         }
       ],
       "asset_id": "sha256:18533a9787577760645f648136da7501c3a9a6668110cf533723dcfabd310152",
-      "source_type": "reference",
-      "reused_asset_id": "sha256:52094b9fe9d1cc2f5506103a130681287dfb8739b1da37b048d05ca58a80d44a",
-      "hub_asset_id": "sha256:52094b9fe9d1cc2f5506103a130681287dfb8739b1da37b048d05ca58a80d44a"
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "hub_asset_id": null
     },
     {
       "type": "Gene",

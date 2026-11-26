@@ -516,6 +516,59 @@
         "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
       ],
       "asset_id": "sha256:31008a2daea2ea5ab2cce37164adaee306c803ff5de36f720b69323374d624f1"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795712873527",
+      "trigger": [
+        "bounty_task",
+        "external_task",
+        "perf_bottleneck",
+        "repeated_tool_usage:exec"
+      ],
+      "gene": "gene_auto_c26ae3c2",
+      "summary": "固化：gene_auto_c26ae3c2 命中信号 bounty_task, external_task, perf_bottleneck, repeated_tool_usage:exec，变更 3 文件 / 204 行。",
+      "confidence": 0.91,
+      "blast_radius": {
+        "files": 3,
+        "lines": 204
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.91
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_auto_c26ae3c2 (optimize) matched signals [bounty_task, external_task, perf_bottleneck, repeated_tool_usage:exec]. Scope: 3 file(s), 204 line(s) changed. Outcome score: 0.91. Strategy applied: Extract structured signals from logs and user instructions; Select an existing Gene by signals match (no improvisation); Estimate blast radius (files, lines) before editing and record it.",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "generated",
+      "reused_asset_id": null,
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_auto_c26ae3c2 (optimize)\n\nSignals: bounty_task, external_task, perf_bottleneck, repeated_tool_usage:exec\n\nStrategy:\n1. Extract structured signals from logs and user instructions\n2. Select an existing Gene by signals match (no improvisation)\n3. Estimate blast radius (files, lines) before editing and record it\n4. Apply smallest reversible patch\n5. Validate using declared validation steps; rollback on failure\n6. Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\n\nScope: 3 file(s), 204 line(s)\n\nChanged files:\nsrc/gep/solidify.js\ntest/blastRadiusFootprint.test.js\nvalidation/validate-analysis-capsule-footprint.js\n\nOutcome score: 0.91",
+      "diff": "diff --git a/assets/gep/genes.json b/assets/gep/genes.json\nindex 3d0a69bc..b42f01fa 100644\n--- a/assets/gep/genes.json\n+++ b/assets/gep/genes.json\n@@ -286,6 +286,8 @@\n         \"node --test test/a2aPublishContract.test.js\",\n         \"node validation/validate-publish-contract.js\",\n         \"node scripts/validate-modules.js ./src/gep/a2a ./src/gep/a2aProtocol ./src/gep/solidify\",\n+        \"node --test test/blastRadiusFootprint.test.js\",\n+        \"node validation/validate-analysis-capsule-footprint.js\",\n         \"node --test test/\"\n       ],\n       \"epigenetic_marks\": [\ndiff --git a/src/gep/solidify.js b/src/gep/solidify.js\nindex af56ea09..fc5323fc 100644\n--- a/src/gep/solidify.js\n+++ b/src/gep/solidify.js\n@@ -110,10 +110,10 @@ function readOpenclawConstraintPolicy() {\n   const defaults = {\n     excludePrefixes: ['logs/', 'memory/', 'assets/gep/', 'out/', 'temp/', 'node_modules/'],\n     excludeExact: ['event.json', 'temp_gep_output.json', 'temp_evolution_output.json', 'evolution_error.log'],\n-    excludeRegex: ['capsule', 'events?\\\\.jsonl$'],\n-    includePrefixes: ['src/', 'scripts/', 'config/'],\n+    excludeRegex: ['capsules?\\\\.json$', 'events?\\\\.jsonl$'],\n+    includePrefixes: ['src/', 'scripts/', 'config/', 'skills/', 'docs/', 'references/', 'analysis/'],\n     includeExact: ['index.js', 'package.json'],\n-    includeExtensions: ['.js', '.cjs', '.mjs', '.ts', '.tsx', '.json', '.yaml', '.yml', '.toml', '.ini', '.sh'],\n+    includeExtensions: ['.js', '.cjs', '.mjs', '.ts', '.tsx', '.json', '.yaml', '.yml', '.toml', '.ini', '.sh', '.md', '.mdx', '.rst', '.txt', '.adoc'],\n   };\n   try {\n     const root = path.resolve(getWorkspaceRoot(), '..');\n@@ -1912,4 +1912,7 @@ module.exports = {\n   buildSuccessReason,\n   BLAST_RADIUS_HARD_CAP_FILES,\n   BLAST_RADIUS_HARD_CAP_LINES,\n+  isConstraintCountedPath,\n+  readOpenclawConstraintPolicy,\n+  computeBlastRadius,\n };\n",
+      "strategy": [
+        "Extract structured signals from logs and user instructions",
+        "Select an existing Gene by signals match (no improvisation)",
+        "Estimate blast radius (files, lines) before editing and record it",
+        "Apply smallest reversible patch",
+        "Validate using declared validation steps; rollback on failure",
+        "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
+      ],
+      "asset_id": "sha256:c2b770e9a3211bec8a826acb9bd8b76ebd3b50541bce001b459c18e1289b709d"
     }
   ]
 }

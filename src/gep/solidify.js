@@ -110,10 +110,10 @@ function readOpenclawConstraintPolicy() {
   const defaults = {
     excludePrefixes: ['logs/', 'memory/', 'assets/gep/', 'out/', 'temp/', 'node_modules/'],
     excludeExact: ['event.json', 'temp_gep_output.json', 'temp_evolution_output.json', 'evolution_error.log'],
-    excludeRegex: ['capsule', 'events?\\.jsonl$'],
-    includePrefixes: ['src/', 'scripts/', 'config/'],
+    excludeRegex: ['capsules?\\.json$', 'events?\\.jsonl$'],
+    includePrefixes: ['src/', 'scripts/', 'config/', 'skills/', 'docs/', 'references/', 'analysis/'],
     includeExact: ['index.js', 'package.json'],
-    includeExtensions: ['.js', '.cjs', '.mjs', '.ts', '.tsx', '.json', '.yaml', '.yml', '.toml', '.ini', '.sh'],
+    includeExtensions: ['.js', '.cjs', '.mjs', '.ts', '.tsx', '.json', '.yaml', '.yml', '.toml', '.ini', '.sh', '.md', '.mdx', '.rst', '.txt', '.adoc'],
   };
   try {
     const root = path.resolve(getWorkspaceRoot(), '..');
@@ -1912,4 +1912,7 @@ module.exports = {
   buildSuccessReason,
   BLAST_RADIUS_HARD_CAP_FILES,
   BLAST_RADIUS_HARD_CAP_LINES,
+  isConstraintCountedPath,
+  readOpenclawConstraintPolicy,
+  computeBlastRadius,
 };
