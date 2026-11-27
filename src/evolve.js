@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 const { getRepoRoot, getMemoryDir, getSessionScope, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./gep/paths');
+const { buildSkillList, computeSkillsFingerprint } = require('./gep/skillDescription');
 const { extractSignals } = require('./gep/signals');
 const {
   loadGenes,
@@ -1036,62 +1037,32 @@ async function run() {
         const CACHE_TTL = 1000 * 60 * 60 * 6; // 6 Hours
         const isFresh = Date.now() - cacheStats.mtimeMs < CACHE_TTL;
 
-        // Use cache if it's fresh AND newer than the directory (structure change)
+        // Use the cache only when it is fresh AND still matches the current
+        // skill metadata fingerprint. The old check compared the cache mtime
+        // with the mtime of skills/ itself, which never changes when a skill's
+        // own SKILL.md/package.json is edited -- an edited skill therefore kept
+        // a stale description for the whole TTL.
         if (isFresh && cacheStats.mtimeMs > dirStats.mtimeMs) {
           try {
             const cached = JSON.parse(fs.readFileSync(SKILLS_CACHE_FILE, 'utf8'));
-            fileList = cached.list;
-            useCache = true;
+            const fingerprint = computeSkillsFingerprint(skillsDir);
+            if (cached && cached.list && cached.fingerprint === fingerprint) {
+              fileList = cached.list;
+              useCache = true;
+            }
           } catch (e) {}
         }
       }
 
       if (!useCache) {
-        const skills = fs
-          .readdirSync(skillsDir, { withFileTypes: true })
-          .filter(dirent => dirent.isDirectory())
-          .map(dirent => {
-            const name = dirent.name;
-            let desc = 'No description';
-            try {
-              const pkg = require(path.join(skillsDir, name, 'package.json'));
-              if (pkg.description) desc = pkg.description.slice(0, 100) + (pkg.description.length > 100 ? '...' : '');
-            } catch (e) {
-              try {
-                const skillMdPath = path.join(skillsDir, name, 'SKILL.md');
-                if (fs.existsSync(skillMdPath)) {
-                  const skillMd = fs.readFileSync(skillMdPath, 'utf8');
-                  // Strategy 1: YAML Frontmatter (description: ...)
-                  const yamlMatch = skillMd.match(/^description:\s*(.*)$/m);
-                  if (yamlMatch) {
-                    desc = yamlMatch[1].trim();
-                  } else {
-                    // Strategy 2: First non-header, non-empty line
-                    const lines = skillMd.split('\n');
-                    for (const line of lines) {
-                      const trimmed = line.trim();
-                      if (
-                        trimmed &&
-                        !trimmed.startsWith('#') &&
-                        !trimmed.startsWith('---') &&
-                        !trimmed.startsWith('```')
-                      ) {
-                        desc = trimmed;
-                        break;
-                      }
-                    }
-                  }
-                  if (desc.length > 100) desc = desc.slice(0, 100) + '...';
-                }
-              } catch (e2) {}
-            }
-            return `- **${name}**: ${desc}`;
-          });
-        fileList = skills.join('\n');
+        fileList = buildSkillList(skillsDir);
 
-        // Write cache
+        // Write cache (with the metadata fingerprint that invalidates it)
         try {
-          fs.writeFileSync(SKILLS_CACHE_FILE, JSON.stringify({ list: fileList }, null, 2));
+          fs.writeFileSync(
+            SKILLS_CACHE_FILE,
+            JSON.stringify({ list: fileList, fingerprint: computeSkillsFingerprint(skillsDir) }, null, 2)
+          );
         } catch (e) {}
       }
     }

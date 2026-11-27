@@ -569,6 +569,58 @@
         "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
       ],
       "asset_id": "sha256:c2b770e9a3211bec8a826acb9bd8b76ebd3b50541bce001b459c18e1289b709d"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795799253353",
+      "trigger": [
+        "bounty_task",
+        "external_task",
+        "user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。"
+      ],
+      "gene": "gene_auto_c26ae3c2",
+      "summary": "固化：gene_auto_c26ae3c2 命中信号 bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。，变更 4 文件 / 443 行。",
+      "confidence": 0.91,
+      "blast_radius": {
+        "files": 4,
+        "lines": 443
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.91
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_auto_c26ae3c2 (optimize) matched signals [bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。]. Scope: 4 file(s), 443 line(s) changed. Outcome score: 0.91. Strategy applied: Extract structured signals from logs and user instructions; Select an existing Gene by signals match (no improvisation); Estimate blast radius (files, lines) before editing and record it.",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "reference",
+      "reused_asset_id": "sha256:601ee5f6317fe6d7efc9276eeaa2d29ee6fea693b15620d38fd261b534db9287",
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_auto_c26ae3c2 (optimize)\n\nSignals: bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。\n\nStrategy:\n1. Extract structured signals from logs and user instructions\n2. Select an existing Gene by signals match (no improvisation)\n3. Estimate blast radius (files, lines) before editing and record it\n4. Apply smallest reversible patch\n5. Validate using declared validation steps; rollback on failure\n6. Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\n\nScope: 4 file(s), 443 line(s)\n\nChanged files:\nsrc/evolve.js\nsrc/gep/skillDescription.js\ntest/skillDescription.test.js\nvalidation/validate-skill-descriptions.js\n\nOutcome score: 0.91",
+      "diff": "diff --git a/assets/gep/genes.json b/assets/gep/genes.json\nindex 096f903a..6baf3ca1 100644\n--- a/assets/gep/genes.json\n+++ b/assets/gep/genes.json\n@@ -288,6 +288,8 @@\n         \"node scripts/validate-modules.js ./src/gep/a2a ./src/gep/a2aProtocol ./src/gep/solidify\",\n         \"node --test test/blastRadiusFootprint.test.js\",\n         \"node validation/validate-analysis-capsule-footprint.js\",\n+        \"node --test test/skillDescription.test.js\",\n+        \"node validation/validate-skill-descriptions.js\",\n         \"node --test test/\"\n       ],\n       \"epigenetic_marks\": [\ndiff --git a/src/evolve.js b/src/evolve.js\nindex d259eea2..e493c480 100644\n--- a/src/evolve.js\n+++ b/src/evolve.js\n@@ -3,6 +3,7 @@ const path = require('path');\n const os = require('os');\n const { execSync } = require('child_process');\n const { getRepoRoot, getMemoryDir, getSessionScope, getOpenclawWorkspaceRoot, getOpenclawMemoryDir, localDateStamp } = require('./gep/paths');\n+const { buildSkillList, computeSkillsFingerprint } = require('./gep/skillDescription');\n const { extractSignals } = require('./gep/signals');\n const {\n   loadGenes,\n@@ -1036,62 +1037,32 @@ async function run() {\n         const CACHE_TTL = 1000 * 60 * 60 * 6; // 6 Hours\n         const isFresh = Date.now() - cacheStats.mtimeMs < CACHE_TTL;\n \n-        // Use cache if it's fresh AND newer than the directory (structure change)\n+        // Use the cache only when it is fresh AND still matches the current\n+        // skill metadata fingerprint. The old check compared the cache mtime\n+        // with the mtime of skills/ itself, which never changes when a skill's\n+        // own SKILL.md/package.json is edited -- an edited skill therefore kept\n+        // a stale description for the whole TTL.\n         if (isFresh && cacheStats.mtimeMs > dirStats.mtimeMs) {\n           try {\n             const cached = JSON.parse(fs.readFileSync(SKILLS_CACHE_FILE, 'utf8'));\n-            fileList = cached.list;\n-            useCache = true;\n+            const fingerprint = computeSkillsFingerprint(skillsDir);\n+            if (cached && cached.list && cached.fingerprint === fingerprint) {\n+              fileList = cached.list;\n+              useCache = true;\n+            }\n           } catch (e) {}\n         }\n       }\n \n       if (!useCache) {\n-        const skills = fs\n-          .readdirSync(skillsDir, { withFileTypes: true })\n-          .filter(dirent => dirent.isDirectory())\n-          .map(dirent => {\n-            const name = dirent.name;\n-            let desc = 'No description';\n-            try {\n-              const pkg = require(path.join(skillsDir, name, 'package.json'));\n-              if (pkg.description) desc = pkg.description.slice(0, 100) + (pkg.description.length > 100 ? '...' : '');\n-            } catch (e) {\n-              try {\n-                const skillMdPath = path.join(skillsDir, name, 'SKILL.md');\n-                if (fs.existsSync(skillMdPath)) {\n-                  const skillMd = fs.readFileSync(skillMdPath, 'utf8');\n-                  // Strategy 1: YAML Frontmatter (description: ...)\n-                  const yamlMatch = skillMd.match(/^description:\\s*(.*)$/m);\n-                  if (yamlMatch) {\n-                    desc = yamlMatch[1].trim();\n-                  } else {\n-                    // Strategy 2: First non-header, non-empty line\n-                    const lines = skillMd.split('\\n');\n-                    for (const line of lines) {\n-                      const trimmed = line.trim();\n-                      if (\n-                        trimmed &&\n-                        !trimmed.startsWith('#') &&\n-                        !trimmed.startsWith('---') &&\n-                        !trimmed.startsWith('```')\n-                      ) {\n-                        desc = trimmed;\n-                        break;\n-                      }\n-                    }\n-                  }\n-                  if (desc.length > 100) desc = desc.slice(0, 100) + '...';\n-                }\n-              } catch (e2) {}\n-            }\n-            return `- **${name}**: ${desc}`;\n-          });\n-        fileList = skills.join('\\n');\n+        fileList = buildSkillList(skillsDir);\n \n-        // Write cache\n+        // Write cache (with the metadata fingerprint that invalidates it)\n         try {\n-          fs.writeFileSync(SKILLS_CACHE_FILE, JSON.stringify({ list: fileList }, null, 2));\n+          fs.writeFileSync(\n+            SKILLS_CACHE_FILE,\n+            JSON.stringify({ list: fileList, fingerprint: computeSkillsFingerprint(skillsDir) }, null, 2)\n+          );\n         } catch (e) {}\n       }\n     }\n",
+      "strategy": [
+        "Extract structured signals from logs and user instructions",
+        "Select an existing Gene by signals match (no improvisation)",
+        "Estimate blast radius (files, lines) before editing and record it",
+        "Apply smallest reversible patch",
+        "Validate using declared validation steps; rollback on failure",
+        "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
+      ],
+      "asset_id": "sha256:e12ce8ca5998abd37b1a637a25c6f123e0fe484d13edf16b9bbb7c7a9eefdb5e"
     }
   ]
 }

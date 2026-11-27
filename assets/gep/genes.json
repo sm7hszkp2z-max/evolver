@@ -288,20 +288,22 @@
         "node scripts/validate-modules.js ./src/gep/a2a ./src/gep/a2aProtocol ./src/gep/solidify",
         "node --test test/blastRadiusFootprint.test.js",
         "node validation/validate-analysis-capsule-footprint.js",
+        "node --test test/skillDescription.test.js",
+        "node validation/validate-skill-descriptions.js",
         "node --test test/"
       ],
       "epigenetic_marks": [
         {
           "context": "linux/x64/v24.22.1",
-          "boost": 0.2,
+          "boost": 0.25,
           "reason": "reinforced_by_success",
-          "created_at": "2026-11-26T17:07:53.551Z"
+          "created_at": "2026-11-27T17:07:33.379Z"
         }
       ],
       "asset_id": "sha256:18533a9787577760645f648136da7501c3a9a6668110cf533723dcfabd310152",
-      "source_type": "generated",
-      "reused_asset_id": null,
-      "hub_asset_id": null
+      "source_type": "reference",
+      "reused_asset_id": "sha256:601ee5f6317fe6d7efc9276eeaa2d29ee6fea693b15620d38fd261b534db9287",
+      "hub_asset_id": "sha256:601ee5f6317fe6d7efc9276eeaa2d29ee6fea693b15620d38fd261b534db9287"
     },
     {
       "type": "Gene",
