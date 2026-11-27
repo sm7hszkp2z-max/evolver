@@ -97,6 +97,45 @@ try {
     );
   });
 
+  // Git quotes UTF-8, tabs and newlines by default. The ruler must consume
+  // raw NUL-delimited names for both untracked and tracked deliverables.
+  for (const rel of ['分析报告.md', '研究 结果.md', '报告\t细节.md', '报告\n细节.md']) {
+    resetRepo(tmpRoot);
+    writeFile(tmpRoot, rel, 'finding\n');
+    check('untracked knowledge path ' + JSON.stringify(rel), () => {
+      const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });
+      nodeAssert.deepStrictEqual(blast.changed_files, [rel]);
+      nodeAssert.ok(blast.lines > 0);
+    });
+    git(tmpRoot, ['add', '--', rel]);
+    check('staged knowledge path ' + JSON.stringify(rel), () => {
+      const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });
+      nodeAssert.deepStrictEqual(blast.changed_files, [rel]);
+      nodeAssert.strictEqual(blast.lines, 1);
+    });
+    git(tmpRoot, ['commit', '-q', '-m', 'UTF-8 knowledge baseline']);
+    writeFile(tmpRoot, rel, 'finding\nnew finding\n');
+    check('unstaged knowledge path ' + JSON.stringify(rel), () => {
+      const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });
+      nodeAssert.deepStrictEqual(blast.changed_files, [rel]);
+      nodeAssert.strictEqual(blast.lines, 1);
+    });
+  }
+
+  resetRepo(tmpRoot);
+  const renameBase = 'baseline finding\n'.repeat(20);
+  writeFile(tmpRoot, '分析报告.md', renameBase);
+  git(tmpRoot, ['add', '--', '分析报告.md']);
+  git(tmpRoot, ['commit', '-q', '-m', 'rename baseline']);
+  git(tmpRoot, ['mv', '--', '分析报告.md', '分析结果.md']);
+  writeFile(tmpRoot, '分析结果.md', renameBase + 'additional finding\n');
+  git(tmpRoot, ['add', '--', '分析结果.md']);
+  check('staged UTF-8 rename preserves added-line churn', () => {
+    const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });
+    nodeAssert.ok(blast.changed_files.includes('分析结果.md'));
+    nodeAssert.strictEqual(blast.lines, 1);
+  });
+
   // (b) ledger / bookkeeping-only change must NOT inflate the footprint
   resetRepo(tmpRoot);
   writeFile(tmpRoot, 'assets/gep/genes.json', '{"version":1,"genes":[]}\n');

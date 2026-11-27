@@ -80,12 +80,12 @@ function tryRunCmd(cmd, opts = {}) {
 
 function gitListChangedFiles({ repoRoot }) {
   const files = new Set();
-  const s1 = tryRunCmd('git diff --name-only', { cwd: repoRoot, timeoutMs: 60000 });
-  if (s1.ok) for (const line of String(s1.out).split('\n').map(l => l.trim()).filter(Boolean)) files.add(line);
-  const s2 = tryRunCmd('git diff --cached --name-only', { cwd: repoRoot, timeoutMs: 60000 });
-  if (s2.ok) for (const line of String(s2.out).split('\n').map(l => l.trim()).filter(Boolean)) files.add(line);
-  const s3 = tryRunCmd('git ls-files --others --exclude-standard', { cwd: repoRoot, timeoutMs: 60000 });
-  if (s3.ok) for (const line of String(s3.out).split('\n').map(l => l.trim()).filter(Boolean)) files.add(line);
+  const s1 = tryRunCmd('git diff --name-only -z', { cwd: repoRoot, timeoutMs: 60000 });
+  if (s1.ok) for (const line of String(s1.out).split('\0').filter(Boolean)) files.add(line);
+  const s2 = tryRunCmd('git diff --cached --name-only -z', { cwd: repoRoot, timeoutMs: 60000 });
+  if (s2.ok) for (const line of String(s2.out).split('\0').filter(Boolean)) files.add(line);
+  const s3 = tryRunCmd('git ls-files --others --exclude-standard -z', { cwd: repoRoot, timeoutMs: 60000 });
+  if (s3.ok) for (const line of String(s3.out).split('\0').filter(Boolean)) files.add(line);
   return Array.from(files);
 }
 
@@ -182,23 +182,26 @@ function isConstraintCountedPath(relPath, policy) {
   return false;
 }
 
+// NUL-delimited Git output preserves UTF-8 names instead of core.quotePath escapes.
+// With --numstat -z, a rename has an empty path followed by old and new paths.
 function parseNumstatRows(text) {
   const rows = [];
-  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
-  for (const line of lines) {
-    const parts = line.split('\t');
-    if (parts.length < 3) continue;
-    const a = Number(parts[0]);
-    const d = Number(parts[1]);
-    let rel = normalizeRelPath(parts.slice(2).join('\t'));
-    if (rel.includes('=>')) {
-      const right = rel.split('=>').pop();
-      rel = normalizeRelPath(String(right || '').replace(/[{}]/g, '').trim());
+  const records = String(text || '').split('\0');
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    if (!record) continue;
+    const match = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(record);
+    if (!match) continue;
+    let rel = match[3];
+    if (!rel) {
+      i++; // old rename path
+      rel = records[++i];
     }
+    if (!rel) continue;
     rows.push({
-      file: rel,
-      added: Number.isFinite(a) ? a : 0,
-      deleted: Number.isFinite(d) ? d : 0,
+      file: normalizeRelPath(rel),
+      added: Number.isFinite(Number(match[1])) ? Number(match[1]) : 0,
+      deleted: Number.isFinite(Number(match[2])) ? Number(match[2]) : 0,
     });
   }
   return rows;
@@ -215,8 +218,8 @@ function computeBlastRadius({ repoRoot, baselineUntracked }) {
   const ignoredFiles = changedFiles.filter(f => !isConstraintCountedPath(f, policy));
   const filesCount = countedFiles.length;
 
-  const u = tryRunCmd('git diff --numstat', { cwd: repoRoot, timeoutMs: 60000 });
-  const c = tryRunCmd('git diff --cached --numstat', { cwd: repoRoot, timeoutMs: 60000 });
+  const u = tryRunCmd('git diff --numstat -z', { cwd: repoRoot, timeoutMs: 60000 });
+  const c = tryRunCmd('git diff --cached --numstat -z', { cwd: repoRoot, timeoutMs: 60000 });
   const unstagedRows = u.ok ? parseNumstatRows(u.out) : [];
   const stagedRows = c.ok ? parseNumstatRows(c.out) : [];
   let stagedUnstagedChurn = 0;
@@ -225,10 +228,10 @@ function computeBlastRadius({ repoRoot, baselineUntracked }) {
     stagedUnstagedChurn += row.added + row.deleted;
   }
 
-  const untracked = tryRunCmd('git ls-files --others --exclude-standard', { cwd: repoRoot, timeoutMs: 60000 });
+  const untracked = tryRunCmd('git ls-files --others --exclude-standard -z', { cwd: repoRoot, timeoutMs: 60000 });
   let untrackedLines = 0;
   if (untracked.ok) {
-    const rels = String(untracked.out).split('\n').map(normalizeRelPath).filter(Boolean);
+    const rels = String(untracked.out).split('\0').map(normalizeRelPath).filter(Boolean);
     const baselineSet = new Set((Array.isArray(baselineUntracked) ? baselineUntracked : []).map(normalizeRelPath));
     for (const rel of rels) {
       if (baselineSet.has(rel)) continue;

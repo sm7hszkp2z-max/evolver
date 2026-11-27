@@ -621,6 +621,58 @@
         "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
       ],
       "asset_id": "sha256:e12ce8ca5998abd37b1a637a25c6f123e0fe484d13edf16b9bbb7c7a9eefdb5e"
+    },
+    {
+      "type": "Capsule",
+      "schema_version": "1.6.0",
+      "id": "capsule_1795799673138",
+      "trigger": [
+        "bounty_task",
+        "external_task",
+        "user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。"
+      ],
+      "gene": "gene_auto_c26ae3c2",
+      "summary": "固化：gene_auto_c26ae3c2 命中信号 bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。，变更 2 文件 / 88 行。",
+      "confidence": 0.91,
+      "blast_radius": {
+        "files": 2,
+        "lines": 88
+      },
+      "outcome": {
+        "status": "success",
+        "score": 0.91
+      },
+      "success_streak": 1,
+      "success_reason": "Gene gene_auto_c26ae3c2 (optimize) matched signals [bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。]. Scope: 2 file(s), 88 line(s) changed. Outcome score: 0.91. Strategy applied: Extract structured signals from logs and user instructions; Select an existing Gene by signals match (no improvisation); Estimate blast radius (files, lines) before editing and record it.",
+      "env_fingerprint": {
+        "device_id": "c406356c3d798921841c5266a132e719",
+        "node_version": "v24.22.1",
+        "platform": "linux",
+        "arch": "x64",
+        "os_release": "7.0.0-38-generic",
+        "hostname": "9fb0d34fea08",
+        "evolver_version": "1.28.0",
+        "client": "evolver",
+        "client_version": "1.28.0",
+        "cwd": "8f88cfd236fa",
+        "container": false
+      },
+      "source_type": "reference",
+      "reused_asset_id": "sha256:601ee5f6317fe6d7efc9276eeaa2d29ee6fea693b15620d38fd261b534db9287",
+      "a2a": {
+        "eligible_to_broadcast": false
+      },
+      "content": "Gene: gene_auto_c26ae3c2 (optimize)\n\nSignals: bounty_task, external_task, user_feature_request:- **长文件必须分段写**（先 write 首段，再 exec 调 python 追加），别把整篇塞进 JS 模板字符串。\n\nStrategy:\n1. Extract structured signals from logs and user instructions\n2. Select an existing Gene by signals match (no improvisation)\n3. Estimate blast radius (files, lines) before editing and record it\n4. Apply smallest reversible patch\n5. Validate using declared validation steps; rollback on failure\n6. Solidify knowledge: append EvolutionEvent, update Gene/Capsule store\n\nScope: 2 file(s), 88 line(s)\n\nChanged files:\nsrc/gep/solidify.js\nvalidation/validate-analysis-capsule-footprint.js\n\nOutcome score: 0.91",
+      "diff": "diff --git a/src/gep/solidify.js b/src/gep/solidify.js\nindex fc5323fc..cc67f583 100644\n--- a/src/gep/solidify.js\n+++ b/src/gep/solidify.js\n@@ -80,12 +80,12 @@ function tryRunCmd(cmd, opts = {}) {\n \n function gitListChangedFiles({ repoRoot }) {\n   const files = new Set();\n-  const s1 = tryRunCmd('git diff --name-only', { cwd: repoRoot, timeoutMs: 60000 });\n-  if (s1.ok) for (const line of String(s1.out).split('\\n').map(l => l.trim()).filter(Boolean)) files.add(line);\n-  const s2 = tryRunCmd('git diff --cached --name-only', { cwd: repoRoot, timeoutMs: 60000 });\n-  if (s2.ok) for (const line of String(s2.out).split('\\n').map(l => l.trim()).filter(Boolean)) files.add(line);\n-  const s3 = tryRunCmd('git ls-files --others --exclude-standard', { cwd: repoRoot, timeoutMs: 60000 });\n-  if (s3.ok) for (const line of String(s3.out).split('\\n').map(l => l.trim()).filter(Boolean)) files.add(line);\n+  const s1 = tryRunCmd('git diff --name-only -z', { cwd: repoRoot, timeoutMs: 60000 });\n+  if (s1.ok) for (const line of String(s1.out).split('\\0').filter(Boolean)) files.add(line);\n+  const s2 = tryRunCmd('git diff --cached --name-only -z', { cwd: repoRoot, timeoutMs: 60000 });\n+  if (s2.ok) for (const line of String(s2.out).split('\\0').filter(Boolean)) files.add(line);\n+  const s3 = tryRunCmd('git ls-files --others --exclude-standard -z', { cwd: repoRoot, timeoutMs: 60000 });\n+  if (s3.ok) for (const line of String(s3.out).split('\\0').filter(Boolean)) files.add(line);\n   return Array.from(files);\n }\n \n@@ -182,23 +182,26 @@ function isConstraintCountedPath(relPath, policy) {\n   return false;\n }\n \n+// NUL-delimited Git output preserves UTF-8 names instead of core.quotePath escapes.\n+// With --numstat -z, a rename has an empty path followed by old and new paths.\n function parseNumstatRows(text) {\n   const rows = [];\n-  const lines = String(text || '').split('\\n').map(l => l.trim()).filter(Boolean);\n-  for (const line of lines) {\n-    const parts = line.split('\\t');\n-    if (parts.length < 3) continue;\n-    const a = Number(parts[0]);\n-    const d = Number(parts[1]);\n-    let rel = normalizeRelPath(parts.slice(2).join('\\t'));\n-    if (rel.includes('=>')) {\n-      const right = rel.split('=>').pop();\n-      rel = normalizeRelPath(String(right || '').replace(/[{}]/g, '').trim());\n+  const records = String(text || '').split('\\0');\n+  for (let i = 0; i < records.length; i++) {\n+    const record = records[i];\n+    if (!record) continue;\n+    const match = /^(\\d+|-)\\t(\\d+|-)\\t([\\s\\S]*)$/.exec(record);\n+    if (!match) continue;\n+    let rel = match[3];\n+    if (!rel) {\n+      i++; // old rename path\n+      rel = records[++i];\n     }\n+    if (!rel) continue;\n     rows.push({\n-      file: rel,\n-      added: Number.isFinite(a) ? a : 0,\n-      deleted: Number.isFinite(d) ? d : 0,\n+      file: normalizeRelPath(rel),\n+      added: Number.isFinite(Number(match[1])) ? Number(match[1]) : 0,\n+      deleted: Number.isFinite(Number(match[2])) ? Number(match[2]) : 0,\n     });\n   }\n   return rows;\n@@ -215,8 +218,8 @@ function computeBlastRadius({ repoRoot, baselineUntracked }) {\n   const ignoredFiles = changedFiles.filter(f => !isConstraintCountedPath(f, policy));\n   const filesCount = countedFiles.length;\n \n-  const u = tryRunCmd('git diff --numstat', { cwd: repoRoot, timeoutMs: 60000 });\n-  const c = tryRunCmd('git diff --cached --numstat', { cwd: repoRoot, timeoutMs: 60000 });\n+  const u = tryRunCmd('git diff --numstat -z', { cwd: repoRoot, timeoutMs: 60000 });\n+  const c = tryRunCmd('git diff --cached --numstat -z', { cwd: repoRoot, timeoutMs: 60000 });\n   const unstagedRows = u.ok ? parseNumstatRows(u.out) : [];\n   const stagedRows = c.ok ? parseNumstatRows(c.out) : [];\n   let stagedUnstagedChurn = 0;\n@@ -225,10 +228,10 @@ function computeBlastRadius({ repoRoot, baselineUntracked }) {\n     stagedUnstagedChurn += row.added + row.deleted;\n   }\n \n-  const untracked = tryRunCmd('git ls-files --others --exclude-standard', { cwd: repoRoot, timeoutMs: 60000 });\n+  const untracked = tryRunCmd('git ls-files --others --exclude-standard -z', { cwd: repoRoot, timeoutMs: 60000 });\n   let untrackedLines = 0;\n   if (untracked.ok) {\n-    const rels = String(untracked.out).split('\\n').map(normalizeRelPath).filter(Boolean);\n+    const rels = String(untracked.out).split('\\0').map(normalizeRelPath).filter(Boolean);\n     const baselineSet = new Set((Array.isArray(baselineUntracked) ? baselineUntracked : []).map(normalizeRelPath));\n     for (const rel of rels) {\n       if (baselineSet.has(rel)) continue;\ndiff --git a/validation/validate-analysis-capsule-footprint.js b/validation/validate-analysis-capsule-footprint.js\nindex aa8fda9a..39b90832 100644\n--- a/validation/validate-analysis-capsule-footprint.js\n+++ b/validation/validate-analysis-capsule-footprint.js\n@@ -97,6 +97,45 @@ try {\n     );\n   });\n \n+  // Git quotes UTF-8, tabs and newlines by default. The ruler must consume\n+  // raw NUL-delimited names for both untracked and tracked deliverables.\n+  for (const rel of ['分析报告.md', '研究 结果.md', '报告\\t细节.md', '报告\\n细节.md']) {\n+    resetRepo(tmpRoot);\n+    writeFile(tmpRoot, rel, 'finding\\n');\n+    check('untracked knowledge path ' + JSON.stringify(rel), () => {\n+      const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });\n+      nodeAssert.deepStrictEqual(blast.changed_files, [rel]);\n+      nodeAssert.ok(blast.lines > 0);\n+    });\n+    git(tmpRoot, ['add', '--', rel]);\n+    check('staged knowledge path ' + JSON.stringify(rel), () => {\n+      const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });\n+      nodeAssert.deepStrictEqual(blast.changed_files, [rel]);\n+      nodeAssert.strictEqual(blast.lines, 1);\n+    });\n+    git(tmpRoot, ['commit', '-q', '-m', 'UTF-8 knowledge baseline']);\n+    writeFile(tmpRoot, rel, 'finding\\nnew finding\\n');\n+    check('unstaged knowledge path ' + JSON.stringify(rel), () => {\n+      const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });\n+      nodeAssert.deepStrictEqual(blast.changed_files, [rel]);\n+      nodeAssert.strictEqual(blast.lines, 1);\n+    });\n+  }\n+\n+  resetRepo(tmpRoot);\n+  const renameBase = 'baseline finding\\n'.repeat(20);\n+  writeFile(tmpRoot, '分析报告.md', renameBase);\n+  git(tmpRoot, ['add', '--', '分析报告.md']);\n+  git(tmpRoot, ['commit', '-q', '-m', 'rename baseline']);\n+  git(tmpRoot, ['mv', '--', '分析报告.md', '分析结果.md']);\n+  writeFile(tmpRoot, '分析结果.md', renameBase + 'additional finding\\n');\n+  git(tmpRoot, ['add', '--', '分析结果.md']);\n+  check('staged UTF-8 rename preserves added-line churn', () => {\n+    const blast = computeBlastRadius({ repoRoot: tmpRoot, baselineUntracked: [] });\n+    nodeAssert.ok(blast.changed_files.includes('分析结果.md'));\n+    nodeAssert.strictEqual(blast.lines, 1);\n+  });\n+\n   // (b) ledger / bookkeeping-only change must NOT inflate the footprint\n   resetRepo(tmpRoot);\n   writeFile(tmpRoot, 'assets/gep/genes.json', '{\"version\":1,\"genes\":[]}\\n');\n",
+      "strategy": [
+        "Extract structured signals from logs and user instructions",
+        "Select an existing Gene by signals match (no improvisation)",
+        "Estimate blast radius (files, lines) before editing and record it",
+        "Apply smallest reversible patch",
+        "Validate using declared validation steps; rollback on failure",
+        "Solidify knowledge: append EvolutionEvent, update Gene/Capsule store"
+      ],
+      "asset_id": "sha256:0268154449a94bae3e9df4ed98e7fca4d3db06a78cb1a6aeda2cb95752546552"
     }
   ]
 }
